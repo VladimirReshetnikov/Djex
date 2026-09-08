@@ -104,7 +104,7 @@ Logs are `dist-newstyle/priority-context-private-build-v6.log`,
 `priority-context-ghc-replay-v5.log`. These receipts do not establish methods,
 instances, superclass projections, end-to-end query reachability, or Lean replay.
 
-## Live Haskell Given acceptance
+## Earlier live Haskell Given acceptance (`922c5558`)
 
 The native facade fixture additionally passes eleven acceptance tests: all five
 Exference roles below, the unused-root/nested-callback/exact-forwarding Djinn
@@ -131,6 +131,30 @@ global applications. Both the driver compilation and fixture policy differ,
 so this is not an isolated measurement of deferral's performance. The production
 default is unchanged. Methods, instance/superclass evidence, the three remaining
 Djinn target cases, and live Lean synthesis remain unaccepted.
+
+## Conditional Djinn root-Given increment
+
+The subsequent [implementation report](2026-09-07-djinn-conditional-givens.md)
+records forced local/global provider applications under the query's exact root
+dictionaries. Complete provider schemes remain opaque until a checked
+conditional specialization supplies every dictionary. Original provider and
+ambient kinds stay fixed; erasure consumes the actual checked dictionary
+prefix and arguments before independent full-source graph checking.
+
+The registered facade now uses `ContextEvidenceSpec.targetTests`, expanded to
+sixteen tests. All pass in 23.56 seconds, including both engines' five roles,
+scope-leakage controls, GHC replay, and root/nested omitted-method refutation
+checks. The 92 private tests include 26 conditional preparation/kind/proof
+controls and eleven direct-erasure controls. Production budget tests exercise
+both APIs with zero/tiny allowances and a measured duplicate raw cutoff.
+
+Class-method omission must leave qualified source queries inconclusive:
+`NoEvidence` in the stable API and `Undecided` in the raw facade. The complete
+source type may still be inhabited through a method, even if the projected
+dictionary-independent body is not. Genuine unconstrained refutations remain
+available. This correction does not add methods to search. Aggregate validation
+and the remaining nested/duplicate/partial-instantiation limits are recorded
+in the implementation report; production Lean integration remains separate.
 
 ## Source authority and derivations
 

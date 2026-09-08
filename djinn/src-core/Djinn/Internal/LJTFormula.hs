@@ -10,7 +10,8 @@
 -- "Djinn.Internal.LJT" re-exports this module and searches over it, while
 -- "Djinn.Internal.TypeFormula" compiles source types into these formulae.
 module Djinn.Internal.LJTFormula (
-    Symbol(Symbol), opaqueTypeSymbol, opaqueSymbolSource, symbolSpelling,
+    Symbol(Symbol), opaqueTypeSymbol, opaqueSymbolSource,
+    dictionarySymbol, dictionarySymbolSource, symbolSpelling,
     Formula(..), (<->), (&), (|:), fnot, false, true,
     formulaSymbols,
     ConsDesc(..), Term(..), applys, validateTermMetadata,
@@ -21,6 +22,7 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 
 import Language.Haskell.Synthesis.Collection (distinctOn)
+import Language.Haskell.Synthesis.Constraint (Constraint)
 import Language.Haskell.Synthesis.Type (Type)
 import Language.Haskell.Synthesis.TypeAtom (TypeAtomKey, alphaTypeKey)
 import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
@@ -36,14 +38,19 @@ infixl 4 &
 -- An opaque type atom additionally carries the exact shared source tree for
 -- display and an alpha-normal key for logical identity. Keeping those roles in
 -- one sum lets the existing LJT indexes stay unchanged without ever treating a
--- rendered forall spelling as its proposition key.
+-- rendered forall spelling as its proposition key. A dictionary atom is a
+-- separate proposition: a value of a qualified type is not itself evidence
+-- for the qualification, even when their display spellings coincide.
 data Symbol
     = Symbol String
     | OpaqueTypeSymbol !(Type String) !(TypeAtomKey String)
+    | DictionarySymbol
+        !(Constraint (Type String)) !(Constraint (TypeAtomKey String))
 
 instance Eq Symbol where
     Symbol left == Symbol right = left == right
     OpaqueTypeSymbol _ left == OpaqueTypeSymbol _ right = left == right
+    DictionarySymbol _ left == DictionarySymbol _ right = left == right
     _ == _ = False
 
 instance Ord Symbol where
@@ -51,6 +58,12 @@ instance Ord Symbol where
     compare Symbol{} OpaqueTypeSymbol{} = LT
     compare OpaqueTypeSymbol{} Symbol{} = GT
     compare (OpaqueTypeSymbol _ left) (OpaqueTypeSymbol _ right) =
+        compare left right
+    compare Symbol{} DictionarySymbol{} = LT
+    compare DictionarySymbol{} Symbol{} = GT
+    compare OpaqueTypeSymbol{} DictionarySymbol{} = LT
+    compare DictionarySymbol{} OpaqueTypeSymbol{} = GT
+    compare (DictionarySymbol _ left) (DictionarySymbol _ right) =
         compare left right
 
 -- | Seal any shared source type as one opaque logical proposition. The caller
@@ -67,6 +80,21 @@ opaqueSymbolSource :: Symbol -> Maybe (Type String)
 opaqueSymbolSource symbol = case symbol of
     Symbol _ -> Nothing
     OpaqueTypeSymbol source _ -> Just source
+    DictionarySymbol{} -> Nothing
+
+-- | A dictionary obligation with nominal class identity and source-ordered,
+-- alpha-aware type arguments. It is disjoint from ordinary names and every
+-- opaque source type; in particular, an inhabitant of @C a => ()@ cannot
+-- discharge this proposition. The caller owns constraint declaration and
+-- kind validation, just as the caller of 'opaqueTypeSymbol' owns its type.
+dictionarySymbol :: Constraint (Type String) -> Symbol
+dictionarySymbol source = DictionarySymbol source $ fmap alphaTypeKey source
+
+-- | Recover the exact constraint carried by a dictionary proposition.
+dictionarySymbolSource :: Symbol -> Maybe (Constraint (Type String))
+dictionarySymbolSource symbol = case symbol of
+    DictionarySymbol source _ -> Just source
+    _ -> Nothing
 
 -- | Source-like display spelling. Proof terms contain only the ordinary
 -- constructor, but keeping this projection total makes invariant failures
@@ -75,6 +103,8 @@ symbolSpelling :: Symbol -> String
 symbolSpelling symbol = case symbol of
     Symbol spelling -> spelling
     OpaqueTypeSymbol source _ -> SharedTypeRender.renderType id source
+    DictionarySymbol source _ ->
+        "dictionary[" ++ SharedTypeRender.renderConstraint id source ++ "]"
 
 instance Show Symbol where
     show = symbolSpelling

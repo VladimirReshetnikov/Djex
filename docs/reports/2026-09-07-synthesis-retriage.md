@@ -40,15 +40,33 @@ The subsequent native Given matrix establishes five live Exference roles and
 three Djinn roles, plus three leakage controls. The report retains its exact
 inventory, constraint-pruning policy, original signatures, and GHC replay.
 Djinn's constrained local/global search remains outside that published matrix.
-The **unpublished conditional-Given pilot** now passes strict library/private/
-integration builds and all 81 private tests, including 26 new conditional-kind
-and proof controls. Its unchanged 14-case Given target also passes in 26.09
-seconds, including forced Djinn local/global use and sibling-scope rejection.
-Broader regressions, budget controls, and direct-erasure controls remain pending.
-These are bounded pilot results; the pilot is not released and is absent from
-Leant's `922c5558` dependency.
+The [conditional-Given increment](2026-09-07-djinn-conditional-givens.md) adds
+forced Djinn local/global use under exact root dictionaries, checked erasure,
+and shared batch/stream budgets. All 92 private tests pass, including 26
+conditional-kind/proof controls and eleven direct-erasure controls. The expanded
+sixteen-test Given target passes in 23.56 seconds, including GHC replay,
+sibling-scope rejection, root/nested omitted-method evidence, and preservation
+of unconstrained refutations. Ten budget tests cover zero/tiny allowances,
+unchanged windows, exact source ownership, and an observed duplicate cutoff.
+The increment remains absent from Leant's `922c5558` dependency; arbitrary
+nested uses, duplicate equal Givens, methods, and partial constrained
+instantiation remain separate work.
 
-The final strict build passes, and the
+The conditional-Given strict builds pass with `-Werror -j1`. Its
+[current aggregate receipt](../../test-integration/receipts/conditional-givens-checkpoint.json)
+records **2,168 passing tests across twelve complete affected suites**:
+502 shared, 94 certificate, 10 graph-fingerprint, 133 Djinn unit, 59 public and
+92 private Djinn graph, 513 Exference, 70 private Exference, 139 facade,
+100 Djex CLI, 24 historical Djinn CLI, and 432 Length tests. This is a
+complementary set of complete suites across two runs, not one unfiltered
+twelve-suite invocation. Only three test files changed between the runs to
+correct stale expectations of unsound method-based refutations; production
+source stayed identical. The complete corrected Djinn unit, facade, and
+historical CLI suites pass. The first run's full Length suite passes in
+60.39 seconds. Receipts preserve both the initial failures and the corrected
+complete reruns, exact commands, source hashes, and executable hashes.
+
+The earlier `922c5558` strict build passed, and its
 [complete affected-suite receipt](../../test-integration/receipts/recursive-context-checkpoint.json)
 records 2,090/2,092 passing tests. All ten non-Length suites pass in full.
 Two existing short-deadline Length process tests fail in the 432-test run and
@@ -63,10 +81,26 @@ now passes `map`, order-sensitive `append`, generalized `length`, and the
 empty-input control in both Haskell engines within the original bounds. The
 next capability gate is cross-engine Lean acceptance of these fold compositions,
 including generic provider termination and actual provider inventories.
-Leant now includes the prepared recursor runner with an initial failed settings
-receipt. A native Djinn `map` candidate and actual false rejection were observed,
-but the validator's wrong provider-cap label prevented independent replay. Its
-correction passes eighteen Python tests; fresh Lean fold acceptance is pending.
+Leant's fresh native Djinn fold run, after correcting its settings validator,
+accepts `map` through live synthesis and independent replay. Append exhausts
+the raw window and generalized length reaches the command deadline, although
+their correct terms already occur in the debug stream. Independent Lean replay
+accepts those exact terms, original predicates, and wrong-result controls with
+eleven empty axiom inventories. Their live failures are at the backend-request
+boundary, so request timing and recovery now precede larger search windows or
+corpus expansion. The false control records eleven falsifications and one
+inconclusive check; the strict matrix remains incomplete. See the
+[live receipt](https://github.com/VladimirReshetnikov/Leant/blob/main/test-recursive/receipts/native-folds-incomplete.json)
+and [separate witness replay](https://github.com/VladimirReshetnikov/Leant/blob/main/test-recursive/receipts/native-fold-witnesses.json).
+
+The contextual audit found a separate correctness gate: an exhaustive search
+that omitted class methods must not refute the complete qualified source type.
+The correction suppresses negative authorization for retained
+qualifications and separately supplied contexts, while preserving positive
+checks and genuine unconstrained refutations. Root and nested method-source
+regressions pass; the aggregate receipts retain the necessary correction of
+older tests that expected those unsound refutations. This correction
+does not add class methods to the search vocabulary.
 Expanded Church acceptance must cover additional total operations
 and all nineteen partial cases with explicit supplied defaults. New source and
 oracle controls must compile and run before those cells count as accepted
@@ -160,10 +194,24 @@ current blocking fixtures.
 
 ## Recommended execution order
 
+The observed false-negative-evidence gate is now corrected and validated in
+canonical Djex; carry it into the next Leant dependency integration. Before
+capability expansion, resolve Lean's verification-request failure on an
+already-generated correct length candidate.
+The latter times out at the five-second request boundary with 71 seconds still
+available to the command; increasing the raw search window cannot recover that
+skipped occurrence. Keep per-request and whole-command timing separate.
+Leant's later direct five-second control reproduces the timeout without any
+search or serializer preparation, after a separate 91-second startup delay.
+The earlier identical direct program completed in 0.736 seconds under a
+60-second diagnostic guard. Thus search load is not a necessary cause; startup
+and request variability need measurement at the process/IO boundary before
+choosing a scheduling fix or changing defaults.
+
 | Order | Existing goal item | Deliverable | Acceptance and reason for its position |
 | --- | --- | --- | --- |
-| 1 | Priority 2, recursor stage; extend priority 4 corpus | Complete Lean acceptance and broaden supplied recursor composition | Retain the accepted Haskell `map`, `append`, and generalized `length` fixture in both engines. Replay supplied folds and tree operations in Lean, including provider-inventory and termination checks; extend accumulator shapes where concrete programs expose a gap. |
-| 2 | Priority 3 | Complete lexical-Given production synthesis, then evidence derivation | Finish, regression-test, and publish the Djinn Given increment, including budget/direct-erasure controls, then integrate it with Lean source metadata/preparation/routing. Cover methods, conditional instances, superclasses, and contextual certificate association. The isolated renderer and bounded pilot tests do not establish production Lean synthesis. |
+| 1 | Priority 2, recursor stage; extend priority 4 corpus | Complete Lean acceptance and broaden supplied recursor composition | Resolve the observed verification-request failure, then retain the accepted Haskell `map`, `append`, and generalized `length` fixture in both engines. Replay supplied folds and tree operations in Lean, including provider-inventory and termination checks; extend accumulator shapes where concrete programs expose a gap. |
+| 2 | Priority 3 | Complete lexical-Given production synthesis, then evidence derivation | Integrate the checked Djinn root-Given increment with Lean source metadata/preparation/routing. Extend forced nested uses and actual slot association, then methods, conditional instances, superclasses, and contextual certificates. The isolated renderer and bounded Haskell acceptance do not establish production Lean synthesis. |
 | 3 | Priority 4, corpus completion | Close the remaining Church behavioral coverage | Execute the prepared extended total and all-19 supplied-default fixtures: oracle preflight, fresh processes, controlled providers, false controls, exact full-signature replay, hashes, and actual axioms. Add this coverage during the earlier deliveries; fixture preparation alone is not acceptance. |
 
 Leant's bounded simplification milestone is now published in `990b7f3`. Its
@@ -228,9 +276,21 @@ retain their own source metadata. Preserve rank-N callback structure, but
 initially reject impredicative selections until their resulting Lean universes
 can be checked: `Type 0` binder domains do not put the whole polymorphic type
 in `Type 0`. Missing metadata must not fall back to context erasure or
-replacement instance search. Complete the unpublished Djinn pilot's regression
-and resource controls alongside this work, then methods, instances, superclasses, and contextual
-certificate association.
+replacement instance search. Retain the Djinn increment's kind, erasure, budget,
+and source-negative-evidence controls alongside this work, then methods,
+instances, superclasses, and contextual certificate association.
+
+Within contextual synthesis, forced use beneath a nested Given should precede
+general partial constrained instantiation: it establishes the scoped dictionary
+ownership both need. Duplicate equal Givens require the actual proof-selected
+slot to survive erasure and source-graph construction; removing the current
+duplicate guard alone is insufficient. Add a live higher-kind constrained
+provider regression alongside the existing original-kind controls. Vacuous
+type slots can use a private entrance that performs kind validation and
+structural preparation together; the callback-only entrance must remain
+conservative. Methods need owned method schemes and dictionary application
+evidence before they enter search, followed by conditional instances,
+superclasses, and residual qualification under partial type application.
 
 **Behavior is a continuing acceptance requirement.** Add host execution and
 false controls with each new program family. Keep total and supplied-default

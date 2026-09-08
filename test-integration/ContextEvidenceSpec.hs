@@ -90,7 +90,90 @@ contextualMatrix label rows = testGroup label
        checkSiblingLeakage
    , testCase "GHC independently rejects sibling given leakage" $
        bounded "sibling GHC control" compileSiblingLeakage
-   ])
+   ] ++ omittedMethodTests)
+
+-- Class methods deliberately remain outside Djinn's candidate vocabulary.
+-- That is an incomplete search policy, not a refutation of their qualified
+-- source types. Exercise the public batch and stream entrances, including a
+-- qualification below an ordinary arrow, without demanding method synthesis.
+omittedMethodTests :: [TestTree]
+omittedMethodTests =
+  [ testCase "omitted methods cannot refute inhabited root or nested qualifications" $
+      bounded "omitted method evidence" $ do
+        forM_
+          [ "forall a. C a => a -> Token"
+          , "() -> (forall a. C a => a -> Token)"
+          ] $ \source -> checkMethodEvidence source NoEvidence
+        replay <- executeModule $ unlines
+          [ "{-# LANGUAGE RankNTypes #-}"
+          , "module Main where"
+          , "data Token = Token"
+          , "class C a where make :: a -> Token"
+          , "root :: forall a. C a => a -> Token"
+          , "root = make"
+          , "nested :: () -> (forall a. C a => a -> Token)"
+          , "nested _ = make"
+          , "main :: IO ()"
+          , "main = print True"
+          ]
+        case replay of
+          (ExitSuccess, output, errors) ->
+            assertEqual ("independent method witness replay: " ++ errors)
+              (Just True) (readMaybe output :: Maybe Bool)
+          _ -> fail $ "GHC rejected the omitted-method source inhabitants: " ++ show replay
+  , testCase "an unconstrained query keeps genuine negative evidence with the same class inventory" $
+      bounded "unconstrained method evidence control" $
+        checkMethodEvidence "A -> Token" ProvedUninhabitable
+  ]
+
+checkMethodEvidence :: String -> QueryEvidence -> IO ()
+checkMethodEvidence source expectedEvidence = do
+  className <- expectRight $ parseName "C"
+  atomName <- expectRight $ parseName "A"
+  tokenTypeName <- expectRight $ parseName "Token"
+  methodName <- expectRight $ mkIdentifier "make"
+  target <- expectRight $ mkIdentifier "methodEvidence"
+  let sourceDeclarations =
+        [ AbstractTypeDeclaration () atomName ProperTypeKind
+        , AbstractTypeDeclaration () tokenTypeName ProperTypeKind
+        , ClassDeclaration () className [TypeParameter "a" Nothing] []
+            [ValueSignature () methodName $
+              FunctionType (TypeVariable "a") $ TypeConstructor tokenTypeName]
+        ]
+  environment <- expectRight (mkEnvironment sourceDeclarations :: Either
+    (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+  session <- expectRight $ mkDjinnSession environment
+  assertEqual "the class method became an ordinary value provider" []
+    [valueName value | ValueDeclaration value <-
+      environmentDeclarations $ djinnSessionEnvironment session]
+  forM_ [DepthFirst, Interleave] $ \strategy -> do
+    request <- expectRight $ parseDjinnRequest session
+      defaultQueryOptions
+        { optionCutoff = 32, optionAlternatives = True, optionSorted = False
+        , optionStrategy = strategy, optionBudget = Just 10000
+        }
+      target "omitted-method-evidence" source
+    batch <- expectRight $ runDjinnTypedQuery session request
+    stream <- expectRight $ runDjinnTypedQueryStream session request
+    observed <- traverse expectRight stream
+    let checkCompleted result = do
+          assertBool "omitted methods unexpectedly entered synthesis" $
+            null $ batchCandidates $ resultSearch result
+          assertEqual ("wrong source evidence for " ++ source ++ " under " ++ show strategy)
+            expectedEvidence $ resultEvidence result
+          assertEqual "the negative-evidence control merely exhausted its finite allowance"
+            (Completed Finished) $ batchProgress $ resultSearch result
+    checkCompleted batch
+    forM_ observed $ \result -> do
+      assertBool "the stream admitted an omitted method" $
+        null $ batchCandidates $ resultSearch result
+      if expectedEvidence == NoEvidence
+        then assertEqual "an intermediate observation refuted a qualified source"
+          NoEvidence $ resultEvidence result
+        else pure ()
+    case reverse observed of
+      finalResult : _ -> checkCompleted finalResult
+      [] -> fail "method evidence stream omitted its terminal observation"
 
 positiveRoles :: [Role]
 positiveRoles =

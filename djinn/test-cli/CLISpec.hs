@@ -281,8 +281,11 @@ testClassKindEnforcement = do
         not $ "Error: class Independent:" `isInfixOf` output
     assertContains "a well-kinded phantom context still works"
         "good a = a" output
-    assertContains "an essential higher-kinded method is not assumed"
-        "fine cannot be realized" output
+    assertContains "an omitted essential higher-kinded method leaves search inconclusive"
+        ("fine: no proof found in the supported inference fragment; " ++
+            "inhabitation is undecided.") output
+    assertBool "omitting the method must not refute its qualified source type" $
+        not $ "fine cannot be realized" `isInfixOf` output
 
 testDiagnosticRendering :: Assertion
 testDiagnosticRendering = do

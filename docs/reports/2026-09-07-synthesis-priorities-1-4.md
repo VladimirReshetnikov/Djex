@@ -225,6 +225,32 @@ is published and passes live three-engine acceptance plus independent replay.
 It preserves false and inconclusive outcomes. The report retains the incomplete
 full boundary receipt separately from its passing unchanged focused retry.
 
+## Conditional root-Given checkpoint
+
+The [Djinn conditional-Given increment](2026-09-07-djinn-conditional-givens.md)
+adds actual constrained local/global applications under exact root dictionaries,
+complete correlated kind checks, checked dictionary erasure, and shared search
+budgets. All 92 private tests and the expanded sixteen-test contextual target
+pass. Ten production budget tests include zero/tiny allowances and a measured
+duplicate cutoff. Qualified sources whose class methods were omitted no longer
+receive false negative evidence; unconstrained refutations are preserved.
+Strict builds pass with `-Werror -j1`. The
+[aggregate receipt](../../test-integration/receipts/conditional-givens-checkpoint.json)
+records 2,168 passing tests across twelve complete affected suites, including
+all 432 Length tests. These are complementary complete-suite runs with
+unchanged production source, not one unfiltered twelve-suite invocation.
+The first run exposed stale expectations of unsound method-based refutations;
+only three test files changed before complete reruns of all 133 Djinn unit,
+139 facade, and 24 historical Djinn CLI tests passed. The detailed report
+and receipts retain both runs and their exact source/executable identities.
+
+The Lean fold diagnostic now accepts native map and independently checks the
+exact append/length terms already present in the debug stream. Request failures
+still prevent their live acceptance. A subsequent five-second direct control
+reproduces the failure without synthesis, so startup/request variability must
+be resolved before attributing it to search. Leant's pinned dependency remains
+`922c5558`; integration of this contextual increment is still required.
+
 ## Remaining work
 
 - Retain priority 2's accepted sixteen-cell Haskell matrix, 24-cell Lean
@@ -233,8 +259,9 @@ full boundary receipt separately from its passing unchanged focused retry.
   tree folds, accumulator shapes, and structurally decreasing programs.
 - Finish priority 1's remaining selection and negative evidence acceptance;
   integrate and validate any further shared changes in Leant.
-- Complete priority 3's live direct-Given uses and Lean projection, then methods,
-  conditional providers, and superclass evidence.
+- Complete priority 3's forced nested Given uses, actual duplicate-slot
+  association, partial constrained instantiation, and Lean projection, then
+  methods, conditional instances, and superclass evidence.
 - Compile, execute, and synthesize priority 4's broader corpus and all nineteen
   supplied-default cases, retaining bounded Lean simplification as a regression.
 - Run the appropriate complete affected suites and live compiler/kernel

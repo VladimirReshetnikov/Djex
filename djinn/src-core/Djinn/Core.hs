@@ -63,7 +63,7 @@ module Djinn.Core (
     ) where
 
 import Control.DeepSeq (deepseq)
-import Control.Monad (foldM, unless, void, when)
+import Control.Monad (foldM, replicateM, unless, void, when)
 import Data.Bifunctor (first)
 import Data.Either (fromRight)
 import Data.List (intercalate, isPrefixOf, mapAccumL)
@@ -105,6 +105,7 @@ import Djinn.Internal.CheckedCandidate
     , validatedCandidateOutput
     )
 import Djinn.Internal.Environment
+import qualified Djinn.Internal.ContextualInstantiation as Contextual
 import Djinn.Internal.Declaration
 import Djinn.Internal.GeneratedDeduplication
     ( deduplicateEtaEquivalentClausesOn, etaNormalClauseExpression )
@@ -1283,6 +1284,7 @@ inhabitSynthesisPreparedSearchChecked sourceGoal options prepared
     pure $ prepareFormulaSearch options sourceContext checkedCandidates checkedAssignments target
         elaboratedGoal
         parametricDataRelevant
+        (null contexts && null (SharedType.typeConstraints checkedSourceGoal))
         plans nominalPlans
   where
     translatorFailure = first DjinnInternalQueryFailure
@@ -1651,11 +1653,12 @@ prepareFormulaSearch
     -> SharedGenerated.DefinitionName
     -> SharedType.Type HSymbol
     -> Bool
+    -> Bool
     -> PolarizedFormulaPlans
     -> PolarizedFormulaPlans
     -> PreparedFormulaSearch
 prepareFormulaSearch options sourceContext providerCandidates providerAssignments
-        target elaboratedGoal parametricDataRelevant formulaPlans
+        target elaboratedGoal parametricDataRelevant sourceNegativeEvidenceSound formulaPlans
         nominalFormulaPlans = PreparedFormulaSearch
     { preparedFormulaBatchResult = do
         results <- if interleavePlanAlternatives
@@ -1679,6 +1682,7 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
         [FormulaPlanLane (1, 0) False [] carrierPlans Nothing
         | interleavePlanAlternatives]
     historicalFamilies =
+        [(False, contextualSearchPlans) | not interleavePlanAlternatives] ++
         [(False, initialSearchPlans), (True, loadedConstructedAccelerationPlans),
             (False, searchPlans)] ++ deferredInstantiationPlans
     -- Premise partitioning and deterministic plan-family derivation from
@@ -1710,6 +1714,72 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
         ((== targetSymbol) . fst) nominalLoadedSchemePremises
     goalVariables =
         SharedType.freeVariablesInFirstOccurrenceOrder elaboratedGoal
+    -- The complete source root is opened jointly, retaining the identities
+    -- shared by its Givens and its body. No constraint below an arrow/product
+    -- becomes a root assumption. Failed/ambiguous optional openings add no
+    -- plan and, like all contextual plans, confer no negative evidence.
+    contextualPlanEntries = do
+        Right (Just opening) <- [prepareRootGivenOpening prepared
+            (SourceEvidence.sourceTypingGoal sourceContext) elaboratedGoal]
+        Right bodyFormula <- [preparedEnvironmentSynthesisFormulaTranslator prepared $
+            rootGivenOpeningBody opening]
+        let exactPremises = SharedCollection.distinctOn fst $
+                activeLoadedSchemePremises ++ filter ((/= targetSymbol) . fst)
+                    (preparedEnvironmentFunctionPremises prepared)
+            availableSources = SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey
+                [ source
+                | symbol <- Set.toList $ Set.unions $
+                    negativeOpaqueFormulaSymbols PositiveFormula bodyFormula :
+                    map (negativeOpaqueFormulaSymbols NegativeFormula . snd) exactPremises
+                , Just source <- [opaqueSymbolSource symbol]
+                , let (binders, contexts, _) = SharedType.splitLeadingForalls source
+                , not $ null contexts
+                , length binders <= SharedQuery.maximumProviderInstantiationArguments
+                ]
+            vocabulary = take SharedQuery.maximumProviderInstantiationCandidates $
+                SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
+                    map SharedType.TypeVariable goalVariables ++
+                    [argument | Constraint _ arguments <- rootGivenOpeningContexts opening,
+                        argument <- arguments] ++ closedMonotypeSubtrees elaboratedGoal
+            tuples source =
+                let (binders, _, _) = SharedType.splitLeadingForalls source
+                    count = length binders
+                in if count == 0 then [[]] else
+                    map (replicate count) vocabulary ++ replicateM count vocabulary
+            -- Charge optional proposals against the existing finite assignment
+            -- bound before type checking/dedup. Proof search still spends its
+            -- one shared raw-proof/choice allowance; this is no extra search.
+            requests = take SharedQuery.maximumProviderInstantiationAssignments $
+                roundRobin [[(source, vector) | vector <- tuples source]
+                    | source <- availableSources]
+            check = checkPreparedSynthesisTypesKindsWithRigids prepared
+                (Set.fromList goalVariables) . (: []) . (,) KStar
+            family = Contextual.contextualInstantiationAxioms
+                [ sealed
+                | (source, vector) <- requests
+                , Right () <- [Contextual.checkContextualInstantiationKinds
+                    prepared opening source vector]
+                , Right sealed <- [Contextual.sealContextualInstantiation check
+                    (preparedEnvironmentSynthesisFormulaTranslator prepared) source vector]
+                ]
+            helpers = filter
+                (all (`elem` rootGivenOpeningContexts opening) .
+                    Contextual.contextualInstantiationObligations)
+                $ Contextual.contextualInstantiations family
+        if null helpers then [] else pure ()
+        Right erasure <- [SourceEvidence.rootGivenErasure sourceContext opening helpers]
+        let plan = (exactPremises ++
+                [(Contextual.contextualInstantiationSymbol helper,
+                    Contextual.contextualInstantiationFormula helper) | helper <- helpers],
+                [], Set.empty, Map.empty, Map.empty,
+                SourceEvidence.rootGivenErasureGoal erasure, False)
+        pure (plan, erasure)
+      where
+        roundRobin streams = case [(value, rest) | value : rest <- streams] of
+            [] -> []
+            nonempty -> map fst nonempty ++ roundRobin (map snd nonempty)
+    contextualSearchPlans = map fst contextualPlanEntries
+    contextualPlanErasure plan = lookup plan contextualPlanEntries
     queryClosedCandidates =
         SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
             closedMonotypeSubtrees elaboratedGoal
@@ -1745,7 +1815,12 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     primary = primaryFormulaPlan formulaPlans
     primaryTranslationSound = not $
         translationIncomplete primary || premiseTranslationIncomplete
-    primarySound = primaryTranslationSound &&
+    -- Qualified source types may be inhabited through class methods which
+    -- are intentionally absent from LJT. This includes qualifications below
+    -- ordinary arrows, and historical requests carrying contexts separately.
+    -- An exhaustive search of the dictionary-independent body cannot refute
+    -- that complete source type. Positive proofs and their budgets are unchanged.
+    primarySound = sourceNegativeEvidenceSound && primaryTranslationSound &&
         null activeLoadedSchemePremises
     alternativeForms
         | primaryTranslationSound = []
@@ -2520,7 +2595,7 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     -- Neither lane can refill the shared raw-proof or choice allowance.
     carrierAlternativeSearchPlans
         | not interleavePlanAlternatives = []
-        | otherwise = commonResultInstantiationSearchPlans ++
+        | otherwise = contextualSearchPlans ++ commonResultInstantiationSearchPlans ++
             functionCarrierSearchPlans
     functionCarrierSearchPlans = focusedPlansWithPrefix "$djinn$carrier-focused$"
         [(instantiationAxiomPremises queryCarrierAxioms,
@@ -2537,7 +2612,7 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     -- axiom inventory, not additional instantiation evidence or a completeness
     -- claim. Common groups retain their original symbol indices and member
     -- order. Batch, depth-first, and first-only schedules remain unchanged.
-    demandedStreamingPlans = demandedCommonResultPlans ++ demandedSingletonPlans
+    demandedStreamingPlans = contextualSearchPlans ++ demandedCommonResultPlans ++ demandedSingletonPlans
     otherStreamingCarrierPlans = otherCommonResultPlans ++ functionCarrierSearchPlans
     demandedResult = instantiationResult $ translatedFormula primary
     demandedSingletonPlans = focusedPlansWithPrefix "$djinn$carrier-focused$demand$"
@@ -3027,9 +3102,11 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     -- Marker identities
     -- here are private planner provenance; the demand test compares formulae.
     startStreamingPlan plan@(planPremises, _, symbols, _, _, form, _) =
-        if constructorCompositionPlan plan
-            then startConstructorCompositionPlan sourceContext options target plan
-            else startFormulaPlanStreamWithNormalPriority prioritize sourceContext options target plan
+        case contextualPlanErasure plan of
+            Just receipt -> startContextualFormulaPlan receipt sourceContext options target plan
+            Nothing -> if constructorCompositionPlan plan
+                then startConstructorCompositionPlan sourceContext options target plan
+                else startFormulaPlanStreamWithNormalPriority prioritize sourceContext options target plan
       where
         carrierSymbol symbol =
             "$djinn$carrier-focused$" `isPrefixOf` symbolSpelling symbol
@@ -3168,9 +3245,11 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     -- an earlier source subsequently succeeds; consumed work and already
     -- emitted results remain in the global accounting/result stream.
     activateLane completed = activateLaneWith
-        (\plan -> if constructorCompositionPlan plan
-            then startConstructorCompositionPlan sourceContext options target plan
-            else startFormulaPlanStream sourceContext options target plan) $
+        (\plan -> case contextualPlanErasure plan of
+            Just receipt -> startContextualFormulaPlan receipt sourceContext options target plan
+            Nothing -> if constructorCompositionPlan plan
+                then startConstructorCompositionPlan sourceContext options target plan
+                else startFormulaPlanStream sourceContext options target plan) $
         \ordinal inhabitationOnly firstCandidateOnly ->
         suppressPlan ordinal inhabitationOnly firstCandidateOnly completed
     activateLaneWith start suppress lane@(FormulaPlanLane ordinal inhabitationOnly families pendingPlans (Just stream))
@@ -3232,7 +3311,7 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
         , any isInhabitationFallbackSymbol $ Set.toList symbols =
             runPlans firstProofOnly remainingFamilies collect currentOptions candidateLimit completed remaining
     runPlans firstProofOnly remainingFamilies collect currentOptions candidateLimit completed
-            (( planPremises
+            (plan@( planPremises
               , diagnosticOnlyPremises
               , axiomSymbols
               , visibleApplications
@@ -3241,10 +3320,13 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
               , negativeEvidenceSound
               )
                 : remaining) = do
-        result <- searchPreparedFormulaPlan sourceContext firstProofOnly
-            currentOptions candidateLimit target planPremises axiomSymbols
-            visibleApplications providerApplications diagnosticOnlyPremises form
-            negativeEvidenceSound
+        result <- case contextualPlanErasure plan of
+            Nothing -> searchPreparedFormulaPlan sourceContext firstProofOnly
+                currentOptions candidateLimit target planPremises axiomSymbols
+                visibleApplications providerApplications diagnosticOnlyPremises form
+                negativeEvidenceSound
+            Just receipt -> searchContextualFormulaPlan receipt sourceContext firstProofOnly
+                currentOptions candidateLimit target plan
         let completed' = result : completed
             nextLimit = candidateLimit - formulaPlanProofCount result
             continue =
@@ -3481,7 +3563,21 @@ startFormulaPlanStreamWithGoalPolicy
     -> SourceEvidence.SourceTypingContext
     -> QueryOptions -> SharedGenerated.DefinitionName -> FormulaSearchPlan
     -> Either DjinnQueryError FormulaPlanStream
-startFormulaPlanStreamWithGoalPolicy prioritize introduce sourceContext options target
+startFormulaPlanStreamWithGoalPolicy = startFormulaPlanStreamWithContextual Nothing
+
+startContextualFormulaPlan
+    :: SourceEvidence.RootGivenErasure -> SourceEvidence.SourceTypingContext
+    -> QueryOptions -> SharedGenerated.DefinitionName -> FormulaSearchPlan
+    -> Either DjinnQueryError FormulaPlanStream
+startContextualFormulaPlan receipt =
+    startFormulaPlanStreamWithContextual (Just receipt) False True
+
+startFormulaPlanStreamWithContextual
+    :: Maybe SourceEvidence.RootGivenErasure -> Bool -> Bool
+    -> SourceEvidence.SourceTypingContext
+    -> QueryOptions -> SharedGenerated.DefinitionName -> FormulaSearchPlan
+    -> Either DjinnQueryError FormulaPlanStream
+startFormulaPlanStreamWithContextual contextual prioritize introduce sourceContext options target
         (premises, diagnostics, symbols, visible, providers, form, negativeSound) = do
     let (_, internalEnv, mode) = formulaPlanSearchContext options target premises providers
         reserved = Set.fromList $
@@ -3491,7 +3587,7 @@ startFormulaPlanStreamWithGoalPolicy prioritize introduce sourceContext options 
             formulaSymbols form ++ Set.toList symbols ++ Map.keys visible ++
             Map.keys providers ++ map fst (Map.elems providers)
         (introduced, searchGoal)
-            | introduce = openGoal reserved 0 form
+            | introduce = openFormulaGoal reserved 0 form
             | otherwise = ([], form)
         searchEnv = reverse introduced ++ internalEnv
         restoreGoal proof = foldr (Lam . fst) proof introduced
@@ -3502,7 +3598,7 @@ startFormulaPlanStreamWithGoalPolicy prioritize introduce sourceContext options 
             unless (null introduced) $
                 first (DjinnInternalQueryFailure . ("invalid opened-goal proof: " ++)) $
                     mapM_ (void . checkProofWithEvidence searchEnv searchGoal) $ searchProofs outcome
-            searchPreparedFormulaPlanBy sourceContext True
+            searchPreparedFormulaPlanByWithContextual contextual sourceContext True
                 (\_ _ _ -> Right outcome {searchProofs = map restoreGoal $ searchProofs outcome})
                 options 1 target premises symbols visible providers diagnostics form negativeSound
     cursor <- first (DjinnInternalQueryFailure .
@@ -3517,22 +3613,56 @@ startFormulaPlanStreamWithGoalPolicy prioritize introduce sourceContext options 
         , formulaStreamFirstCandidateOnly = False
         , formulaStreamWorkRemaining = formulaPlanWorkQuantum
         }
-  where
-    -- Freshness includes source/provider spellings as well as internal names:
-    -- restoring a free assumption must never capture it under a new lambda.
-    -- The domains are the original exact Formula nodes, with no substitution
-    -- or extra proof premise beyond the query's own arrow-introduction rule.
-    openGoal used next (domain :-> result) =
-        let (binder, following) = freshInput used next
-            (remaining, final) = openGoal (Set.insert binder used) following result
-        in ((binder, domain) : remaining, final)
-    openGoal _ _ result = ([], result)
+-- Freshness includes source/provider spellings as well as internal names:
+-- restoring a free assumption must never capture it under a new lambda.
+-- The domains are the original exact Formula nodes, with no substitution
+-- or extra proof premise beyond the query's own arrow-introduction rule.
+openFormulaGoal :: Set.Set Symbol -> Natural -> Formula -> ([(Symbol, Formula)], Formula)
+openFormulaGoal used next (domain :-> result) =
+    let (binder, following) = freshInput used next
+        (remaining, final) = openFormulaGoal (Set.insert binder used) following result
+    in ((binder, domain) : remaining, final)
+openFormulaGoal _ _ result = ([], result)
 
-    freshInput used next =
-        let binder = Symbol $ "$djinn$query-input$" ++ show (next :: Natural)
-        in if binder `Set.member` used
-            then freshInput used (next + 1)
-            else (binder, next + 1)
+freshInput :: Set.Set Symbol -> Natural -> (Symbol, Natural)
+freshInput used next =
+    let binder = Symbol $ "$djinn$query-input$" ++ show next
+    in if binder `Set.member` used
+        then freshInput used (next + 1)
+        else (binder, next + 1)
+
+-- The sequential entrance opens exactly the same sequent as its cursor
+-- counterpart. Each introduction is charged before observing the underlying
+-- search, including at zero/tiny budgets; no proof is produced on borrowed
+-- fuel. Both independent checks still see the complete original goal.
+searchContextualFormulaPlan
+    :: SourceEvidence.RootGivenErasure -> SourceEvidence.SourceTypingContext
+    -> Bool -> QueryOptions -> Int -> SharedGenerated.DefinitionName
+    -> FormulaSearchPlan -> Either DjinnQueryError FormulaPlanResult
+searchContextualFormulaPlan receipt sourceContext firstOnly options candidateLimit target
+        (premises, diagnostics, symbols, visible, providers, form, _) =
+    searchPreparedFormulaPlanByWithContextual (Just receipt) sourceContext False run
+        options candidateLimit target premises symbols visible providers diagnostics form False
+  where
+    run mode internalEnv goal = do
+        let reserved = Set.fromList $
+                Symbol (SharedGenerated.definitionSpelling target) :
+                map fst (internalEnv ++ premises ++ diagnostics) ++
+                concatMap (formulaSymbols . snd) (internalEnv ++ premises ++ diagnostics) ++
+                formulaSymbols goal ++ Set.toList symbols ++ Map.keys visible ++
+                Map.keys providers ++ map fst (Map.elems providers)
+            (introduced, opened) = openFormulaGoal reserved 0 goal
+            count = fromIntegral $ length introduced
+            restore proof = foldr (Lam . fst) proof introduced
+            openedEnvironment = reverse introduced ++ internalEnv
+        case searchBudget mode of
+            Just fuel | fuel < count -> Right $ SearchOutcome [] True $ Just 0
+            _ -> do
+                outcome <- (if firstOnly then proveFirstWithModeChecked else proveWithModeChecked)
+                    mode {searchBudget = fmap (subtract count) $ searchBudget mode}
+                    openedEnvironment opened
+                mapM_ (void . checkProofWithEvidence openedEnvironment opened) $ searchProofs outcome
+                pure outcome {searchProofs = map restore $ searchProofs outcome}
 
 formulaPlanSearchContext
     :: QueryOptions -> SharedGenerated.DefinitionName -> [(Symbol, Formula)]
@@ -3607,7 +3737,25 @@ searchPreparedFormulaPlanBy
     -> Formula
     -> Bool
     -> Either DjinnQueryError FormulaPlanResult
-searchPreparedFormulaPlanBy sourceContext chargeDiagnosticChoices runProofSearch options candidateLimit target externalEnv
+searchPreparedFormulaPlanBy = searchPreparedFormulaPlanByWithContextual Nothing
+
+searchPreparedFormulaPlanByWithContextual
+    :: Maybe SourceEvidence.RootGivenErasure
+    -> SourceEvidence.SourceTypingContext
+    -> Bool
+    -> (SearchMode -> [(Symbol, Formula)] -> Formula -> Either String SearchOutcome)
+    -> QueryOptions
+    -> Int
+    -> SharedGenerated.DefinitionName
+    -> [(Symbol, Formula)]
+    -> Set.Set Symbol
+    -> Map.Map Symbol [SharedGenerated.VisibleTypeArgument]
+    -> Map.Map Symbol (Symbol, [SharedGenerated.VisibleTypeArgument])
+    -> [(Symbol, Formula)]
+    -> Formula
+    -> Bool
+    -> Either DjinnQueryError FormulaPlanResult
+searchPreparedFormulaPlanByWithContextual contextual sourceContext chargeDiagnosticChoices runProofSearch options candidateLimit target externalEnv
         axiomSymbols visibleApplications providerApplications
         diagnosticOnlyEnv form
         negativeEvidenceSound = do
@@ -3676,7 +3824,10 @@ searchPreparedFormulaPlanBy sourceContext chargeDiagnosticChoices runProofSearch
                     splitAt candidateLimit proofs
                 candidateLimitReached = not $ null overflow
                 convertProof _ evidence =
-                    SourceEvidence.lowerCheckedSourceCandidate sourceContext
+                    (case contextual of
+                        Nothing -> SourceEvidence.lowerCheckedSourceCandidate
+                        Just receipt -> SourceEvidence.lowerCheckedContextualSourceCandidate receipt)
+                        sourceContext
                         proofEnv axiomSymbols visibleApplications
                         providerApplications target evidence
             -- Preserve the historical error precedence by checking every raw

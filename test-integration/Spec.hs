@@ -72,6 +72,7 @@ import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
 import qualified RecursorSpec
 import qualified ContextHaskellReplaySpec
 import qualified ContextEvidenceSpec
+import qualified ContextBudgetSpec
 
 main :: IO ()
 main = defaultMain tests
@@ -80,7 +81,8 @@ tests :: TestTree
 tests = testGroup "Djex facade"
   [ RecursorSpec.tests
   , ContextHaskellReplaySpec.tests
-  , ContextEvidenceSpec.tests
+  , ContextEvidenceSpec.targetTests
+  , ContextBudgetSpec.tests
   , testCase "synthesize and execute ordinary list and tree observations" $ do
       listName' <- expectRight $ parseName "[]"
       consName' <- expectRight $ parseName ":"
@@ -716,10 +718,13 @@ tests = testGroup "Djex facade"
       captureResult <- expectRight $
         runDjinnQuery captureSession captureRequest
       batchCandidates (resultSearch captureResult) @?= []
-      resultEvidence captureResult @?= ProvedUninhabitable
+      -- The omitted method can inhabit the qualified source goal; absence
+      -- from dictionary-independent search is not a source refutation.
+      resultEvidence captureResult @?= NoEvidence
 
       -- Use an otherwise uninhabited nominal result so the operator method
-      -- would be essential. Dictionary-independent search must reject it.
+      -- would be essential. Dictionary-independent search omits it and must
+      -- leave the qualified source query inconclusive.
       tokenType <- expectRight $ parseHType "TokenPrepared"
       operatorMethod <- expectRight $ parseHType "a -> ProofPrepared"
       operatorEnvironment <- expectRight $ do
@@ -750,7 +755,7 @@ tests = testGroup "Djex facade"
       operatorResult <- expectRight $
         runDjinnQuery operatorSession operatorRequest
       batchCandidates (resultSearch operatorResult) @?= []
-      resultEvidence operatorResult @?= ProvedUninhabitable
+      resultEvidence operatorResult @?= NoEvidence
 
       higherMethod <- expectRight $ parseHType "f a -> f a"
       higherEnvironment <- expectRight $ declare

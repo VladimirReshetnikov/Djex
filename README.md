@@ -106,8 +106,11 @@ Its full configured 647-test integration run passes in 343.79 seconds, with
 unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
 retain source graphs as checked wildcards, preserving exact compatibility
 erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
-places Lean supplied-fold acceptance, production contextual evidence, and the
-broader Church behavioral corpus next.
+places truthful contextual negative evidence and Lean verification-request
+recovery first: a source method omitted from search must not cause a false
+non-inhabitation claim, and correct fold candidates already reach Lean's
+verification boundary. Supplied-fold acceptance, production contextual evidence,
+and the broader Church behavioral corpus follow those gates.
 
 The [supplied-fold composition report](docs/reports/2026-09-07-supplied-recursor-composition.md)
 describes synthesis of `map`, order-sensitive `append`, and generalized `length`
@@ -128,12 +131,21 @@ seven full-signature Lean replays, and sixteen empty implementation/proof axiom
 inventories, including distinct equal-predicate dictionaries. Ordinary `:synth`
 still needs exact source metadata and production routing. Methods,
 instance/superclass derivations, and complete Djinn constrained search remain
-open. An unpublished conditional-Given pilot now passes strict library/private/
-integration builds, 81 private tests including 26 new kind/proof controls, and
-the unchanged 14-case Given target in 26.09 seconds. This adds bounded evidence
-for forced Djinn local/global uses and sibling-scope rejection; broader
-regressions, budget controls, and direct-erasure controls remain pending. The
-pilot is not part of published `922c5558` or Leant's pinned integration.
+open. The [conditional-Given increment](docs/reports/2026-09-07-djinn-conditional-givens.md)
+adds forced Djinn local/global uses under the exact root dictionaries, checked
+dictionary erasure, and shared batch/stream budgets. All 92 private tests and
+the expanded sixteen-test Given target pass, including independent GHC replay.
+Qualified searches that omit class methods now report no evidence rather than
+incorrectly refuting the source type; genuine unconstrained refutations remain.
+Duplicate equal Givens, forced nested uses, methods, and partial constrained
+instantiation still need further work. Leant's pinned `922c5558` dependency
+does not yet contain this increment.
+
+Its [validation receipt](test-integration/receipts/conditional-givens-checkpoint.json)
+records 2,168 passing tests across twelve complete affected suites, including
+all 432 Length tests. These are complementary complete-suite runs with
+unchanged production source; the detailed report preserves the initial stale
+test expectations and their complete corrected reruns.
 
 Leant also adds [bounded simplification of behavioral assertions](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-07-bounded-behavioral-simplification.md)
 after decision checks of the assertion and its negation. The three-engine live

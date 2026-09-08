@@ -655,8 +655,8 @@ testCheckedDjinnSessionRebuilding = do
     assertEqual "a rebuilt session changed dictionary-independent search"
         (SharedQuery.resultEvidence oldResult)
         (SharedQuery.resultEvidence newResult)
-    assertEqual "an essential class method did not remain uninhabitable"
-        SharedQuery.ProvedUninhabitable $ SharedQuery.resultEvidence oldResult
+    assertEqual "an omitted essential class method produced false negative evidence"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence oldResult
     case Djex.runDjinnQuery withoutClass classRequest of
       Left failure -> assertBool "an absent class lost its lookup diagnostic"
             $ "Class not found: Selectable" `isInfixOf`
@@ -852,8 +852,8 @@ testCoreFacade = do
         [context "Witness" [HTVar "a"]] "essential" (HTCon "Proof")
     essentialB <- expectRight $ inhabit defaultQueryOptions proofEnvironment
         [context "Witness" [HTVar "b"]] "essential" (HTCon "Proof")
-    assertEqual "a type-class method was treated as an essential premise"
-        Unrealizable (reportOutcome essentialA)
+    assertEqual "class-method omission became a source-level refutation"
+        Undecided (reportOutcome essentialA)
     assertEqual "alpha-renaming a context changed its proof power"
         (reportOutcome essentialA) (reportOutcome essentialB)
 
@@ -2749,8 +2749,8 @@ testRankNTypeAtoms = do
         SharedQuery.NoEvidence $ SharedQuery.resultEvidence constrainedHypothesis
 
     -- Opening the contextual result must not make a class method available to
-    -- LJT. Reporting a proof-backed miss distinguishes this from merely
-    -- retaining the positive forall as an incomplete opaque atom.
+    -- LJT. Its omission also prevents a source-level refutation: the complete
+    -- type is inhabited by \_ -> rankNWitness under the nested Given.
     let rankNInput = SharedDeclaration.AbstractTypeDeclaration ()
             (sharedName "RankNContextInput") SharedKind.ProperTypeKind
         rankNProof = SharedDeclaration.AbstractTypeDeclaration ()
@@ -2768,8 +2768,8 @@ testRankNTypeAtoms = do
         "RankNContextInput -> (forall a. RankNWitness a => RankNContextProof)"
     assertEqual "a nested contextual forall exposed its class method"
         [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch methodLeak
-    assertEqual "a supported contextual result stayed opaque instead of opening"
-        SharedQuery.ProvedUninhabitable $ SharedQuery.resultEvidence methodLeak
+    assertEqual "an omitted class method produced false source negative evidence"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence methodLeak
 
     -- Positive opening alone cannot implement this transport: its argument
     -- stays opaque while its result opens with a fresh skolem. The legacy

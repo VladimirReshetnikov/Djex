@@ -237,6 +237,7 @@ Library
 
   Other-Modules:
     Djinn.Internal.CheckedCandidate
+    Djinn.Internal.ContextualInstantiation
     Djinn.Internal.SourceEvidence
     Djinn.Internal.SourceGraph
     Djinn.Internal.SourceGraphKinds
@@ -395,6 +396,7 @@ Test-Suite djex-tests
     RecursorSpec
     ContextHaskellReplaySpec
     ContextEvidenceSpec
+    ContextBudgetSpec
   -- This integration suite deliberately crosses the stable facade, both raw
   -- search APIs, and the HSE compatibility API.
   Build-Depends:
@@ -791,6 +793,15 @@ Test-Suite djinn-source-graph-private-tests
     djinn/src-internal
   Other-Modules:
     DjinnContextSpec
+    ContextualInstantiationSpec
+    ContextualErasureSpec
+    Djinn.Internal.ContextualInstantiation
+    Djinn.Internal.SourceEvidence
+    Djinn.Internal.Instantiation
+    Djinn.Internal.DirectedInstantiation
+    Djinn.Internal.InstantiationEvidence
+    Djinn.Internal.ProofToGenerated
+    Djinn.Internal.ProofCheck.Evidence
     KindGraphCases
     Djinn.Internal.SourceGraph
     Djinn.Internal.SourceGraphKinds

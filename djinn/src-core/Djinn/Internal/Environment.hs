@@ -36,6 +36,8 @@ module Djinn.Internal.Environment (
     preparedEnvironmentPolarizedFunctionPremises,
     preparedEnvironmentNominalPolarizedFunctionPremises,
     preparedEnvironmentLoadedFunctionInstantiation,
+    PreparedRootGivenOpening, prepareRootGivenOpening,
+    rootGivenOpeningSource, rootGivenOpeningContexts, rootGivenOpeningBody,
     preparedEnvironmentQueryUsesParametricData,
     lookupPreparedSynthesisClass, synthesisFunctionSymbol,
     synthesisMethodSymbol,
@@ -55,6 +57,7 @@ import qualified Data.Set as Set
 import Data.Void (Void, absurd)
 import Numeric.Natural (Natural)
 import qualified Language.Haskell.Synthesis.Class as SharedClass
+import Language.Haskell.Synthesis.Constraint (Constraint)
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
@@ -77,7 +80,7 @@ import Djinn.Internal.HCheck.Implementation
     )
 import Djinn.Internal.HTypes
 import Djinn.Internal.Instantiation (closedMonotypeSubtrees)
-import Djinn.Internal.LJTFormula (Formula, Symbol(..))
+import Djinn.Internal.LJTFormula (Formula, Symbol(..), dictionarySymbol)
 import Djinn.Internal.TypeFormula
 import Djinn.Internal.Type
     ( djinnTypeConstructorSymbol
@@ -956,23 +959,24 @@ sealPreparedEnvironment expansion = do
             (_, constraints, _) = SharedType.splitLeadingForalls sourceType
             (schemeBinders, _, _) =
                 SharedType.splitLeadingForalls quantifiedSource
-        if null constraints then pure () else Left $
-            "function " ++ prHSymbolOp name ++
-                ": constrained premises are unsupported"
         implicit <- first
             ((("function " ++ prHSymbolOp name ++ ": ") ++) . show) $
             (fst <$> SharedType.implicitizeLeadingForalls
                 (const (Nothing :: Maybe ())) freshBinder mempty sourceType)
-        let (_, _, body) = SharedType.splitLeadingForalls implicit
+        let (_, _, implicitBody) = SharedType.splitLeadingForalls implicit
+            -- Qualified providers retain their complete opaque scheme.
+            -- A separate conditional rule must discharge their dictionaries.
+            body | null constraints = implicitBody
+                 | otherwise = quantifiedSource
         plans <- first (("function " ++ prHSymbolOp name ++ ": ") ++) $
             compilePolarizedSynthesisFormulaPlans namespace NegativeFormula
                 compiler body
         let spellings =
                 SharedType.freeVariablesInFirstOccurrenceOrder body ++
                 polarizedFormulaPlanSkolems plans
-        schemePremise <- case schemeBinders of
-            [] -> Right Nothing
-            _ : _ -> do
+        schemePremise <- if null schemeBinders && null constraints
+            then Right Nothing
+            else do
                 formula <- first
                     (("function " ++ prHSymbolOp name ++ ": ") ++)
                     $ compileSynthesisFormula compiler quantifiedSource
@@ -1278,6 +1282,48 @@ preparedEnvironmentLoadedFunctionInstantiation
             _ _ _) =
     (structuralSchemes, nominalSchemes, candidates)
 
+-- | A joint opening of the actual source root. Its private constructor
+-- prevents pairing one context's identities with another search body.
+data PreparedRootGivenOpening = PreparedRootGivenOpening
+    (SharedType.Type HSymbol)
+    [Constraint (SharedType.Type HSymbol)]
+    (SharedType.Type HSymbol)
+
+prepareRootGivenOpening
+    :: PreparedEnvironment
+    -> SharedType.Type HSymbol
+    -> SharedType.Type HSymbol
+    -> Either String (Maybe PreparedRootGivenOpening)
+prepareRootGivenOpening prepared source actualBody = do
+    opened <- first show $ fst <$> SharedType.implicitizeLeadingForalls
+        (const (Nothing :: Maybe ())) fresh Set.empty source
+    let (binders, contexts, body) = SharedType.splitLeadingForalls opened
+    if null contexts then Right Nothing else do
+        if null binders &&
+                SharedType.splitLeadingForalls (SharedType.canonicalizeType body) ==
+                SharedType.splitLeadingForalls (SharedType.canonicalizeType actualBody)
+            then Right ()
+            else Left "root-Given opening does not match the exact search body"
+        checkPreparedSynthesisTypesKinds prepared [(KStar, opened)]
+        -- Equal Givens need an explicit selected-slot association in the
+        -- source graph; the pilot never chooses between them silently.
+        if length contexts /= length
+                (SharedCollection.distinctOn dictionarySymbol contexts)
+            then Right Nothing
+            else Right $ Just $ PreparedRootGivenOpening source contexts body
+  where
+    fresh unavailable variable = Just $ fst $ freshPrimedVariable unavailable variable
+
+rootGivenOpeningSource :: PreparedRootGivenOpening -> SharedType.Type HSymbol
+rootGivenOpeningSource (PreparedRootGivenOpening source _ _) = source
+
+rootGivenOpeningContexts
+    :: PreparedRootGivenOpening -> [Constraint (SharedType.Type HSymbol)]
+rootGivenOpeningContexts (PreparedRootGivenOpening _ contexts _) = contexts
+
+rootGivenOpeningBody :: PreparedRootGivenOpening -> SharedType.Type HSymbol
+rootGivenOpeningBody (PreparedRootGivenOpening _ _ body) = body
+
 -- | Translate a checked shared type directly. Stable raw and native queries
 -- meet here after raw compatibility validation and use the exact same
 -- prepared formula-definition cache. The historical unchecked formula
@@ -1517,7 +1563,11 @@ translateFunctionPremises compilePremise prepared = do
             (fst <$> SharedType.implicitizeLeadingForalls
                 (const (Nothing :: Maybe ())) freshBinder mempty
                 source)
-        let (_, _, body) = SharedType.splitLeadingForalls implicit
+        let (_, contexts, implicitBody) = SharedType.splitLeadingForalls implicit
+            -- Coherent transport and datatype views must preserve exactly the
+            -- same qualified opacity as the sealed ordinary premise cache.
+            body | null contexts = implicitBody
+                 | otherwise = SharedType.quantifyFreeVariables (const True) source
         translation <- compilePremise namespace NegativeFormula body
         pure ((Symbol name, translatedFormula translation),
             SharedType.freeVariablesInFirstOccurrenceOrder body ++

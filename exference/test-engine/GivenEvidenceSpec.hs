@@ -1,5 +1,5 @@
 -- | Focused specification for the independently reconstructed Given path.
--- Unregistered until the parent build owner integrates and validates it.
+-- Private checker cases complement live search and native replay acceptance.
 module GivenEvidenceSpec (tests) where
 
 import Control.Monad (forM_)
@@ -81,6 +81,56 @@ tests = testGroup "Independent lexical Given evidence"
       assertEqual "global provider identity changed" [tokenName] $ map fst globals
       forM_ globals $ \(_, ty) -> assertBool "global provider lost its complete source telescope" $
         A.alphaEquivalentTypes (providerScheme 3) ty
+  , testCase "a bare global method infers a constraint-only parameter independently" $ do
+      classes <- unaryClasses
+      let provider = TypeForall [3] [constraint 3] tokenType
+          goal = TypeForall [0] [constraint 0] tokenType
+          expression = E.ExpName tokenName
+      (bindings, schemes) <- providerEnvironment provider
+      checked <- evidence classes bindings schemes goal expression
+      graph <- plainGraph expression checked
+      assertRoot goal graph
+      assertOneGivenApplication graph
+      assertEqual "method lost its implicit selection" 1 $
+        length [() | (_, Q.TermNode _ Q.TypedImplicitTypeApplication{}) <- Q.termGraphNodes graph]
+  , testCase "a bare local method infers a constraint-only parameter independently" $ do
+      classes <- unaryClasses
+      let provider = TypeForall [3] [constraint 3] tokenType
+          goal = TypeForall [0] [constraint 0] $ TypeArrow provider tokenType
+          expression = E.ExpLambda 1 provider $ E.ExpVar 1 tokenType
+      checked <- evidence classes [] Map.empty goal expression
+      graph <- plainGraph expression checked
+      assertRoot goal graph
+      assertOneGivenApplication graph
+  , testCase "constraint-only inference retains joint provider constraints" $ do
+      let d ty = HsConstraint (name "D") [ty]
+          provider = TypeForall [3] [constraint 3, d $ TypeVar 3] tokenType
+          goal = TypeForall [0, 1] [constraint 0, constraint 1, d $ TypeVar 1] $
+            TypeArrow provider tokenType
+          expression = E.ExpLambda 1 provider $ E.ExpVar 1 tokenType
+      classes <- expectRight $ mkStaticClassEnv
+        [HsTypeClass className [0] [], HsTypeClass (name "D") [0] []] []
+      checked <- evidence classes [] Map.empty goal expression
+      graph <- plainGraph expression checked
+      assertEqual "provider constraints chose inconsistent type parameters" [1, 2] $
+        map Q.evidenceBinderSlot $ applications graph
+  , testCase "an unconstrained method cannot borrow a sibling's dictionary" $ do
+      classes <- unaryClasses
+      let provider = TypeForall [3] [constraint 3] tokenType
+          goal = TypeForall [0] [] $ TypeTuple Boxed
+            [TypeForall [] [constraint 0] tokenType, tokenType]
+          expression = E.ExpTuple [E.ExpName tokenName, E.ExpName tokenName]
+      (bindings, schemes) <- providerEnvironment provider
+      plan <- expectRight $ planRigidInstantiation
+        (mkRigidInstantiationContext $ EnvDictionary bindings [] classes) [] goal
+      context <- expectRight $ prepareExpressionCheckContextWithSchemes plan
+        (mkQueryClassEnv classes []) bindings [] schemes goal
+      case checkExpressionInContextWithNestedRigidProvenanceEvidence
+          context (nestedRigidProvenance emptyRigidScope) [] expression of
+        Left RefutableConstraints{} -> pure ()
+        Left ConstraintMismatch{} -> pure ()
+        Left failure -> fail $ "unexpected sibling rejection: " ++ show failure
+        Right _ -> fail "sibling acquired method evidence"
   , testCase "equal root givens retain distinct ordered slots" $ do
       classes <- unaryClasses
       checked <- evidence classes [] Map.empty
@@ -178,9 +228,12 @@ tokenBinding = FunctionBinding tokenType tokenName 0 [constraint 3] [TypeVar 3]
 -- Derive both views from one source declaration instead of pairing a manually
 -- numbered compatibility binding with an independently retained source scheme.
 tokenEnvironment :: IO ([FunctionBinding], Map.Map QualifiedName HsType)
-tokenEnvironment = do
+tokenEnvironment = providerEnvironment $ providerScheme 3
+
+providerEnvironment :: HsType -> IO ([FunctionBinding], Map.Map QualifiedName HsType)
+providerEnvironment provider = do
   inventory <- expectRight $ I.mkInventory K.OpenKindInventory
-    ([ D.ValueDeclaration $ D.ValueSignature () tokenName $ providerScheme 3
+    ([ D.ValueDeclaration $ D.ValueSignature () tokenName provider
      ] :: [D.Declaration SynthesisVariable Void ()])
   prepared <- expectRight $ prepareSynthesisInventory inventory
   pure

@@ -40,7 +40,9 @@ import Language.Haskell.Djex.REPL.Eval (renderInterpreterError)
 import Language.Haskell.Djex.REPL.Scope
   ( ReplScope, ScopeEntry (..), scopeEntries, parseScopeImport )
 import qualified Language.Haskell.Exts.Pretty as HSE
+import qualified Language.Haskell.Exts.Parser as HSE
 import qualified Language.Haskell.Exts.Syntax as HSE
+import Language.Haskell.Exference.TypeFromHaskellSrc (haskellSrcExtsParseMode)
 import qualified Language.Haskell.Synthesis.Name as Name
 import Language.Haskell.Synthesis.Behavioral (BehavioralQuery (..))
 
@@ -171,10 +173,27 @@ candidateCheckExpression :: BehavioralQuery -> String -> String
 candidateCheckExpression query term =
   "let { " ++ fresh ++ " :: " ++ ty ++ "\n; " ++ fresh ++ " = (" ++ term
   ++ "\n) } in let { " ++ name ++ " :: " ++ ty ++ "\n; " ++ name ++ " = "
-  ++ fresh ++ " } in (" ++ behavioralPredicate query ++ "\n)"
+  ++ fresh ++ concatMap (\binder -> " @" ++ binder) explicitBinders
+  ++ " } in (" ++ behavioralPredicate query ++ "\n)"
  where
   name = behavioralName query
   ty = behavioralType query
+  -- The second binding must forward the first binding's exact type choices.
+  -- Implicit subsumption loses a constraint-only parameter before the
+  -- predicate gets to apply it. Only explicitly scoped source binders may
+  -- name these applications; GHC still checks the complete original type.
+  explicitBinders = case HSE.parseTypeWithMode
+      (haskellSrcExtsParseMode "behavioral-alias") ty of
+    HSE.ParseOk parsed -> leading parsed
+    HSE.ParseFailed{} -> []
+  leading parsed = case parsed of
+    HSE.TyParen _ body -> leading body
+    HSE.TyForall _ binders _ body ->
+      maybe [] (map binderName) binders ++ leading body
+    _ -> []
+  binderName binder = HSE.prettyPrint $ case binder of
+    HSE.UnkindedVar _ variable -> variable
+    HSE.KindedVar _ variable _ -> variable
   tokens = Set.fromList $ words $ map
     (\c -> if isAlphaNum c || c == '_' || c == '\'' then c else ' ')
     $ unwords [name, ty, term, behavioralPredicate query]
@@ -220,7 +239,8 @@ runBehavioralWorker = do
       result <- Hint.runInterpreter $ do
         Hint.set [Hint.languageExtensions Hint.:=
           [ Hint.RankNTypes, Hint.ImpredicativeTypes, Hint.ScopedTypeVariables
-          , Hint.TypeApplications, Hint.ExplicitNamespaces, Hint.PatternSynonyms ]]
+          , Hint.TypeApplications, Hint.AllowAmbiguousTypes
+          , Hint.ExplicitNamespaces, Hint.PatternSynonyms ]]
         imports <- either (Catch.throwM . Hint.UnknownError) pure $
           traverse checkedImport importSources
         unless (null paths) $ Hint.loadModules paths

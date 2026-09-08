@@ -108,7 +108,15 @@ modes: six exact full-type replays, 24 observations and 16 empty axiom
 inventories. Its strict build and all 686 unfiltered tests pass. The
 [updated re-triage](docs/reports/2026-09-07-synthesis-retriage.md) promotes
 a concrete global-method inference failure, followed by missing Church
-construction paths; neither is covered by that accepted integration.
+construction paths; neither is covered by that accepted Leant integration.
+The new [constraint-only provider increment](docs/reports/2026-09-08-constraint-only-provider-inference.md)
+infers a unique coherent selection from lexical class assumptions in both
+engines. Four public Haskell API cases synthesize global/local constrained
+providers and replay their exact full signatures with distinct dictionary
+payloads. Explicit-signature rendering preserves the chosen type arguments;
+ambiguity, scope, and dictionary-ownership guards remain. Loaded Haskell
+provider metadata, implicit-root behavioral scoping, and native Lean method
+integration are still separate acceptance gates.
 The ordinary-data matrix now passes eight
 scenarios in each Haskell engine, including tuple fields and independently typed
 recursive inputs. Exference's complete-case graphs and protected queues preserve
@@ -123,10 +131,10 @@ marks priority 1's supported-fragment Haskell elaboration complete: all 101
 CLI tests pass, including first/best/all repair selection, exact GHC replay,
 and retention of the original failed-candidate sample when its elaboration
 retry times out under the same deadline. Priorities 2–4 remain open. Next is
-inferring a global method's fresh type parameters from lexical class assumptions
-when its result type cannot determine them, within the existing `Type 0`
-non-overlap guard. The Leant prototype builds but
-fails all six focused positive cases; it is not accepted support. Then address
+integrating the accepted engine inference into complete frontend provider
+metadata, within the existing `Type 0` non-overlap guard. The Leant prototype's
+last run, before this engine increment, built but failed all six focused
+positive cases; it is not accepted support. Then address
 the missing Church construction paths and remaining defaulted cells, with
 supplied tree folds as an independent delivery. Two tested Exference ranking
 changes still produced 256 false `maybeEither` candidates and were restored.
@@ -642,8 +650,9 @@ signatures and compiler-checks the generated terms under its documented
 environment and partiality assumptions.
 
 The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) records
-accepted elaboration, case-analysis, and Haskell fold milestones, then orders
-Lean fold acceptance, production dictionary evidence, and broader behavior.
+accepted elaboration, case-analysis, Haskell folds, and constraint-only engine
+inference. Next are frontend provider integration and missing Church
+constructions, with supplied tree folds as an independent delivery.
 The [original roadmap](docs/reports/2026-09-06-synthesis-next-priorities.md)
 retains the full completion requirements; prepared runners and isolated
 renderers do not establish production synthesis coverage.

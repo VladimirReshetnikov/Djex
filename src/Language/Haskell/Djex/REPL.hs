@@ -89,6 +89,7 @@ import Language.Haskell.Djex.HaskellSrc
   ( ParsedSourceType
   , parseSourceTypeInScope
   , parsedSourceType
+  , parsedSourceTypeVariableNames
   )
 import Language.Haskell.Djex.Package
   ( PackageOperation (DownloadOperation, InstallOperation)
@@ -769,7 +770,7 @@ runQuery sourceName query state = do
     Left failure -> diagnosticFailure failure
     Right request -> presentBehavioralCandidates options context behavioral
         (renderDjinnCandidateExpression qualification . projected)
-        (elaborateBehavioral $ defaultRenderOptions id)
+        (elaborateBehavioral parsed $ defaultRenderOptions id)
         (renderDefinitionOrExpression renderDjinnCandidateDefinition
           renderDjinnCandidateExpression options . projected)
         (\candidate -> (if presentationRanking options == LegacyCandidateRanking
@@ -792,7 +793,7 @@ runQuery sourceName query state = do
     Left failure -> diagnosticFailure failure
     Right request -> presentBehavioralCandidates options context behavioral
         (renderExferenceCandidateExpression qualification . projected)
-        (elaborateBehavioral $ defaultRenderOptions $ const "x")
+        (elaborateBehavioral parsed $ defaultRenderOptions $ const "x")
         (renderDefinitionOrExpression renderExferenceCandidateDefinition
           renderExferenceCandidateExpression options . projected)
         (\candidate -> (candidateQualityCost (presentationRanking options)
@@ -807,13 +808,19 @@ runQuery sourceName query state = do
       . typedCandidateCompatibility
     expression = functionClauseExpression . candidateOutput . projected
 
-  elaborateBehavioral renderOptions candidate = case typedCandidateTermGraph candidate of
+  elaborateBehavioral parsed renderOptions candidate = case typedCandidateTermGraph candidate of
     Left failure -> ("graph unavailable: " ++ show failure, Left "no source graph for this candidate")
     Right graph ->
       ( "graph present; root=" ++ show (termGraphRoot graph)
           ++ "; nodes=" ++ show (length $ termGraphNodes graph)
-      , either (Left . show) Right $ TypedHaskell.renderHaskellTermGraph renderOptions graph
+      , either (Left . show) Right $ case traverse (`Map.lookup` sourceNames) $ parsedSourceType parsed of
+          Nothing -> TypedHaskell.renderHaskellTermGraph renderOptions graph
+          Just signature -> TypedHaskell.renderHaskellTermGraphAtSignature renderOptions signature graph
       )
+   where
+    sourceNames = Map.fromList
+      [(FlexibleVariable identifier, spelling)
+      | (spelling, identifier) <- Map.toList $ parsedSourceTypeVariableNames parsed]
 
   providerPrice options name = Map.findWithDefault
     (defaultCandidateProviderCost name) name $ presentationProviderCosts options

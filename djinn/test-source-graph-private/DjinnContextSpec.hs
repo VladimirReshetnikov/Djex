@@ -14,7 +14,7 @@ import Djinn.Internal.Environment (prepareGroundSynthesisEnvironment)
 import Djinn.Internal.SourceGraph (SourceGraphError, checkSourceClauseGraph)
 import Djinn.Internal.SourceTypingContext (sourceTypingContext)
 import Language.Haskell.Synthesis.Constraint (Constraint(..))
-import Language.Haskell.Synthesis.Declaration (Declaration(..), TypeParameter(..))
+import Language.Haskell.Synthesis.Declaration (Declaration(..), TypeParameter(..), ValueSignature(..))
 import qualified Language.Haskell.Synthesis.Environment as E
 import qualified Language.Haskell.Synthesis.Generated as G
 import Language.Haskell.Synthesis.Kind (Kind(..))
@@ -72,6 +72,62 @@ tests = testGroup "Djinn lexical Given source checker (not synthesis)"
         lambda ["p"] $ local "p"
       assertEqual "result-selected application used a different Given"
         (introduced graph) (applied graph)
+
+  , testCase "a bare global method infers its constraint-only type parameter" $ do
+      let method = forallWith ["b"] [given "C" b] token
+      graph <- positive (declarations ++ [ValueDeclaration $ ValueSignature () (name "method") method])
+        (forallWith ["a"] [given "C" a] token) $ G.Global $ name "method"
+      assertEqual "global method lost its exact Given" (introduced graph) (applied graph)
+      assertEqual "global method did not retain its inferred type application" 1 $
+        length [() | (_, Q.TermNode _ Q.TypedImplicitTypeApplication{}) <- Q.termGraphNodes graph]
+
+  , testCase "a bare local method infers its constraint-only type parameter" $ do
+      let method = forallWith ["b"] [given "C" b] token
+      graph <- positive declarations
+        (forallWith ["a"] [given "C" a] $ arrow method token) $ lambda ["p"] $ local "p"
+      assertEqual "local method lost its exact Given" (introduced graph) (applied graph)
+
+  , testCase "constraint-only inference solves the complete context coherently" $ do
+      let method = forallWith ["x"] [given "C" $ var "x", given "D" $ var "x"] token
+      graph <- positive (declarations ++ [classDeclaration "D" []])
+        (forallWith ["a", "b"] [given "C" a, given "C" b, given "D" b] $
+          arrow method token) $ lambda ["p"] $ local "p"
+      assertEqual "constraints did not jointly select b" [1, 2] $
+        map Q.evidenceBinderSlot $ applied graph
+
+  , testCase "constraint-only inference matches a function-shaped class argument" $ do
+      let method = forallWith ["b"] [given "C" $ arrow b token] token
+      graph <- positive declarations
+        (forallWith ["a"] [given "C" $ arrow a token] $ arrow method token) $
+        lambda ["p"] $ local "p"
+      assertEqual "function-shaped constraint lost its Given" (introduced graph) (applied graph)
+
+  , testCase "a lexical Given can determine a whole impredicative selection" $ do
+      let identity = forallWith ["x"] [] $ arrow (var "x") $ var "x"
+          method = forallWith ["b"] [given "C" b] token
+      graph <- positive declarations
+        (forallWith [] [given "C" identity] $ arrow method token) $ lambda ["p"] $ local "p"
+      assertEqual "impredicative method lost its Given" (introduced graph) (applied graph)
+
+  , testCase "different lexical type instantiations remain explicitly ambiguous" $ do
+      let method = forallWith ["x"] [given "C" $ var "x"] token
+      negative "ambiguous lexical Given type instantiation" declarations
+        (forallWith ["a", "b"] [given "C" a, given "C" b] $ arrow method token) $
+        lambda ["p"] $ local "p"
+
+  , testCase "constraint matching cannot capture a Given's quantified variable" $ do
+      let method = forallWith ["x"]
+            [given "C" $ forallWith ["b"] [] $ arrow b $ var "x"] token
+          identity = forallWith ["a"] [] $ arrow a a
+      negative "no exact lexical given" declarations
+        (forallWith [] [given "C" identity] $ arrow method token) $
+        lambda ["p"] $ local "p"
+
+  , testCase "constraint-only inference cannot combine inconsistent selections" $ do
+      let method = forallWith ["x"] [given "C" $ var "x", given "D" $ var "x"] token
+      negative "no exact lexical given" (declarations ++ [classDeclaration "D" []])
+        (forallWith ["a", "b"] [given "C" a, given "D" b] $ arrow method token) $
+        lambda ["p"] $ local "p"
 
   , testCase "provider constraints retain their own order while selecting root slots" $ do
       let binary = forallWith ["x", "y"] [given "C" $ var "y", given "C" $ var "x"] $

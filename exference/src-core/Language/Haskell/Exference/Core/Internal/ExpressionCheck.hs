@@ -497,6 +497,7 @@ data CheckState = CheckState
   , checkEvidenceGivens :: [CheckedGiven]
   , checkNextContextIntroduction :: !Natural
   , checkConstraints :: [ScopedConstraint]
+  , checkGivenInference :: [(IntSet.IntSet, [ScopedConstraint])]
   , checkRigidPlan :: !RigidInstantiationPlan
   , checkRigidScope :: !RigidScope
   , checkCandidateRigidIds :: !IntSet.IntSet
@@ -743,6 +744,7 @@ checkValidatedExpression provenCandidateRigids
         , checkEvidenceGivens = []
         , checkNextContextIntroduction = 0
         , checkConstraints = []
+        , checkGivenInference = []
         , checkRigidPlan = rigidPlan
         , checkRigidScope = emptyRigidScope
         , checkCandidateRigidIds = candidateRigids
@@ -753,10 +755,11 @@ checkValidatedExpression provenCandidateRigids
         , checkTypeApplicationOrigins = []
         , checkProviderOccurrences = []
         }
-  (checkedResult, finalState) <- runStateT
-    (checkOpenedTelescope rootOpenings $
-      checkAgainst IntMap.empty expression checkedGoal)
-    initialState
+  (checkedResult, finalState) <- runStateT (do
+    checked <- checkOpenedTelescope rootOpenings $
+      checkAgainst IntMap.empty expression checkedGoal
+    inferLexicalProviderSelections
+    pure checked) initialState
   let substitutions = checkSubstitutions finalState
       rigidAlpha = checkRigidAlpha finalState
       unmatchedRigids = IntSet.toAscList $ IntSet.difference
@@ -1296,13 +1299,19 @@ checkValidatedExpression provenCandidateRigids
       [] -> throwCheck $ UnknownBinding name
       binding : _ -> do
         let constraints = functionConstraints binding
+        previousSupply <- gets checkFlexibleIds
         (freshType :| _, freshConstraints) <- freshenTypes
           (functionBindingType binding :| []) constraints
         localGivens <- gets checkLocalGivens
+        let fresh = IntSet.filter
+              (not . (`identifierIsReserved` previousSupply)) $ IntSet.unions $
+                flexibleFreeIdentifiers freshType :
+                  map (IntSet.unions . map flexibleFreeIdentifiers . constraint_params) freshConstraints
+            obligations = scopedConstraints localGivens freshConstraints
         modify' $ \current -> current
           { checkConstraints =
-              scopedConstraints localGivens freshConstraints
-                ++ checkConstraints current
+              obligations ++ checkConstraints current
+          , checkGivenInference = (fresh, obligations) : checkGivenInference current
           }
         pure freshType
 
@@ -1333,9 +1342,9 @@ checkValidatedExpression provenCandidateRigids
             (IntSet.toAscList $ flexibleIdentifiers $ checkedResultType original)
             (checkFlexibleIds current)
         }
-      consume original
+      consume IntSet.empty [] original
      where
-      consume checked = case checkedResultType checked of
+      consume fresh obligations checked = case checkedResultType checked of
         TypeForallNative (binder : remaining) contexts body -> do
           selected <- freshTypeVariable
           let result = SharedType.canonicalizeType $
@@ -1343,7 +1352,8 @@ checkValidatedExpression provenCandidateRigids
                   if null remaining && null contexts then body
                     else TypeForallNative remaining contexts body
           recordAliveType result
-          consume $ unaryCheckedTerm result
+          consume (fresh `IntSet.union` flexibleFreeIdentifiers selected) obligations $
+            unaryCheckedTerm result
             (CheckedImplicitTypeApplication selected) checked
         source@(TypeForallNative [] constraints@(_ : _) body) -> do
           localGivens <- gets checkLocalGivens
@@ -1352,9 +1362,13 @@ checkValidatedExpression provenCandidateRigids
             { checkConstraints = scopedConstraints localGivens constraints
                 ++ checkConstraints current }
           recordAliveType source
-          consume $ unaryCheckedTerm body
+          consume fresh (obligations ++ scopedConstraints localGivens constraints) $
+            unaryCheckedTerm body
             (CheckedContextApplication evidenceGivens) checked
-        _ -> pure checked
+        _ -> do
+          unless (null obligations) $ modify' $ \current -> current
+            { checkGivenInference = (fresh, obligations) : checkGivenInference current }
+          pure checked
 
     -- Visible application consumes exactly one binder. Contexts attached to
     -- a multi-binder layer become obligations only after its last binder has
@@ -2763,6 +2777,34 @@ alignRigidAlpha originalLeft originalRight = go originalLeft originalRight
             }
 
   mismatch = throwCheck $ TypeMismatch originalLeft originalRight
+
+-- Run after ordinary expression/result inference, while retaining each use's
+-- lexical snapshot. Fresh provider variables are the only assignable ones;
+-- the unifier's existing rigid-scope validation still checks every selection.
+-- A newly determined shared parameter can resolve another provider group, so
+-- repeat only while the substitution grows. No dictionary evidence is added
+-- here: final constraint solving and graph sealing independently discharge it.
+inferLexicalProviderSelections :: Check ()
+inferLexicalProviderSelections = do
+  before <- gets checkSubstitutions
+  groups <- gets checkGivenInference
+  mapM_ inferGroup groups
+  after <- gets checkSubstitutions
+  unless (before == after) inferLexicalProviderSelections
+ where
+  inferGroup (fresh, obligations) = do
+    substitutions <- gets checkSubstitutions
+    let eligible = fresh `IntSet.difference` IntMap.keysSet substitutions
+    unless (IntSet.null eligible) $ do
+      normalized <- mapM normalize obligations
+      case uniqueGivenInstantiation 4096 eligible normalized of
+        Nothing -> pure ()
+        Just selected -> mapM_
+          (\(variable, image) -> unifyTypes (TypeVar variable) image) $
+            IntMap.toAscList selected
+
+  normalize (ScopedConstraint givens required) = (,)
+    <$> mapM (traverse zonk) givens <*> traverse zonk required
 
 unifyTypes :: HsType -> HsType -> Check ()
 unifyTypes left right = do

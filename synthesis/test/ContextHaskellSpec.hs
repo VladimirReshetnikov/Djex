@@ -17,7 +17,28 @@ type Graph = Q.TermGraph Ty Int
 
 contextHaskellTests :: TestTree
 contextHaskellTests = testGroup "Haskell lexical context graph rendering"
-  [ testCase "annotate a dictionary-independent body with its complete source context" $ do
+  [ testCase "a constraint-only root requires its lexical signature" $
+      H.renderHaskellTermGraph options constraintOnlyGraph @?= Left H.HaskellGraphRootSignatureRequired
+  , testCase "a matching full signature scopes the actual constraint-only selection" $ do
+      let signature = T.ForallType ["a"] [classC $ T.TypeVariable "a"] unit
+      rendered <- either (fail . show) pure $
+        H.renderHaskellTermGraphAtSignature options signature constraintOnlyGraph
+      contains "Fixture.provider @(a)" rendered
+      assertBool "the selected outer binder was re-generalized" $
+        not $ "forall djexSkolem" `isInfixOf` rendered
+  , testCase "a different result signature cannot name a graph's skolems" $ do
+      let signature = T.ForallType ["a"] [classC $ T.TypeVariable "a"] $ arrow unit unit
+      H.renderHaskellTermGraphAtSignature options signature constraintOnlyGraph @?=
+        Left H.HaskellGraphRootSignatureMismatch
+  , testCase "an invalid source binder cannot enter generated Haskell" $ do
+      let signature = T.ForallType ["a; bad"] [classC $ T.TypeVariable "a; bad"] unit
+      H.renderHaskellTermGraphAtSignature options signature constraintOnlyGraph @?=
+        Left H.HaskellGraphRootSignatureMismatch
+  , testCase "a free source variable cannot authorize a root signature" $ do
+      let signature = T.ForallType ["a"] [classC $ T.TypeVariable "b"] unit
+      H.renderHaskellTermGraphAtSignature options signature constraintOnlyGraph @?=
+        Left H.HaskellGraphRootSignatureMismatch
+  , testCase "annotate a dictionary-independent body with its complete source context" $ do
       let source = qualified [classC unit] $ arrow unit unit
           graph = checked $ Q.TermGraphSource (nid 0)
             [ (nid 0, node source $ intro 0 1 source)
@@ -150,6 +171,20 @@ contextHaskellTests = testGroup "Haskell lexical context graph rendering"
 options :: G.RenderOptions Int
 options = G.defaultRenderOptions $ const "x"
 
+constraintOnlyGraph :: Graph
+constraintOnlyGraph = checked $ Q.TermGraphSource (nid 0)
+  [ (nid 0, node source $ Q.TypedForallIntroduction (oid 0) (nid 1) $
+        Q.ForallIntroductionWitness source rigid opened)
+  , (nid 1, node opened $ intro 1 2 opened)
+  , (nid 2, node unit $ apply 2 3 opened [given 1 0])
+  , (nid 3, node opened $ Q.TypedImplicitTypeApplication (oid 3) (nid 4) $
+        Q.ImplicitTypeApplicationWitness source rigid opened)
+  , (nid 4, node source $ Q.TypedGlobal (oid 4) provider)
+  ]
+ where
+  source = T.ForallType [bound] [classC $ variable bound] unit
+  opened = qualified [classC rigid] unit
+
 rendering :: Graph -> IO String
 rendering graph = case H.renderHaskellTermGraph options graph of
   Left failure -> fail $ "context rendering failed: " ++ show failure
@@ -181,16 +216,16 @@ bound = T.FlexibleVariable "a"
 rigid :: Ty
 rigid = variable $ T.RigidVariable "contextRendererOpening"
 
-unit :: Ty
+unit :: T.Type variable
 unit = T.TupleType Boxed []
 
-arrow :: Ty -> Ty -> Ty
+arrow :: T.Type variable -> T.Type variable -> T.Type variable
 arrow = T.FunctionType
 
-qualified :: [Constraint Ty] -> Ty -> Ty
+qualified :: [Constraint (T.Type variable)] -> T.Type variable -> T.Type variable
 qualified = T.ForallType []
 
-classC, classD :: Ty -> Constraint Ty
+classC, classD :: T.Type variable -> Constraint (T.Type variable)
 classC ty = Constraint (right $ parseName "Fixture.C") [ty]
 classD ty = Constraint (right $ parseName "Fixture.D") [ty]
 

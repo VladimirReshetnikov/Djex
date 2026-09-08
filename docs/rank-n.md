@@ -50,6 +50,17 @@ The added search families are positive-only beyond the historical structural
 core: reaching a resource bound makes an empty search **inconclusive**, never a
 proof of non-inhabitation.
 
+Both engines can also infer a provider's fresh constraint-only parameters
+from a unique coherent match against lexical class assumptions, including
+whole polymorphic selections. Djinn charges matching to its source-checker
+fuel; Exference permits at most 4,096 candidate matches per invocation and
+does not certify uniqueness after exhaustion. Scope, occurs, complete-source
+scheme and exact dictionary checks still apply; ambiguity does not acquire
+dictionary evidence. The [constraint-only inference report](reports/2026-09-08-constraint-only-provider-inference.md)
+describes the engine/API tests and explicit-signature Haskell rendering.
+Loaded Haskell provider metadata, implicit-root behavioral scoping, and Leant's
+global-method integration remain separate frontend acceptance gates.
+
 The comprehensive account includes derivations, implementation paths, realistic
 examples, and the distinction between practical coverage and a decision
 procedure: [PDF](rank-n-impredicative-synthesis.pdf) and

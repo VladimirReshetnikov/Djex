@@ -7,22 +7,26 @@ or numbering of the active **implement priorities 1–4** goal. The
 
 ## Current decision and next delivery gates
 
-**September 8 re-triage: fix constraint-only provider instantiation next, then
-the missing Church construction paths.** The global-method prototype has a
-small reproducible failure; two simple search-ranking experiments have failed
-their behavioral gate and were restored. This changes delivery order, not the
-scope of original priorities 1–4.
+**September 8 re-triage: finish frontend integration of constraint-only provider
+inference, then the missing Church construction paths.** The
+[engine increment](2026-09-08-constraint-only-provider-inference.md) adds unique,
+coherent lexical-Given inference in both engines and four public Haskell API
+synthesis/replay cases. Loaded-provider source schemes, implicitly quantified
+behavioral roots, and native Leant integration remain separate gates. Two
+simple search-ranking experiments failed their behavioral gate and were
+restored. This changes delivery order, not the scope of original priorities 1–4.
 
 Priority 1's supported-fragment Haskell elaboration remains accepted. The
 published local `Type 0` context route passes its 39-cell matrix; the latest
 published Leant graph integration passes nine native cells and all 686 unit
 tests. These results belong to their recorded revisions. The newer global
-provider prototype builds but fails all six focused positive cases, while
-seven negative controls pass. It has no full-suite or native-method acceptance.
+provider prototype's last run, before the engine increment, built but failed
+all six focused positive cases, while seven negative controls passed. It has
+no full-suite or native-method acceptance for the new engine increment.
 
 | Order | Delivery | Required acceptance |
 | --- | --- | --- |
-| 1 | Infer a method's type arguments from its lexical class assumptions (priority 3) | Keep the forced `Ctx.C.out : {α : Type} → [Ctx.C α] → Nat` fixture and its goal `∀ (α : Type), [Ctx.C α] → Nat`. Infer only fresh provider parameters; preserve exact source schemes, scopes, provider ownership and dictionary evidence. First close the six focused positives, then ordinary/where × Djinn/Exference/Both native replay, payload-sensitive observations, actual False controls, discovery/cache isolation, the existing local-context matrix and the complete unit suite. |
+| 1 | Integrate constraint-only inference through complete frontend provider schemes (priority 3) | The engine/API increment is implemented. Preserve the forced `Ctx.C.out : {α : Type} → [Ctx.C α] → Nat` fixture and goal `∀ (α : Type), [Ctx.C α] → Nat`. Rebuild Leant and close the six focused positives, then ordinary/where × Djinn/Exference/Both native replay, payload-sensitive observations, actual False controls, discovery/cache isolation, the existing local-context matrix and complete unit suite. In Haskell, diagnose loaded-provider scheme closure and explicit provider admission; separately support implicit-root behavioral scoping without changing binder order. |
 | 2 | Make missing Church constructions reachable within the existing limits (priority 4) | Diagnose `maybeEither` branch admission and `foldl1`'s flexible-goal construction separately from rendering. Require a generic rule change supported by a concrete failed derivation, followed by the original live queries, exact full-signature replay and unchanged false controls. Keep reference witnesses out of provider inventories. Extend the remaining total/defaulted cells with each accepted change. |
 | 3 | Accept a supplied tree fold with an accumulator (priority 2; independent of steps 1–2) | Use the prepared polymorphic `foldTree`/constructor inventory and order-sensitive observations in both Haskell engines and all three Lean modes. Require full-type behavior, termination-checked replay, actual False controls and the original limits. The fixture is prepared, not executed; reliable native verification is already an accepted foundation. |
 | 4 | Preserve selected dictionary identity, then extend evidence derivation (priority 3) | Keep overlap guards until a forced equal-predicate outer/inner fixture retains the selected introduction and ordered slot, including distinct payload behavior in Haskell and Lean. Follow with conditional providers and superclass projections as separately checked extensions. A unique type substitution does not identify a dictionary occurrence. |
@@ -36,6 +40,12 @@ cells alongside relevant increments; do not redefine completion around an
 easier batch. Heavy runtime acceptance remains serialized.
 
 ## What changed in this re-triage
+
+The [constraint-only inference report](2026-09-08-constraint-only-provider-inference.md)
+supersedes the engine failure diagnosis below with implementation and tests.
+It retains the remaining frontend failures rather than counting behavioral
+preflight as synthesis acceptance. The earlier diagnostic evidence below
+continues to belong to its recorded sources and settings.
 
 The [diagnostic receipt](../../test-church/receipts/synthesis-retriage-diagnostics.json) embeds selected process captures, the failed
 method fixture, tested heuristic diffs and source hashes. It is a diagnostic
@@ -510,7 +520,7 @@ An unsuccessful proof attempt remains inconclusive.
 | --- | --- | --- |
 | Exact accepted-candidate provenance and reproducible replay | Complete 39-cell matrix and 680-test suite accepted | Retain own-Variant graph/renderer/engine observations, non-forcing diagnostics and direct kernel pinning. Retain the accepted bounded request capture and its whole-record omission accounting. Keep the accepted empty-environment repair and lifecycle controls as regressions; defer a general tracing framework. |
 | Routing-test maintenance | Incremental when a boundary is touched | Replace brittle source-text counts with executable routing or boundary controls where practical, preserving coverage. Do not turn this into a broad cleanup milestone. |
-| Constraint-only provider instantiation | Next implementation milestone | Close the forced method fixture without adding an ordinary argument that determines its type parameter. Infer only fresh provider parameters from coherent lexical Givens; retain source schemes, scopes and actual dictionary evidence. The current prototype's six positive failures remain unaccepted. |
+| Constraint-only provider instantiation | Engine/API increment implemented; frontend integration next | Keep the forced method fixture without adding an ordinary argument. Native Leant replay and discovery/cache tests remain required. Haskell loaded-provider metadata and implicit-root alias scoping are now concrete follow-ups; preflight success is not candidate acceptance. |
 | Selected dictionary occurrence and complete context metadata | Required before relaxing overlap guards | Separately demonstrate differing outer/inner payload behavior under faithful scoped capture in Haskell and Lean. A unique type substitution, graph identity or successful compilation alone does not establish selected dictionary ownership. Extend conditional providers and superclass evidence individually. |
 | Tree folds and accumulator programs | Independent next recursion delivery; fixture prepared, not run | Use the polymorphic tree accumulator to test order-sensitive composition, retaining exact recursor inventories, full-signature behavior and termination checking. Native verification repair is already accepted. |
 | Flexible-goal construction and branch diagnostics | Next Church-search investigation | Trace one missing derivation through actual rule admission, substitutions and queue decisions. Distinguish an unavailable construction from an admitted but delayed branch. Count every alternative against existing budgets and check the resulting term independently. Public graph-shape histograms alone cannot locate the cause. |

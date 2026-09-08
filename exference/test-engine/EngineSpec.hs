@@ -17,7 +17,7 @@ import Test.Tasty.HUnit
 
 import Language.Haskell.Exference.Core.Candidate
   ( ExferenceCandidateDetails (..), emptyExferenceSourceTypeVariableHints )
-import Language.Haskell.Exference.Core.ConstraintSolver (filterUnresolved)
+import Language.Haskell.Exference.Core.ConstraintSolver (filterUnresolved, uniqueGivenInstantiation)
 import Language.Haskell.Exference.Core.Expression
   ( Expression (..), toGeneratedExpression )
 import Language.Haskell.Exference.Core.ExferenceStats (ExferenceStats (..))
@@ -193,6 +193,79 @@ tests = testGroup "Exference private engine boundaries"
             $ E.queryGoalType query
       singleOptionValidationStrictnessForTesting
         target sourceHints environment query @?= Right ()
+  , testGroup "constraint-only lexical instantiation"
+      [ testCase "only fresh provider variables can be solved" $ do
+          let c ty = HsConstraint (name "C") [ty]
+              request = [([c $ TypeVar 0], c $ TypeVar 9)]
+          uniqueGivenInstantiation 20 (IntSet.singleton 9) request @?=
+            Just (IntMap.singleton 9 $ TypeVar 0)
+          uniqueGivenInstantiation 20 IntSet.empty request @?= Nothing
+      , testCase "joint constraints resolve an individually ambiguous parameter" $ do
+          let c ty = HsConstraint (name "C") [ty]
+              d ty = HsConstraint (name "D") [ty]
+              givens = [c $ TypeConstant 0, c $ TypeConstant 1, d $ TypeConstant 1]
+          uniqueGivenInstantiation 30 (IntSet.singleton 9)
+            [(givens, c $ TypeVar 9), (givens, d $ TypeVar 9)] @?=
+              Just (IntMap.singleton 9 $ TypeConstant 1)
+      , testCase "matching respects the work guard before certifying uniqueness" $ do
+          let c ty = HsConstraint (name "C") [ty]
+              one = [([c $ TypeConstant 0], c $ TypeVar 9)]
+              two = [([c $ TypeConstant 0, c $ TypeConstant 1], c $ TypeVar 9)]
+          uniqueGivenInstantiation 0 (IntSet.singleton 9) one @?= Nothing
+          uniqueGivenInstantiation 1 (IntSet.singleton 9) one @?=
+            Just (IntMap.singleton 9 $ TypeConstant 0)
+          uniqueGivenInstantiation 1 (IntSet.singleton 9) two @?= Nothing
+          uniqueGivenInstantiation 20 (IntSet.singleton 9) two @?= Nothing
+      , testCase "alpha-equivalent polytype selections do not create ambiguity" $ do
+          let c ty = HsConstraint (name "C") [ty]
+              identity x = TypeForall [x] [] $ TypeArrow (TypeVar x) (TypeVar x)
+              givens = [c $ identity 1, c $ identity 2]
+          uniqueGivenInstantiation 20 (IntSet.singleton 9)
+            [(givens, c $ TypeVar 9)] @?= Just (IntMap.singleton 9 $ identity 1)
+      , testCase "a quantified Given cannot donate its bound variable" $ do
+          let c ty = HsConstraint (name "C") [ty]
+              actual = TypeForall [0] [] $ TypeArrow (TypeVar 0) (TypeVar 0)
+              wanted = TypeForall [1] [] $ TypeArrow (TypeVar 1) (TypeVar 9)
+          uniqueGivenInstantiation 20 (IntSet.singleton 9) [([c actual], c wanted)] @?= Nothing
+      , testCase "live global method search retains the exact inferred Given graph" $ do
+          let c ty = HsConstraint (name "C") [ty]
+              token = TypeCons $ name "Token"
+              providerName = name "method"
+              provider = TypeForall [3] [c $ TypeVar 3] token
+              goal = TypeForall [0] [c $ TypeVar 0] token
+              input = identityInput { E.input_goalType = goal, E.input_maxSteps = 32 }
+          classes <- expectRight $ mkStaticClassEnv [HsTypeClass (name "C") [0] []] []
+          (bindings, schemes) <- preparedValueEnvironment providerName provider
+          environment <- expectRight $ E.mkExferenceEnvironmentWithSchemes
+            (EnvDictionary bindings [] classes) schemes
+          target <- checkedIdentifierTarget "inferredMethod"
+          options <- expectRight $ E.checkExferenceOptions $
+            E.querySearchOptions $ legacyInputQuery input
+          results <- expectRight $
+            E.findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments Map.empty
+              target (emptyExferenceSourceTypeVariableHints goal) environment
+              (legacyInputQuery input) options
+          let candidates = concatMap
+                (SharedSearch.batchCandidates . SharedQuery.resultSearch) results
+          candidate <- case candidates of
+            first : _ -> pure first
+            [] -> fail "constraint-only global method search produced no candidate"
+          graph <- TypedCandidate.foldTypedCandidateGraph
+            (\_ reason -> fail $ "method candidate has no graph: " ++ show reason)
+            (\_ owned -> pure owned)
+            (\_ associated -> pure $ Association.checkedTypeApplicationCertificateGraph associated)
+            candidate
+          let introductions =
+                [ Typed.contextEvidenceBinder $ Typed.givenContextEvidence occurrence slot
+                | (_, Typed.TermNode _ (Typed.TypedContextIntroduction occurrence _ witness)) <- Typed.termGraphNodes graph
+                , (slot, _) <- zip [0 ..] $ Typed.contextIntroductionConstraints witness ]
+              applications =
+                [ Typed.contextEvidenceBinder proof
+                | (_, Typed.TermNode _ (Typed.TypedContextApplication _ _ witness)) <- Typed.termGraphNodes graph
+                , proof <- Typed.contextApplicationEvidence witness ]
+          length introductions @?= 1
+          applications @?= introductions
+      ]
   , testGroup "serial ordered step actions"
       [ testCase "preserve complete finite traces and typed candidates" $ do
           let ample = IdentifierCapacities 1000 1000 1000 1000

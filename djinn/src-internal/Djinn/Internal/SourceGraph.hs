@@ -297,24 +297,123 @@ consumeForall source selected = case source of
   _ -> failCheck "source type application does not consume a forall binder"
 
 instantiate :: Q.TermNodeId -> Check Q.TermNodeId
-instantiate node = do
-  ty <- nodeType node
-  case ty of
-    T.ForallType [] (_ : _) _ -> applyContext node ty >>= instantiate
-    T.ForallType{} -> do
-      selected <- freshVariable False
-      result <- consumeForall ty selected
-      occurrence <- freshOccurrence
-      instantiated <- emit result $ Q.TypedImplicitTypeApplication occurrence node
-        $ Q.ImplicitTypeApplicationWitness ty selected result
-      instantiate instantiated
-    _ -> pure node
+instantiate = consume Set.empty
+ where
+  consume variables node = do
+    ty <- nodeType node
+    case ty of
+      T.ForallType [] constraints@(_ : _) _ -> do
+        inferGivenSelections variables constraints
+        applyContext node ty >>= consume variables
+      T.ForallType{} -> do
+        selected <- freshVariable False
+        result <- consumeForall ty selected
+        occurrence <- freshOccurrence
+        instantiated <- emit result $ Q.TypedImplicitTypeApplication occurrence node
+          $ Q.ImplicitTypeApplicationWitness ty selected result
+        consume (variables `Set.union` T.freeVariables selected) instantiated
+      _ -> pure node
+
+-- Expected results and value arguments get the first opportunity to determine
+-- a provider's parameters. A parameter occurring only in its context may then
+-- be selected by the actual lexical Givens. Match every required constraint
+-- coherently; only this use's fresh, still-unsolved parameters are assignable.
+-- This establishes type selections, not dictionary identities. applyContext
+-- separately records the exact lexical introduction/slot after substitution.
+-- Ambiguous substitutions remain unsupported at this independent checker
+-- boundary until search can retain the selection that its proof made.
+inferGivenSelections :: Set.Set Variable -> [Constraint Type] -> Check ()
+inferGivenSelections fresh constraints = do
+  wanted <- mapM (traverse zonk) constraints
+  available <- gets checkGivens >>= mapM (traverse zonk . fst)
+  state <- get
+  let givenVariables = Set.unions $ map
+        (Set.unions . map T.freeVariables . constraintArguments) available
+      variables = fresh `Set.intersection` Map.keysSet (checkMetas state)
+        `Set.difference` Map.keysSet (checkSubstitutions state)
+        `Set.difference` givenVariables
+      needed = Set.unions $ map
+        (Set.unions . map T.freeVariables . constraintArguments) wanted
+  unless (Set.null $ variables `Set.intersection` needed) $ do
+    choices <- collect variables available wanted Map.empty []
+    case choices of
+      [] -> pure () -- Keep the ordinary exact-discharge diagnostic.
+      [selected] -> mapM_ (uncurry bindMeta) $ Map.toAscList selected
+      _ -> failCheck "ambiguous lexical Given type instantiation"
+ where
+  collect variables available remaining selected found = case remaining of
+    [] -> pure $ if any (sameSelection selected) found then found else selected : found
+    required : rest -> candidates available found
+     where
+      candidates _ solutions@(_ : _ : _) = pure solutions
+      candidates [] solutions = pure solutions
+      candidates (actual : others) solutions = do
+        tick
+        matched <- matchConstraint variables selected required actual
+        next <- maybe (pure solutions)
+          (\selection -> collect variables available rest selection solutions) matched
+        candidates others next
+
+  sameSelection left right = Map.keysSet left == Map.keysSet right &&
+    and (Map.elems $ Map.intersectionWith A.alphaEquivalentTypes left right)
+
+  matchConstraint variables selected (Constraint name xs) (Constraint other ys)
+    | name == other, length xs == length ys = matchTypes variables selected $ zip xs ys
+    | otherwise = pure Nothing
+
+  matchTypes _ selected [] = pure $ Just selected
+  matchTypes variables selected ((template, actual) : rest) = do
+    matched <- matchType variables selected template actual
+    maybe (pure Nothing) (\next -> matchTypes variables next rest) matched
+
+  matchType variables selected template actual = do
+    tick
+    case template of
+      T.TypeVariable variable | variable `Set.member` variables ->
+        case Map.lookup variable selected of
+          Nothing -> do
+            state <- get
+            let free = T.freeVariables actual
+                level = Map.findWithDefault (-1) variable $ checkMetas state
+                escaping = any (> level) $ Map.elems $
+                  Map.restrictKeys (checkRigids state) free
+            pure $ if variable `Set.member` free || escaping then Nothing
+              else Just $ Map.insert variable actual selected
+          Just previous | A.alphaEquivalentTypes previous actual -> pure $ Just selected
+          _ -> pure Nothing
+      _ | A.alphaEquivalentTypes template actual -> pure $ Just selected
+      T.FunctionType a b -> case actual of
+        T.FunctionType c d -> matchTypes variables selected [(a, c), (b, d)]
+        _ -> pure Nothing
+      T.TypeApplication a b -> case actual of
+        T.TypeApplication c d -> matchTypes variables selected [(a, c), (b, d)]
+        _ -> pure Nothing
+      T.TupleType box xs -> case actual of
+        T.TupleType other ys | box == other, length xs == length ys ->
+          matchTypes variables selected $ zip xs ys
+        _ -> pure Nothing
+      T.ForallType [] cs body -> case actual of
+        T.ForallType [] ds other | length cs == length ds -> do
+          contexts <- foldM
+            (\partial (c, d) -> maybe (pure Nothing)
+              (\next -> matchConstraint variables next c d) partial)
+            (Just selected) $ zip cs ds
+          maybe (pure Nothing) (\next -> matchType variables next body other) contexts
+        _ -> pure Nothing
+      T.ForallType{} -> case actual of
+        T.ForallType (_ : _) _ _ -> underLevel $ do
+          rigid <- freshVariable True
+          left <- consumeForall template rigid
+          right <- consumeForall actual rigid
+          matchType variables selected left right
+        _ -> pure Nothing
+      _ -> pure Nothing
 
 -- Only exact, lexically introduced Givens can discharge a qualified layer.
 -- There is deliberately no instance search, superclass traversal, or shared
--- root dictionary pool. Expected result/argument typing selects polymorphic
--- arguments before this check; a dictionary never guesses an unconstrained
--- type variable or supplies evidence outside its introduction's subtree.
+-- root dictionary pool. Expected result/argument typing and coherent lexical
+-- matching select polymorphic arguments before this exact discharge; a Given
+-- never supplies evidence outside its introduction's subtree.
 applyContext :: Q.TermNodeId -> Type -> Check Q.TermNodeId
 applyContext node source = do
   resolved <- zonk source
@@ -525,6 +624,9 @@ checkApplication locals expression expected = do
     -- argument. Check all those values before choosing its dictionary slots,
     -- while retaining the original order of the application telescope.
     checkedSteps <- mapM checkValueStep allSteps
+    inferGivenSelections
+      (Set.unions [T.freeVariables selected | ImplicitStep _ selected _ <- allSteps])
+      (concat [constraints | ContextStep (T.ForallType [] constraints _) _ <- allSteps])
     foldM (buildStep $ \node _ -> pure node) headNode checkedSteps
   else foldM (buildStep $ checkExpression locals) headNode allSteps
  where

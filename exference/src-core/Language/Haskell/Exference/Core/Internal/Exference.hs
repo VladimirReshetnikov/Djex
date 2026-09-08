@@ -2916,7 +2916,29 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
             { nodeGoals = nodeGoals node <> Seq.fromList additionalGoals }
 
       byUnified :: Substs -> Substs -> StateT SearchNode SearchBranches ()
-      byUnified goalSS provSS = do
+      byUnified originalGoalSS originalProvSS =
+        -- Constraint-only parameters cannot be inferred from the result or
+        -- scheduled value arguments. The allocation snapshot identifies this
+        -- provider use's fresh variables, excluding every persistent goal or
+        -- local variable. Infer only a unique coherent lexical selection and
+        -- carry it through the normal scope validation and dependency updates.
+        let currentGivens = map (snd . constraintApplySubsts originalGoalSS) $
+              S.toList (qClassEnv_constraints contxt) ++ givenConstraints
+            required = map (snd . constraintApplySubsts originalProvSS) provConstrs
+            fresh = IntSet.filter
+              (not . (`identifierIsReserved` nodeFlexibleIds initialNode)) $
+                IntSet.fromList $ S.toList $ foldMap
+                  (foldMap freeVars . constraint_params) required
+            selected = if IntSet.null fresh then IntMap.empty else
+              fromMaybe IntMap.empty $ uniqueGivenInstantiation 4096 fresh
+                [(currentGivens, constraint) | constraint <- required]
+            applySelected = snd . applySubsts selected
+            goalSS = IntMap.map applySelected originalGoalSS
+            provSS = IntMap.union selected $ IntMap.map applySelected originalProvSS
+        in byUnifiedWithSelections goalSS provSS
+
+      byUnifiedWithSelections :: Substs -> Substs -> StateT SearchNode SearchBranches ()
+      byUnifiedWithSelections goalSS provSS = do
         let allSS = IntMap.union goalSS provSS
             substs = case applier of
               Left _  -> goalSS

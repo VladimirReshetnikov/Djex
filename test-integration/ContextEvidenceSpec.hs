@@ -21,6 +21,7 @@ import qualified Language.Haskell.Exference.Core.ExpressionCheck as EC
 import qualified Language.Haskell.Exference.Core.FunctionBinding as EF
 import qualified Language.Haskell.Exference.Core.Types as ET
 import qualified Language.Haskell.Synthesis.TypedGenerated as Q
+import qualified Language.Haskell.Synthesis.TypedGenerated.Haskell as H
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.Exit (ExitCode (ExitSuccess, ExitFailure))
 import System.IO (hClose, hPutStr, openTempFile)
@@ -93,7 +94,105 @@ contextualMatrix label rows = testGroup label
        checkSiblingLeakage
    , testCase "GHC independently rejects sibling given leakage" $
        bounded "sibling GHC control" compileSiblingLeakage
-   ] ++ omittedMethodTests ++ [nestedGivenTests])
+   ] ++ omittedMethodTests ++ [nestedGivenTests, constraintOnlyTests])
+
+-- These providers have no value argument or result occurrence from which to
+-- infer the class parameter. Search sees only the generic source signature;
+-- instances and payloads are introduced solely in independent GHC replay.
+constraintOnlyTests :: TestTree
+constraintOnlyTests = testGroup "Constraint-only contextual provider inference"
+  [ testCase (engineName engine ++ if isLocal then " local" else " global") $
+      bounded "constraint-only provider synthesis and replay" $ do
+        className <- expectRight $ parseName "C"
+        tokenName <- expectRight $ parseName "Token"
+        methodName <- expectRight $ mkIdentifier "method"
+        target <- expectRight $ mkIdentifier "generatedMethod"
+        let parameter = TypeVariable "a"
+            method = ForallType ["a"] [Constraint className [parameter]] $ TypeConstructor tokenName
+            source = "forall a. C a => " ++
+              (if isLocal then "(forall b. C b => Token) -> " else "") ++ "Token"
+            signatureType = ForallType ["a"] [Constraint className [parameter]] $
+              if isLocal then FunctionType
+                (ForallType ["b"] [Constraint className [TypeVariable "b"]] $ TypeConstructor tokenName)
+                (TypeConstructor tokenName)
+              else TypeConstructor tokenName
+            inventory =
+              [ClassDeclaration () className [TypeParameter "a" Nothing] [] [],
+               AbstractTypeDeclaration () tokenName ProperTypeKind] ++
+              [ValueDeclaration $ ValueSignature () methodName method | not isLocal]
+        rendered <- case engine of
+          DjinnEngine -> do
+            environment <- expectRight $ mkEnvironment inventory
+            session <- expectRight $ mkDjinnSession environment
+            request <- expectRight $ parseDjinnRequest session defaultQueryOptions
+              { optionCutoff = 32, optionBudget = Just 20000, optionAlternatives = True
+              , optionSorted = False, optionStrategy = Interleave }
+              target "constraint-only-method" source
+            result <- expectRight $ runDjinnTypedQuery session request
+            candidate <- firstCandidate $ batchCandidates $ resultSearch result
+            graph <- expectRight $ typedCandidateTermGraph candidate
+            renderMethod signatureType (defaultRenderOptions id)
+              (candidateOutput $ typedCandidateCompatibility candidate) graph
+          ExferenceEngine -> do
+            environment <- expectRight $ mkEnvironment $
+              map (mapDeclarationTypeVariables $ const $ FlexibleVariable 0) inventory
+            session <- expectRight $ mkExferenceSession environment
+            request <- expectRight $ parseExferenceRequest session defaultExferenceOptions
+              { exferenceMaximumSteps = 20000, exferenceMaximumQueueSize = Just 256
+              , exferenceConstraintDeferralSteps = 0, exferenceAllowUnused = True }
+              target "constraint-only-method" source
+            results <- expectRight $ runExferenceTypedQuery session request
+            candidate <- firstCandidate $ take 32 $ concatMap (batchCandidates . resultSearch) results
+            graph <- expectRight $ typedCandidateTermGraph candidate
+            renderMethod signatureType (defaultRenderOptions $ \v -> "v" ++ show v)
+              (candidateOutput $ typedCandidateCompatibility candidate) graph
+        let call ty = "observe (generatedMethod @" ++ ty ++
+              (if isLocal then " (\\ @b -> method @b)" else "") ++ ")"
+            fixture = unlines
+              [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications, TypeAbstractions, AllowAmbiguousTypes, FlexibleContexts, KindSignatures #-}"
+              , "module Main where"
+              , "import Data.Kind (Type)"
+              , "data Token = Token Int"
+              , "class C (a :: Type) where payload :: Int"
+              , "instance C Int where payload = 37"
+              , "instance C Bool where payload = 91"
+              , "method :: forall a. C a => Token"
+              , "method = Token (payload @a)"
+              , "observe (Token n) = n"
+              , "generatedMethod :: " ++ source
+              , "generatedMethod = " ++ rendered
+              , "main :: IO ()"
+              , "main = print ([" ++ call "Int" ++ " == 37, " ++ call "Bool" ++
+                  " == 91], [" ++ call "Int" ++ " == 91, " ++ call "Bool" ++ " == 37])"
+              ]
+        replay <- executeModule fixture
+        case replay of
+          (ExitSuccess, output, errors) -> assertEqual (errors ++ "\n" ++ fixture)
+            (Just ([True, True], [False, False])) (readMaybe output :: Maybe ([Bool], [Bool]))
+          _ -> fail $ "constraint-only full-signature replay failed: " ++ show replay ++ "\n" ++ fixture
+  | engine <- [DjinnEngine, ExferenceEngine], isLocal <- [False, True]
+  ]
+ where
+  firstCandidate [] = fail "no constraint-only provider candidate"
+  firstCandidate (candidate : _) = pure candidate
+
+  renderMethod
+    :: (Ord variable, Ord local, Show local)
+    => Type String -> RenderOptions local -> FunctionClause local -> Q.TermGraph (Type variable) local -> IO String
+  renderMethod signatureType options clause graph = do
+    assertEqual "method graph changed its retained clause" clause $
+      eraseTermGraphToFunctionClause (clauseName clause) graph
+    let introductions =
+          [ Q.contextEvidenceBinder $ Q.givenContextEvidence occurrence slot
+          | (_, Q.TermNode _ (Q.TypedContextIntroduction occurrence _ witness)) <- Q.termGraphNodes graph
+          , (slot, _) <- zip [0 ..] $ Q.contextIntroductionConstraints witness ]
+        applications =
+          [ Q.contextEvidenceBinder proof
+          | (_, Q.TermNode _ (Q.TypedContextApplication _ _ witness)) <- Q.termGraphNodes graph
+          , proof <- Q.contextApplicationEvidence witness ]
+    assertEqual "method lost its root dictionary" 1 $ length introductions
+    assertEqual "method changed its selected dictionary" introductions applications
+    expectRight $ H.renderHaskellTermGraphAtSignature options signatureType graph
 
 -- This increment introduces no new forall beneath the callback. Its C a
 -- qualification refers to the already opened root a, and must actually be

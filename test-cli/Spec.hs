@@ -204,6 +204,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplBehavioralTimeout
   , testCase "REPL behavioral execution preserves loaded scope and same-named providers"
       testReplBehavioralScope
+  , testCase "REPL preflight forwards explicitly scoped constraint-only parameters"
+      testReplConstraintOnlyPreflight
   , testCase "REPL scripts persist state and reject recursion"
       testReplScripts
   , testCase "REPL history preserves chronological numbering"
@@ -3859,6 +3861,36 @@ testReplBehavioralScope = withTemporaryEnvironment
       not $ "hidden =" `isInfixOf` output
     assertBool "same-named global became recursive during checking" $
       not $ "BEHAVIORAL_TIMEOUT" `isInfixOf` errors
+
+-- Preflight must compile the named predicate before search. Loaded contextual
+-- providers still need complete source-scheme transport from the frontend;
+-- this test claims no candidate or method-discovery acceptance.
+testReplConstraintOnlyPreflight :: Assertion
+testReplConstraintOnlyPreflight = withTemporaryEnvironment
+  [("Methods.hs", unlines
+    [ "{-# LANGUAGE RankNTypes, ScopedTypeVariables, TypeApplications, AllowAmbiguousTypes, NoPolyKinds #-}"
+    , "module Methods (Token, C, method, observe) where"
+    , "data Token = Token Int"
+    , "class C a where payload :: Int"
+    , "instance C Int where payload = 37"
+    , "instance C Bool where payload = 91"
+    , "method :: forall a. C a => Token"
+    , "method = Token (payload @a)"
+    , "observe :: Token -> Int"
+    , "observe (Token n) = n"
+    ])] $ \directory -> forM_ ["djinn", "exference"] $ \backend -> do
+      (exitCode, output, errors) <- runRepl directory
+        [ ":backend " ++ backend, ":module Methods", ":set select first"
+        , ":set render definition", ":set allow-unused on"
+        , ":set quality-window 1", ":set candidate-limit 1"
+        , ":set choice-budget 20000", ":set max-steps 20000"
+        , ":synth selectedMethod :: forall a. C a => Token where observe (selectedMethod @Prelude.Int) == 37 && observe (selectedMethod @Prelude.Bool) == 91"
+        ]
+      assertEqual (backend ++ " constraint-only method REPL exit") ExitSuccess exitCode
+      assertBool ("the original predicate failed before synthesis: " ++ errors) $
+        not $ "BEHAVIORAL_PREFLIGHT" `isInfixOf` errors
+      assertContains ("preflight did not reach the bounded search: " ++ output)
+        "DJEX_REPL_BEHAVIORAL_OBSERVATIONS" errors
 
 testReplEval :: Assertion
 testReplEval = do

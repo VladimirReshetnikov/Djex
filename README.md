@@ -153,9 +153,13 @@ refined scheduler at `63a23f58` that preserves monomorphic goal ordering.
 The refinement passes all 2,308 Haskell tests and retains the Haskell behavior
 and signature results; its complete native integration remains open. The latest
 native unit run passes **700/701**, with one recurring layered-provider deadline.
-The supplied tree accumulator is now an executed miss in both Haskell engines;
-Lean's positive cells fail the generated-provider inventory gate. The next work
-targets that deadline, provider filtering, useful function-carrier folds and
+The supplied tree accumulator remains an executed miss in both Haskell engines.
+Leant's [semantic provider filter](docs/reports/2026-09-08-semantic-auxiliary-providers.md)
+now fixes generated-eliminator admission while retaining ordinary user `elim`
+functions. Its public tree inventories pass; positive synthesis remains open.
+The report also corrects earlier tree False-control pass labels: the Exference
+and Both commands timed out and fail the fixture's deadline contract. The next work
+targets that deadline, useful function-carrier folds and
 bounded frontend usability. A broader scheduling experiment failed and was reverted. The full **13 extended
 operations and all 19 explicit defaults**, across both Haskell engines and
 Lean Djinn/Exference/Both, remain required; newer canonical Haskell results

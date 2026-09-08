@@ -129,3 +129,5 @@ Reports are listed oldest first.
 - 2026-09-08 — [Exference forall graphs, constructor schemes and exact projection](2026-09-08-exference-forall-graphs.md)
 
 - 2026-09-08 — [Post-integration synthesis priorities](2026-09-08-post-integration-priorities.md) — native Exference 13/13, the recurring layered-provider deadline, executed tree failures, and revised delivery gates.
+
+- 2026-09-08 — [Semantic auxiliary-provider filtering and tree deadline correction](2026-09-08-semantic-auxiliary-providers.md) — four real-kernel discovery cells, public inventory repair, and corrected timeout acceptance.

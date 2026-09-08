@@ -16,7 +16,7 @@ is complete. Priorities 2–4 retain their original requirements.
 
 | Order | Delivery | Required acceptance |
 | --- | --- | --- |
-| 1 | Make native verification repeatable and correlate requests with candidates | Use the recorded append/length workloads and unchanged bounds. Correlate each exact candidate, verification stage and backend request through recovery; distinguish kernel work, scheduling, transport waits and deadline handling before selecting a fix. Require positive/False controls, exact full-type replay, cancellation, owned cleanup and recovery of a context-dependent command. No transport fix follows from timing alone. |
+| 1 | Reuse the exact empty user environment for native verification | Apply the request-correlated diagnosis without borrowing synthesis helpers or changing the real user state. Require the original append/length positive and False workloads at unchanged bounds, exact full-type kernel replay, empty-session reuse and namespace isolation, reset invalidation, and backend retirement/reconstruction. Initial setup and active-query recovery must retain their distinct deadline boundaries. |
 | 2 | Execute broader Church behavior independently | Run additional totals and all 19 explicit-default counterparts in both Haskell engines and all three Lean modes. Require controlled providers, actual False controls and independent exact full-signature replay. Record success, timeout and inconclusive outcomes per cell. These cells need not wait for native fold repair. |
 | 3 | Admit one described global contextual provider | Extend the existing `Type 0` route with one fully described global provider while retaining the current non-overlap guard. Preserve complete source metadata, exact owned graph/renderer evidence and payload-sensitive replay; do not broaden instances or universes as part of this increment. |
 | 4 | Preserve selected dictionary identity before relaxing overlap guards | Carry the selected introduction occurrence and ordered slot through lowering and reconstruction. Require a forced equal-predicate outer/inner fixture whose faithful scoped capture preserves distinct payload behavior in Haskell and Lean replay. Graph IDs or successful compilation alone are insufficient. Methods, superclass evidence and further provider schemes remain separate extensions. |
@@ -67,8 +67,22 @@ Writes, queue operations and parsing take milliseconds, but the longer response
 waits do not identify a transport defect. Candidate 4's negative-decision check
 is associated with the first timeout only by sequential inference: trace v1
 records no request roles or payload tags. Its replay records the actual launcher
-command, not a resolved kernel-executable hash. Repeatable native acceptance
-and precise request correlation remain open.
+command, not a resolved kernel-executable hash. This historical event-only trace predates the request-correlated diagnosis below.
+
+The newer [request-correlated receipt](https://github.com/VladimirReshetnikov/Leant/blob/72d967e57b7d044320b574151f912e88a6ff5a3e/test-recursive/receipts/request-correlation.json) passes the strict build,
+14 focused controls and all 686 unit tests (357.63 seconds), and captures the
+failed append baseline completely. Candidate type and positive/negative checks
+omit `env` in the fresh user session. The installed REPL source confirms that
+this repeats header/import initialization. The [matched empty-session control](https://github.com/VladimirReshetnikov/Leant/blob/72d967e57b7d044320b574151f912e88a6ff5a3e/docs/reports/2026-09-07-empty-environment-diagnosis.md)
+preserves the exact candidate command and annotation: backend 1/request 11
+times out after 5.008023501 seconds, while control request 15 completes in
+0.0223364 seconds. Its decoded payload differs only by `env: 2`. Append then
+passes in 24.85 seconds with exact independent kernel replay; its actual False
+control passes in 10.19 seconds. The latter trace retains 128 requests and
+explicitly omits 187, so its diagnostic capture is incomplete even though the
+behavioral control passes. Production root reuse and its lifecycle checks are
+the next acceptance gate. Physical file rereads and a transport defect are not
+established by this evidence.
 
 Both partial Church oracle preflights pass: 20 Lean files with 491 exact
 inventories (487 empty and four named observer/proof allowances), and 63 Haskell
@@ -385,7 +399,7 @@ An unsuccessful proof attempt remains inconclusive.
 
 | Idea | Disposition | Concrete trigger for promotion |
 | --- | --- | --- |
-| Exact accepted-candidate provenance and reproducible replay | Complete 39-cell matrix and 680-test suite accepted | Retain own-Variant graph/renderer/engine observations, non-forcing diagnostics and direct kernel pinning. Add exact native request-role/candidate correlation for reliability work; defer a general tracing framework. |
+| Exact accepted-candidate provenance and reproducible replay | Complete 39-cell matrix and 680-test suite accepted | Retain own-Variant graph/renderer/engine observations, non-forcing diagnostics and direct kernel pinning. Retain the accepted bounded request capture and its whole-record omission accounting. Use the matched empty-environment diagnosis for the next fix; defer a general tracing framework. |
 | Routing-test maintenance | Incremental when a boundary is touched | Replace brittle source-text counts with executable routing or boundary controls where practical, preserving coverage. Do not turn this into a broad cleanup milestone. |
 | Selected dictionary occurrence and complete context metadata | Next narrow global-provider increment under the accepted guard; exact selection before relaxing overlap guards | Admit one fully described global contextual provider under the existing `Type 0` non-overlap guard; the current provider map is empty and rejects every typed global. Separately demonstrate differing outer/inner payload behavior under faithful scoped capture in Haskell and Lean. Graph identities or successful GHC compilation alone do not establish selected dictionary ownership. Extend further schemes or evidence derivations individually. |
 | Tree folds and accumulator programs | Next recursion extension after live verification is reliable | Select concrete missing corpus programs, retaining exact recursor inventories, full-signature behavior and termination checking. |

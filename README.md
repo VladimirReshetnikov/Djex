@@ -102,6 +102,11 @@ constructor selections, while preserving its exact lambda syntax and checked
 projection costs. The [forall-graph report](docs/reports/2026-09-08-exference-forall-graphs.md)
 records a full-signature `maybeEither` witness replay and the separate live
 search result: all 256 candidates now compile, but none matches the predicate.
+The matching [Leant integration](https://github.com/VladimirReshetnikov/Leant/blob/e1ed6f7eb308b9a431db1ec8c956f9eb7a30d05f/docs/reports/2026-09-08-nested-forall-graphs.md)
+passes nine native ordinary/behavioral/False cells across all three engine
+modes: six exact full-type replays, 24 observations and 16 empty axiom
+inventories. Its strict build and all 686 unfiltered tests pass. Search work
+on the missing Church behaviors remains the next priority.
 The ordinary-data matrix now passes eight
 scenarios in each Haskell engine, including tuple fields and independently typed
 recursive inputs. Exference's complete-case graphs and protected queues preserve

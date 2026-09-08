@@ -112,3 +112,16 @@ search budgets, prove universal behavior or establish that a known witness
 appears within a particular search window. The full thirteen extended Church
 operations and nineteen explicit-default counterparts remain required in both
 Haskell engines and all three Lean modes.
+
+## Published Leant integration
+
+Leant [e1ed6f7](https://github.com/VladimirReshetnikov/Leant/commit/e1ed6f7eb308b9a431db1ec8c956f9eb7a30d05f)
+vendors this implementation. Its [integration report](https://github.com/VladimirReshetnikov/Leant/blob/e1ed6f7eb308b9a431db1ec8c956f9eb7a30d05f/docs/reports/2026-09-08-nested-forall-graphs.md)
+and linked raw receipts record nine passing native cells for
+`{α : Type} → α → {β : Type} → β → β`, covering ordinary and named-`where`
+synthesis plus actual False rejection in Djinn, Exference and Both. Six exact
+outputs pass full-type Lean replay and 24 finite observations, with 16 empty
+axiom inventories. Their graphs retain both actual forall introductions,
+closed roots and exact renderer/engine ownership. The strict build and all
+686 unfiltered frontend tests pass in 358.12 seconds. This is a separate
+frontend acceptance boundary; the broader Church search misses remain open.

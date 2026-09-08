@@ -43,6 +43,15 @@ same-candidate compilation repairs. This adds no behavioral coverage. Candidate
 construction and ordering are the next diagnostic targets; a larger default
 window is not the acceptance criterion.
 
+The [published Leant integration](https://github.com/VladimirReshetnikov/Leant/blob/e1ed6f7eb308b9a431db1ec8c956f9eb7a30d05f/docs/reports/2026-09-08-nested-forall-graphs.md)
+closes the matching frontend gate: all nine native cells pass, with six exact
+full-type outputs, 24 finite observations, three actual False controls and 16
+empty axiom inventories. Each variant retains its own engine, renderer, closed
+root and both actual forall introduction sites. The strict build and complete
+686-test suite pass in 358.12 seconds. This strengthens the reason to address
+candidate construction and ordering next; it does not increase the accepted
+Church behavioral operation count or narrow priorities 2–4.
+
 The [contextual acceptance receipt](https://github.com/VladimirReshetnikov/Leant/blob/469a822da0abfdc7a4d8228a203af0a0b7d2b59b/test-context/receipts/ordinary-context-streaming.json) records a **fresh complete 39/39
 public matrix**: 18 exact displayed outputs with full-type replay, 72 finite
 payload observations and 144 empty replay inventories, three actual False

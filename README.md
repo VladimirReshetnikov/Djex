@@ -107,8 +107,8 @@ passes nine native ordinary/behavioral/False cells across all three engine
 modes: six exact full-type replays, 24 observations and 16 empty axiom
 inventories. Its strict build and all 686 unfiltered tests pass. The
 [updated re-triage](docs/reports/2026-09-07-synthesis-retriage.md) promotes
-a concrete global-method inference failure, followed by missing Church
-construction paths; neither is covered by that accepted Leant integration.
+closure of the newer global-method integration, followed by missing Church
+construction paths; neither is covered by that earlier accepted Leant integration.
 The new [constraint-only provider increment](docs/reports/2026-09-08-constraint-only-provider-inference.md)
 infers a unique coherent selection from lexical class assumptions in both
 engines. Four public Haskell API cases synthesize global/local constrained
@@ -130,15 +130,20 @@ erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
 marks priority 1's supported-fragment Haskell elaboration complete: all 101
 CLI tests pass, including first/best/all repair selection, exact GHC replay,
 and retention of the original failed-candidate sample when its elaboration
-retry times out under the same deadline. Priorities 2–4 remain open. Next is
-integrating the accepted engine inference into complete frontend provider
-metadata, within the existing `Type 0` non-overlap guard. The Leant prototype's
-last run, before this engine increment, built but failed all six focused
-positive cases; it is not accepted support. Then address
-the missing Church construction paths and remaining defaulted cells, with
-supplied tree folds as an independent delivery. Two tested Exference ranking
-changes still produced 256 false `maybeEither` candidates and were restored.
-The detailed re-triage retains their diagnostic evidence and acceptance gates.
+retry times out under the same deadline. Priorities 2–4 remain open. The
+[latest integration triage](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-integration-retriage.md)
+records Leant's working prototype against `4a4ed0fc`: all 13 focused tests,
+six native ordinary/where method queries with full-type replay and 24
+observations, and three actual False controls pass. The prototype remains
+unpublished pending cache/discovery, local-context and complete regression
+closure. Its full suite passed 698/699; the corrected source-text test passes
+in isolation, with a complete rerun still due. Next close those gates and the
+Haskell loaded-provider/implicit-root frontend gaps, then address missing
+Church constructions. Supplied tree folds are an independent delivery.
+The original four-slot cache search miss and a 32-slot diagnostic trace mismatch
+remain distinct. Two Exference ranking experiments still produced 256 false
+`maybeEither` candidates and were restored; further tuning needs a concrete
+branch/queue diagnosis. The detailed re-triage retains the complete scope.
 Bounded Lean contexts now pass their complete 39-cell matrix and 680-test suite. Exact
 proof-selected dictionary transport remains required before that guard is
 relaxed, with payload-sensitive Haskell and Lean replay. Both partial oracle preflights now pass: all 20 Lean files with 491

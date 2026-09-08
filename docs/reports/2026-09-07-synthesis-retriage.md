@@ -7,29 +7,32 @@ or numbering of the active **implement priorities 1–4** goal. The
 
 ## Current decision and next delivery gates
 
-**September 8 re-triage: finish frontend integration of constraint-only provider
-inference, then the missing Church construction paths.** The
-[engine increment](2026-09-08-constraint-only-provider-inference.md) adds unique,
-coherent lexical-Given inference in both engines and four public Haskell API
-synthesis/replay cases. Loaded-provider source schemes, implicitly quantified
-behavioral roots, and native Leant integration remain separate gates. Two
-simple search-ranking experiments failed their behavioral gate and were
-restored. This changes delivery order, not the scope of original priorities 1–4.
+**September 8 follow-up: close the working Leant integration, then the
+Haskell frontend gaps and missing Church constructions.** The
+[updated triage and evidence extraction](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-integration-retriage.md)
+supersede the earlier method-failure diagnosis. Canonical Djex `4a4ed0fc`
+remains published with its strict build and all 2,304 tests passing. Leant's
+working prototype now uses that dependency and passes all 13 focused tests,
+six real ordinary/where method queries with full-type kernel replay and
+24 observations, and all three actual False controls. The prototype and
+dependency update remain uncommitted pending integration acceptance.
 
-Priority 1's supported-fragment Haskell elaboration remains accepted. The
-published local `Type 0` context route passes its 39-cell matrix; the latest
-published Leant graph integration passes nine native cells and all 686 unit
-tests. These results belong to their recorded revisions. The newer global
-provider prototype's last run, before the engine increment, built but failed
-all six focused positive cases, while seven negative controls passed. It has
-no full-suite or native-method acceptance for the new engine increment.
+The complete Leant suite passed 698/699; its obsolete source-text assertion
+was corrected and the focused test passes, but the complete rerun remains due.
+The prior 39-cell local-context matrix also needs a fresh integration run.
+The four-slot cache fixture misses the required legacy candidate; a 32-slot
+diagnostic finds it before and after the contextual visit but fails an
+ordinary-query trace annotation requirement. Inspection confirms the actual
+ordinary verification request exists. This is a trace-contract mismatch,
+not established cache corruption or completed cache acceptance.
 
 | Order | Delivery | Required acceptance |
 | --- | --- | --- |
-| 1 | Integrate constraint-only inference through complete frontend provider schemes (priority 3) | The engine/API increment is implemented. Preserve the forced `Ctx.C.out : {α : Type} → [Ctx.C α] → Nat` fixture and goal `∀ (α : Type), [Ctx.C α] → Nat`. Rebuild Leant and close the six focused positives, then ordinary/where × Djinn/Exference/Both native replay, payload-sensitive observations, actual False controls, discovery/cache isolation, the existing local-context matrix and complete unit suite. In Haskell, diagnose loaded-provider scheme closure and explicit provider admission; separately support implicit-root behavioral scoping without changing binder order. |
-| 2 | Make missing Church constructions reachable within the existing limits (priority 4) | Diagnose `maybeEither` branch admission and `foldl1`'s flexible-goal construction separately from rendering. Require a generic rule change supported by a concrete failed derivation, followed by the original live queries, exact full-signature replay and unchanged false controls. Keep reference witnesses out of provider inventories. Extend the remaining total/defaulted cells with each accepted change. |
-| 3 | Accept a supplied tree fold with an accumulator (priority 2; independent of steps 1–2) | Use the prepared polymorphic `foldTree`/constructor inventory and order-sensitive observations in both Haskell engines and all three Lean modes. Require full-type behavior, termination-checked replay, actual False controls and the original limits. The fixture is prepared, not executed; reliable native verification is already an accepted foundation. |
-| 4 | Preserve selected dictionary identity, then extend evidence derivation (priority 3) | Keep overlap guards until a forced equal-predicate outer/inner fixture retains the selected introduction and ordered slot, including distinct payload behavior in Haskell and Lean. Follow with conditional providers and superclass projections as separately checked extensions. A unique type substitution does not identify a dictionary occurrence. |
+| 1 | Finish Leant global-method integration (priority 3) | Preserve the successful forced method fixture and exact source/engine/dictionary ownership. Correct ordinary verification correlation, finish all cache/discovery sessions and exact replays, rerun the existing local-context matrix and complete 699-test suite, then publish code and reproducible evidence. |
+| 2 | Close Haskell frontend gaps (priority 3) | Complete loaded constrained-provider admission/source schemes and implicit-root behavioral scoping. Require actual ordinary/where synthesis in both engines at full signatures, distinct dictionary payload behavior and False controls. |
+| 3 | Make missing Church constructions reachable (priority 4) | Trace actual branch admission/substitutions/queue decisions for `maybeEither` and `foldl1`, then validate a generic fix using original live queries and bounds. Keep reference witnesses out of inventories and extend the remaining total/defaulted cells. |
+| 4 | Accept supplied tree folds with accumulators (priority 2; independent bounded delivery) | Execute the prepared polymorphic tree fixture in both Haskell engines and all three Lean modes, with exact provider inventories, order-sensitive observations, full-type behavior, termination checking and False controls. |
+| 5 | Preserve dictionary occurrence, then extend evidence (priority 3) | Keep overlap guards until equal-predicate outer/inner uses retain the selected dictionary and distinguish payloads. Add conditional providers and superclass projections separately. |
 
 The full priority-4 obligation remains **all 13 extended operations and all
 19 explicit-default counterparts**, across Haskell Djinn/Exference and Lean
@@ -40,6 +43,10 @@ cells alongside relevant increments; do not redefine completion around an
 easier batch. Heavy runtime acceptance remains serialized.
 
 ## What changed in this re-triage
+
+The [latest integration follow-up](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-integration-retriage.md) records the new working-tree
+results and the revised priorities. The diagnosis below describes earlier
+runs; its old six-case failure no longer describes the updated prototype.
 
 The [constraint-only inference report](2026-09-08-constraint-only-provider-inference.md)
 supersedes the engine failure diagnosis below with implementation and tests.
@@ -519,8 +526,9 @@ An unsuccessful proof attempt remains inconclusive.
 | Idea | Disposition | Concrete trigger for promotion |
 | --- | --- | --- |
 | Exact accepted-candidate provenance and reproducible replay | Complete 39-cell matrix and 680-test suite accepted | Retain own-Variant graph/renderer/engine observations, non-forcing diagnostics and direct kernel pinning. Retain the accepted bounded request capture and its whole-record omission accounting. Keep the accepted empty-environment repair and lifecycle controls as regressions; defer a general tracing framework. |
+| Verification trace and runner consistency | Promote narrowly within integration | Align ordinary verification with the supplemental ownership contract. Share exercised UTF-8, runtime-pinning and exact query-format helpers; retain bounds and negative controls. |
 | Routing-test maintenance | Incremental when a boundary is touched | Replace brittle source-text counts with executable routing or boundary controls where practical, preserving coverage. Do not turn this into a broad cleanup milestone. |
-| Constraint-only provider instantiation | Engine/API increment implemented; frontend integration next | Keep the forced method fixture without adding an ordinary argument. Native Leant replay and discovery/cache tests remain required. Haskell loaded-provider metadata and implicit-root alias scoping are now concrete follow-ups; preflight success is not candidate acceptance. |
+| Constraint-only provider instantiation | Engine/API published; Leant native fixture passes in the working prototype | Finish Leant trace/cache and aggregate regression closure. Haskell loaded-provider metadata and implicit-root alias scoping remain concrete follow-ups; preflight success is not candidate acceptance. |
 | Selected dictionary occurrence and complete context metadata | Required before relaxing overlap guards | Separately demonstrate differing outer/inner payload behavior under faithful scoped capture in Haskell and Lean. A unique type substitution, graph identity or successful compilation alone does not establish selected dictionary ownership. Extend conditional providers and superclass evidence individually. |
 | Tree folds and accumulator programs | Independent next recursion delivery; fixture prepared, not run | Use the polymorphic tree accumulator to test order-sensitive composition, retaining exact recursor inventories, full-signature behavior and termination checking. Native verification repair is already accepted. |
 | Flexible-goal construction and branch diagnostics | Next Church-search investigation | Trace one missing derivation through actual rule admission, substitutions and queue decisions. Distinguish an unavailable construction from an admitted but delayed branch. Count every alternative against existing budgets and check the resulting term independently. Public graph-shape histograms alone cannot locate the cause. |

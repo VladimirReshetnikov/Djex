@@ -1,0 +1,1155 @@
+{
+  "schema_version": 1,
+  "status": "six of seven additional Djinn operations accepted; maybeEither remains unaccepted",
+  "prior_coverage_receipt": {
+    "path": "priority4-haskell-coverage.json",
+    "sha256": "7e69c16a58ee380d57237ce4927f78d9f37e46da4f23021d23de107f9826019c"
+  },
+  "source_receipt": {
+    "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\results.json",
+    "sha256": "193c5760fdf56883c7a9a4fbcc42b6e360ea98794f41b592de2c79dac6b8a8b6"
+  },
+  "settings": {
+    "djinn": {
+      "window": 65536,
+      "budget": 500000,
+      "djinn_strategy": "interleave",
+      "steps": 100000,
+      "process_timeout": 300.0,
+      "queue": 8192
+    }
+  },
+  "live_query_timeout_seconds": 0,
+  "independent_replay_evaluation_seconds": 2.0,
+  "source_hashes": {
+    "C:\\Djex\\test-church\\behavior_extended_probe.py": "322efc48eb360517aec7315132e4830113d4e216f6651a6cdaafaa409eb73908",
+    "C:\\Djex\\test-church\\behavior_extended_spec.py": "7c8f0f42c28b533e72ffe9debceaedad1192438820efc344dcbdfe76d04eb444",
+    "C:\\Djex\\test-church\\behavior_probe.py": "6093f0d122fc09e4fc5a84322042b106cce2f969fb417b9eb2d56c6c69332022",
+    "C:\\Djex\\test-church\\behavior_runtime.py": "b5240378e17d3fb25af8ad18fc0ba88f0226dc2116b99efe3300f4b006a88028",
+    "C:\\Djex\\test-church\\behavior_spec.py": "426fb6cf5e8a607608bed4ca52a74776cd38d1c5f7a5c49866fda6b2a98cedf4",
+    "C:\\Djex\\test-church\\manifest.json": "0c2954eeb36811ea065aba86187d09cd8761529de1acefd5111ccf088b189ed9",
+    "C:\\Djex\\docs\\examples\\Church.hs": "782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11",
+    "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\numeric-fixture\\ExtendedNumeric.hs": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138"
+  },
+  "executable_hashes": {
+    "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe": "74e77fabd961d73b9629df1259d384d3fbfb055a4316f99ce5b6249645012706",
+    "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe": "0560906f7b7a046742d9e8433b95c0db49fc0c2fc28989e67cb23a7b347acc66"
+  },
+  "cells": [
+    {
+      "id": "djinn-numeralSuccessor",
+      "operation": "numeralSuccessor",
+      "status": "passed",
+      "accepted": true,
+      "observations": {
+        "checked": 15,
+        "true": 1,
+        "false": 14,
+        "error": 0,
+        "timeout": 0,
+        "window": 65536
+      },
+      "full_type": "(forall r. (r -> r) -> r -> r) -> (forall r. (r -> r) -> r -> r)",
+      "predicate_sha256": "3372599dea2cae4a1156a37d544b48965f490671c826367df8e90f4e62b35b1b",
+      "command": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-numeralSuccessor.commands.txt",
+        "sha256": "0664d430e2067207f1c2f86c12b390e99f67ccf3efebb68817a5469f6f99e55e"
+      },
+      "actual_stdin": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-numeralSuccessor-synthesis.input.txt",
+        "sha256": "0664d430e2067207f1c2f86c12b390e99f67ccf3efebb68817a5469f6f99e55e"
+      },
+      "actual_stdin_equals_commands": true,
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-numeralSuccessor-synthesis.stdout.txt",
+        "sha256": "7797d23584725989246631460cb71e8047f73bb397978388e10e48054b94fd2d"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-numeralSuccessor-synthesis.stderr.txt",
+        "sha256": "77293d6d69a7774e22cbb3fa68b30ff57bc4aeb442b34527140d3c9948b23534"
+      },
+      "provider_inventory": [],
+      "process_seconds": 2.336806899984367,
+      "definition": "extended_djinn_numeralSuccessor a b c = b (a b c)",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-numeralSuccessor\\Candidate.hs",
+            "sha256": "bf78a8fa05cedfcb0851aa3b56634a998be928d33b1b87d31a9bfb4a7de01299"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-numeralSuccessor\\Main.hs",
+            "sha256": "2d6c2f1f112fde2501ab83d37a069d78c8f342a318f34e205c770a6aa99e2136"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-numeralSuccessor\\replay.exe",
+          "sha256": "dd52950b966059a0e2153cad17b14178846fe8f43844e5b8779fdc2896a412f2"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-numeralSuccessor-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-numeralSuccessor-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-numeralSuccessor-execute.stdout.txt",
+          "sha256": "e50ceadefd9f8ca1011a86894e3193a08d0d053c05f66de86292fdcb9641d8f2"
+        },
+        "pass_labels": [
+          "djinn-numeralSuccessor"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "djinn-foldr",
+      "operation": "foldr",
+      "status": "passed",
+      "accepted": true,
+      "observations": {
+        "checked": 2,
+        "true": 1,
+        "false": 1,
+        "error": 0,
+        "timeout": 0,
+        "window": 65536
+      },
+      "full_type": "(forall church0 church1. ((church0 -> (church1 -> church1)) -> (church1 -> ((forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2))) -> church1))))",
+      "predicate_sha256": "c6cbb3732f2d4b63af410fad6882dc69231a529f412d4a840a30e3fe964c389a",
+      "command": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-foldr.commands.txt",
+        "sha256": "ae3aaf0d1ca056178cba94f29b26d95f4f248042d7e080b20ddf5260ddb247b8"
+      },
+      "actual_stdin": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-foldr-synthesis.input.txt",
+        "sha256": "ae3aaf0d1ca056178cba94f29b26d95f4f248042d7e080b20ddf5260ddb247b8"
+      },
+      "actual_stdin_equals_commands": true,
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-foldr-synthesis.stdout.txt",
+        "sha256": "776ac2fd722764cb6a6d856db33831f84eee4811559e3b38fef5ac07bb7a6316"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-foldr-synthesis.stderr.txt",
+        "sha256": "e069a02bab44f42c61c950b4f16db74ae5056cbf7ea9af22e36a043c78c94490"
+      },
+      "provider_inventory": [],
+      "process_seconds": 1.2032543999957852,
+      "definition": "extended_djinn_foldr a b c = c a b",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-foldr\\Candidate.hs",
+            "sha256": "33bc5b9aafd82ffa1c5aa1260c63df6dc6b2dc345a05a4be8d7849d4606554e2"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-foldr\\Main.hs",
+            "sha256": "58786143bf91931a9a59c47c49ff5be35b3b5ad888b0ba04d32be1e2a396dd3c"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-foldr\\replay.exe",
+          "sha256": "de91f5a1744ec626b89796d1e6aff3ad9ea49640fe055e68147917828e28f5fb"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-foldr-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-foldr-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-foldr-execute.stdout.txt",
+          "sha256": "4041e1e65f1771545885f1cb629ee84e4b463ee7338dc8b377930be24d943e12"
+        },
+        "pass_labels": [
+          "djinn-foldr"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "djinn-listToMaybe",
+      "operation": "listToMaybe",
+      "status": "passed",
+      "accepted": true,
+      "observations": {
+        "checked": 3,
+        "true": 1,
+        "false": 2,
+        "error": 0,
+        "timeout": 0,
+        "window": 65536
+      },
+      "full_type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> (forall church2. (church2 -> ((church0 -> church2) -> church2)))))",
+      "predicate_sha256": "ac3d5e59575b8e3bc661052ac77761d6cb2f2246bbfd62ae86d29889fdcc1213",
+      "command": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-listToMaybe.commands.txt",
+        "sha256": "b26ade19a45779104c551f852d7f59fae32d62042599b99080a0e88941c5bd96"
+      },
+      "actual_stdin": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-listToMaybe-synthesis.input.txt",
+        "sha256": "b26ade19a45779104c551f852d7f59fae32d62042599b99080a0e88941c5bd96"
+      },
+      "actual_stdin_equals_commands": true,
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-listToMaybe-synthesis.stdout.txt",
+        "sha256": "d18dd1282b08e3c508fd0d38fb9f963c56eff554eaf9c2d520223c788ffc16c7"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-listToMaybe-synthesis.stderr.txt",
+        "sha256": "758619e87e2ea869d5bccbcc8f11b7c394c9ed5cd3e09fa73e4b1d8b5bb69e5f"
+      },
+      "provider_inventory": [],
+      "process_seconds": 1.2612894999911077,
+      "definition": "extended_djinn_listToMaybe a =\n  a (\\b _ _ _ c -> c b) (\\_ d _ -> d) a",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-listToMaybe\\Candidate.hs",
+            "sha256": "3571ae68b7f842af4e78cf77a1f88a01e6f400e26f2d2c23a1b0a582d289df9d"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-listToMaybe\\Main.hs",
+            "sha256": "4e821aae1caed4c0008d9e7ec288c02a637993d137ecf3150348367f5dbe2897"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-listToMaybe\\replay.exe",
+          "sha256": "7f198644d918a57836e820490ea2bee5d69f581e68b2578a72223a941792009d"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-listToMaybe-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-listToMaybe-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-listToMaybe-execute.stdout.txt",
+          "sha256": "80e2a257808d3d0225bb6079d9cc1b6f7db17eef8249d7fa7ddfb680b6d88a79"
+        },
+        "pass_labels": [
+          "djinn-listToMaybe"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "djinn-catMaybes",
+      "operation": "catMaybes",
+      "status": "passed",
+      "accepted": true,
+      "observations": {
+        "checked": 35,
+        "true": 1,
+        "false": 34,
+        "error": 0,
+        "timeout": 0,
+        "window": 65536
+      },
+      "full_type": "(forall church0. ((forall church2. (((forall church1. (church1 -> ((church0 -> church1) -> church1))) -> (church2 -> church2)) -> (church2 -> church2))) -> (forall church3. ((church0 -> (church3 -> church3)) -> (church3 -> church3)))))",
+      "predicate_sha256": "c080dae8190f16340e42602f0619c79d50e5bdfaad3305b5eb1ca2d3f944f51c",
+      "command": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-catMaybes.commands.txt",
+        "sha256": "cb443312c6fd1d7708ac99dcb6a980c870012d8720b0d4647d0cbdfe9957e2aa"
+      },
+      "actual_stdin": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-catMaybes-synthesis.input.txt",
+        "sha256": "cb443312c6fd1d7708ac99dcb6a980c870012d8720b0d4647d0cbdfe9957e2aa"
+      },
+      "actual_stdin_equals_commands": true,
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-catMaybes-synthesis.stdout.txt",
+        "sha256": "db01fbf2ae6045607bad22b7d66210c222cd3d1a3452ebcd45968674d1605cf8"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-catMaybes-synthesis.stderr.txt",
+        "sha256": "f166c3611bf9e2470f079384ab6ff1e61773e1c172fa79579d00cbaf6dc1d8e3"
+      },
+      "provider_inventory": [],
+      "process_seconds": 2.2671508000348695,
+      "definition": "extended_djinn_catMaybes a b = a (\\c d -> c d (\\e -> b e d))",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-catMaybes\\Candidate.hs",
+            "sha256": "6304d0dd711e0eb15fc8694cf527a9103e57accf63ebab0c51ae33396800f82d"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-catMaybes\\Main.hs",
+            "sha256": "a184badc91fef4c8d054d3fb9c1e7fa572ecc23b5c359ae25902ef49799db679"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-catMaybes\\replay.exe",
+          "sha256": "5b2dabc00b57433dfc19943f9f669b9546494d1e37ba59c1994244df27442936"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-catMaybes-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-catMaybes-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-catMaybes-execute.stdout.txt",
+          "sha256": "1a83519e8796bd293b40bd6f62015af9a0b363d3a7929d91061ed29ff245f0be"
+        },
+        "pass_labels": [
+          "djinn-catMaybes"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "djinn-squashMaybe",
+      "operation": "squashMaybe",
+      "status": "passed",
+      "accepted": true,
+      "observations": {
+        "checked": 3,
+        "true": 1,
+        "false": 2,
+        "error": 0,
+        "timeout": 0,
+        "window": 65536
+      },
+      "full_type": "(forall church0. ((forall church2. (church2 -> (((forall church1. (church1 -> ((church0 -> church1) -> church1))) -> church2) -> church2))) -> (forall church3. (church3 -> ((church0 -> church3) -> church3)))))",
+      "predicate_sha256": "2716bdab1e291a34b73ad5db91442024de43dba4186a027c7b7d6c763e55d360",
+      "command": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-squashMaybe.commands.txt",
+        "sha256": "46775f3ab578790d0c3b715054fdac64039221a9ddbbb236e2c06cb4a88cc9fe"
+      },
+      "actual_stdin": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-squashMaybe-synthesis.input.txt",
+        "sha256": "46775f3ab578790d0c3b715054fdac64039221a9ddbbb236e2c06cb4a88cc9fe"
+      },
+      "actual_stdin_equals_commands": true,
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-squashMaybe-synthesis.stdout.txt",
+        "sha256": "17dd4734d440592f80ae8bdf1d8d2e097d1515b5a64b53258b750b2d4b8b01ff"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-squashMaybe-synthesis.stderr.txt",
+        "sha256": "758619e87e2ea869d5bccbcc8f11b7c394c9ed5cd3e09fa73e4b1d8b5bb69e5f"
+      },
+      "provider_inventory": [],
+      "process_seconds": 1.2424650999601,
+      "definition": "extended_djinn_squashMaybe a =\n  a (\\_ b _ -> b) (\\c _ -> c) (\\d _ -> d)",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-squashMaybe\\Candidate.hs",
+            "sha256": "f3e0355de5c30f795af9ea7ad59a69eadab9342131f03b565812766c2d66ee4b"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-squashMaybe\\Main.hs",
+            "sha256": "a410c2bb2915779576ddd2dddb9a15fdf9313847597d46d1fb51031f55997995"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-squashMaybe\\replay.exe",
+          "sha256": "ad0ca7e90ae61dbcd2cf43ae4a6851a257ff484a760667fe93dd22f8e23f78ac"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-squashMaybe-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-squashMaybe-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-squashMaybe-execute.stdout.txt",
+          "sha256": "4308ad776aecf1f10f44e71e863e69631d5d78d2fa0b57d8716200365f65abc1"
+        },
+        "pass_labels": [
+          "djinn-squashMaybe"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "djinn-isLeft",
+      "operation": "isLeft",
+      "status": "passed",
+      "accepted": true,
+      "observations": {
+        "checked": 6,
+        "true": 1,
+        "false": 5,
+        "error": 0,
+        "timeout": 0,
+        "window": 65536
+      },
+      "full_type": "(forall church0 church1. ((forall church2. ((church0 -> church2) -> ((church1 -> church2) -> church2))) -> (forall church3. (church3 -> (church3 -> church3)))))",
+      "predicate_sha256": "101aa97adf0209f929c952be10f8a444a9f55f20cb0a99396f9b6f00d48ca7b8",
+      "command": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-isLeft.commands.txt",
+        "sha256": "d60610abf9a24c05bca0ff98aedc0fa629ed604edda319ab9d99e34d088afb2d"
+      },
+      "actual_stdin": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-isLeft-synthesis.input.txt",
+        "sha256": "d60610abf9a24c05bca0ff98aedc0fa629ed604edda319ab9d99e34d088afb2d"
+      },
+      "actual_stdin_equals_commands": true,
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-isLeft-synthesis.stdout.txt",
+        "sha256": "f6e343a4268c5ee42c17c96d5a5143c569c31b651a24c054b3f4a6881056592a"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-isLeft-synthesis.stderr.txt",
+        "sha256": "12b6ce1d652dbe661b89eca5cb8f3dec50183d725cdd6f7aacfdb36246abb627"
+      },
+      "provider_inventory": [],
+      "process_seconds": 1.247081800014712,
+      "definition": "extended_djinn_isLeft a b c = a (\\_ -> b) (\\_ -> c)",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-isLeft\\Candidate.hs",
+            "sha256": "d057a61b6bcdb77a628ccbd85b420bc696682b6333776fc9dcd16ff38151f04a"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-isLeft\\Main.hs",
+            "sha256": "2b6dc2bb7bfa27e897228be71c96b273910f7ecf94b956d8d2168a0651eae2f2"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-isLeft\\replay.exe",
+          "sha256": "8455b8ffdf29ec8ae7a7e8f2fb29a7235e3c841827d0c84989a8851aaa305a73"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-isLeft-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-isLeft-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\candidate-djinn-isLeft-execute.stdout.txt",
+          "sha256": "0c15d9c724c091f50a3b4c03a985fdcca1dafda3995d61053569c8e357d7945f"
+        },
+        "pass_labels": [
+          "djinn-isLeft"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "djinn-maybeEither",
+      "operation": "maybeEither",
+      "status": "failed",
+      "accepted": false,
+      "observations": {
+        "checked": 364,
+        "true": 0,
+        "false": 363,
+        "error": 1,
+        "timeout": 0,
+        "window": 65536
+      },
+      "full_type": "(forall church0 church1. ((forall church4. (((forall church2. (church2 -> ((church0 -> church2) -> church2))) -> church4) -> (((forall church3. (church3 -> ((church1 -> church3) -> church3))) -> church4) -> church4))) -> (forall church6. (church6 -> (((forall church5. ((church0 -> church5) -> ((church1 -> church5) -> church5))) -> church6) -> church6)))))",
+      "predicate_sha256": "c0013244435599de626e38537c4af4dda5ed66f9ae5a8beaef33c1b28c110027",
+      "command": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-maybeEither.commands.txt",
+        "sha256": "b7de0feca2b58ee647d8ce483a9cde76528c7a96c57d07f9168e0be62339e4e2"
+      },
+      "actual_stdin": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-maybeEither-synthesis.input.txt",
+        "sha256": "b7de0feca2b58ee647d8ce483a9cde76528c7a96c57d07f9168e0be62339e4e2"
+      },
+      "actual_stdin_equals_commands": true,
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-maybeEither-synthesis.stdout.txt",
+        "sha256": "3cb9f2388cdb405ac4f4e698d996e3a9261c50317caf841c3ce86bc7d1aae950"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-maybeEither-synthesis.stderr.txt",
+        "sha256": "2dde365f586b20140c56c3a6bbaa132b2f21b3ecbd7e1f547030d5bd93992646"
+      },
+      "provider_inventory": [],
+      "process_seconds": 12.868688800022937,
+      "failure": "displayed success lacks a successful behavioral observation",
+      "classification": "bounded no-match at ChoicePointLimitReached, with one final compilation error",
+      "same_candidate_elaboration_retries": 22,
+      "retained_samples": [
+        {
+          "ordinal": 15,
+          "graph": "present",
+          "final_outcome": "BehavioralFalse"
+        },
+        {
+          "ordinal": 55,
+          "graph": "present",
+          "final_outcome": "BehavioralFalse"
+        },
+        {
+          "ordinal": 70,
+          "graph": "present",
+          "final_outcome": "BehavioralFalse"
+        }
+      ],
+      "interpretation": "The three sampled original GHC compilation failures were repaired into falsified candidates. They do not identify the one final error; this is not evidence of a general unsupported graph fragment or uninhabitation."
+    },
+    {
+      "id": "djinn-reject-all",
+      "operation": null,
+      "status": "passed",
+      "accepted": true,
+      "observations": {
+        "checked": 1,
+        "true": 0,
+        "false": 1,
+        "error": 0,
+        "timeout": 0,
+        "window": 65536
+      },
+      "full_type": "forall a. a -> a",
+      "predicate_sha256": "75a30f844f7c2393b1b42949eab35282db8362aed4ed22b85de05ac920f9d7d8",
+      "command": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-reject-all.commands.txt",
+        "sha256": "5a5dd17f141402ac53e847702e4b0f3f0616a6c6d994e84cda8054c0751ce37e"
+      },
+      "actual_stdin": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-reject-all-synthesis.input.txt",
+        "sha256": "5a5dd17f141402ac53e847702e4b0f3f0616a6c6d994e84cda8054c0751ce37e"
+      },
+      "actual_stdin_equals_commands": true,
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-reject-all-synthesis.stdout.txt",
+        "sha256": "3cb9f2388cdb405ac4f4e698d996e3a9261c50317caf841c3ce86bc7d1aae950"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\djinn-reject-all-synthesis.stderr.txt",
+        "sha256": "ed16817aff2618975bea0576b17f342d8a3fc928ce22694109dc0dec0a994e51"
+      },
+      "provider_inventory": [],
+      "process_seconds": 1.0922941999742761
+    }
+  ],
+  "oracle_controls": [
+    {
+      "id": "positive-numeralSuccessor",
+      "kind": "positive_oracle_witness",
+      "operation": "numeralSuccessor",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-numeralSuccessor\\Candidate.hs",
+            "sha256": "ffe798c6fd5571af49795c21c4179b75eb5e66a9bb68691de7237da23605b475"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-numeralSuccessor\\Main.hs",
+            "sha256": "211ba45530edfd975ef4d921578254868bb7194250584c639fe621686132a83c"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-numeralSuccessor\\replay.exe",
+          "sha256": "0c64c4e728d7083e599c204e2e94a3b2b90133d3f265879c36198c1577f2e8b8"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-numeralSuccessor-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-numeralSuccessor-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-numeralSuccessor-execute.stdout.txt",
+          "sha256": "796d03cb5d3e6daf59f2d72a977f87e73836c3b7c95abd3ff0c60abe6af1ffc0"
+        },
+        "pass_labels": [
+          "positive-numeralSuccessor"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "wrong-successor_identity",
+      "kind": "fully_typed_wrong_candidate",
+      "operation": "numeralSuccessor",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-successor_identity\\Candidate.hs",
+            "sha256": "f0c36c042f3ed7ff1418054ededd0025c287b365a38082ab1badf997b8160581"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-successor_identity\\Main.hs",
+            "sha256": "124d45e55ce0a5c98012f2d13bb5abad97ad3fdd29b234d6d566ddfd206d2a12"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-successor_identity\\replay.exe",
+          "sha256": "e422c885a0d9d54b3a63b55dfa4e997b1273cf03629e03929774402147e5a1fb"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-successor_identity-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-successor_identity-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-successor_identity-execute.stdout.txt",
+          "sha256": "48d200224f46f1dfc1ed58cbdc8ad04487101f250093a00c7237a6b00ff95c78"
+        },
+        "pass_labels": [
+          "wrong-successor_identity"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "positive-foldr",
+      "kind": "positive_oracle_witness",
+      "operation": "foldr",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-foldr\\Candidate.hs",
+            "sha256": "0bc0277bc5f795f65f74876d44f092a5091bddfae4628a1db34d03edf63a83f3"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-foldr\\Main.hs",
+            "sha256": "6c18e9654745e9f1910767727280421568d1fac449e51166241ffa9b1e837cde"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-foldr\\replay.exe",
+          "sha256": "5e107bd1cf4b560bfd84d5b2b002d5e39bfe9238f986efc7d3e11e731102080d"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-foldr-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-foldr-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-foldr-execute.stdout.txt",
+          "sha256": "a2cc7a7eb772d240d22c85eeafe93fbe817148ed1e68fc7b11d5dc3e87cbd697"
+        },
+        "pass_labels": [
+          "positive-foldr"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "wrong-foldr_seed",
+      "kind": "fully_typed_wrong_candidate",
+      "operation": "foldr",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-foldr_seed\\Candidate.hs",
+            "sha256": "282933054200b4cc14f8ce15192c4e3815aeca7c40bddf567e34fe3d09bbb34b"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-foldr_seed\\Main.hs",
+            "sha256": "942dab18f2a75bd65c8d67707f6a471d195d4fdadde905dc5d17e05e86e6df0a"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-foldr_seed\\replay.exe",
+          "sha256": "56557109ab913c625d1db70a79ef992045f5416d645e4c6af01d4991e670c9f9"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-foldr_seed-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-foldr_seed-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-foldr_seed-execute.stdout.txt",
+          "sha256": "84fa77d353aa4fd63a4cf7f06be15b5bfc4e430ff4d57ac5f4a88f56752db81d"
+        },
+        "pass_labels": [
+          "wrong-foldr_seed"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "wrong-foldr_reversed",
+      "kind": "fully_typed_wrong_candidate",
+      "operation": "foldr",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-foldr_reversed\\Candidate.hs",
+            "sha256": "258433c442ef719b06baf2cc5042d344c648476bac846dadc86913f556ae04a2"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-foldr_reversed\\Main.hs",
+            "sha256": "88099835d36941a724bf7cbb97082c8766540496ccab15444cd549288e5cdba3"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-foldr_reversed\\replay.exe",
+          "sha256": "2f0875d8f94f0bb8c8d5577dd22817d82010f597a38e7953b9f9463058f1e790"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-foldr_reversed-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-foldr_reversed-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-foldr_reversed-execute.stdout.txt",
+          "sha256": "9fc3085d7363a8b07980668d56116659a814457fea5de4c0608dbf1c7a21ccec"
+        },
+        "pass_labels": [
+          "wrong-foldr_reversed"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "positive-listToMaybe",
+      "kind": "positive_oracle_witness",
+      "operation": "listToMaybe",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-listToMaybe\\Candidate.hs",
+            "sha256": "c9bc6ce3f2ceb3796870c929abfbc8dc4e0ff1510257b511c2946362244cc7ec"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-listToMaybe\\Main.hs",
+            "sha256": "3dcd45022e43fd58d0e83c21b31d15ddb986a0e6052be11947c00d063400f29b"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-listToMaybe\\replay.exe",
+          "sha256": "818f69bc376028137b2f306933f4a0ebd4f73d6ef5e5bb1fc1112a0537041bc5"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-listToMaybe-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-listToMaybe-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-listToMaybe-execute.stdout.txt",
+          "sha256": "1d3b2ed6c8f70513d8ce7753ec9d3b23391ee6d9afa2615b7c7262f718d0601f"
+        },
+        "pass_labels": [
+          "positive-listToMaybe"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "wrong-listToMaybe_nothing",
+      "kind": "fully_typed_wrong_candidate",
+      "operation": "listToMaybe",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-listToMaybe_nothing\\Candidate.hs",
+            "sha256": "f4c63232896fd288963cafc96e3bf64a5609d4d2c49f5f7c4e0a66b5f581e3c4"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-listToMaybe_nothing\\Main.hs",
+            "sha256": "babf1688bb5e64a0e33cd296cc4a46eec0dccbfce595014bbcab22760b643355"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-listToMaybe_nothing\\replay.exe",
+          "sha256": "40e4c939d8549f654d27eaae6d248d903252b9d8913d6a39d3a705c3240b8b00"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-listToMaybe_nothing-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-listToMaybe_nothing-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-listToMaybe_nothing-execute.stdout.txt",
+          "sha256": "ed26304c51b1c5085836aeed128f44ea333979e8ea8677538e006b1d968e9d05"
+        },
+        "pass_labels": [
+          "wrong-listToMaybe_nothing"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "positive-catMaybes",
+      "kind": "positive_oracle_witness",
+      "operation": "catMaybes",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-catMaybes\\Candidate.hs",
+            "sha256": "b20dbe686fd51301a4e9b5f138bd95812a188ba23e38255d1d6e56a8d94e5a8f"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-catMaybes\\Main.hs",
+            "sha256": "1f122637cf220153af6f7e262b2e2a56cd40b299e41ce3cfad27e94f34ede10a"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-catMaybes\\replay.exe",
+          "sha256": "e3e799067e3b129abc08262982dc0cd7f5a9c5c5acd81d3e16de942f29c5c8ed"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-catMaybes-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-catMaybes-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-catMaybes-execute.stdout.txt",
+          "sha256": "9f300bdc269128120a438c47b0de44a1411b977d4f0dee547e820e7e446b0b33"
+        },
+        "pass_labels": [
+          "positive-catMaybes"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "wrong-catMaybes_empty",
+      "kind": "fully_typed_wrong_candidate",
+      "operation": "catMaybes",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-catMaybes_empty\\Candidate.hs",
+            "sha256": "1e8362d2c0d8593302534ec8601d665ff857342f0bd1cf781d0e5fb445479b5c"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-catMaybes_empty\\Main.hs",
+            "sha256": "0e1bbbaedd61b4c8b6b107a7813187cd2996764cd7f2f954f40bb7ac34878159"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-catMaybes_empty\\replay.exe",
+          "sha256": "6f7ba6ea9cfd5c018ce3ae6fea9de5153cbae5cdb8a03a76f88d6aece2f43063"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-catMaybes_empty-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-catMaybes_empty-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-catMaybes_empty-execute.stdout.txt",
+          "sha256": "abeef0c0dc3eaea25c46b8981bb48bc34db6ef313a3806ff7a17e84ca8fc06da"
+        },
+        "pass_labels": [
+          "wrong-catMaybes_empty"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "positive-squashMaybe",
+      "kind": "positive_oracle_witness",
+      "operation": "squashMaybe",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-squashMaybe\\Candidate.hs",
+            "sha256": "a71672d73a2006fd837ba3a198a018902448b820d7a4f8cb8ca0a8549f40d2b3"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-squashMaybe\\Main.hs",
+            "sha256": "2e6ad78af92e24585dcfe7060b7c54bc05346fd8cffda7be08dcd7ea81c8bfd6"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-squashMaybe\\replay.exe",
+          "sha256": "a8bcedac73239e4357800caf7754d461babf61872666546d320e3e12e3cbc453"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-squashMaybe-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-squashMaybe-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-squashMaybe-execute.stdout.txt",
+          "sha256": "44e73bc06a44c35d3bb8d777aa142b29e139b2302a357302219b168ebde98d1a"
+        },
+        "pass_labels": [
+          "positive-squashMaybe"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "wrong-squashMaybe_nothing",
+      "kind": "fully_typed_wrong_candidate",
+      "operation": "squashMaybe",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-squashMaybe_nothing\\Candidate.hs",
+            "sha256": "862c4d6d75a02bcdca5ec92f807076b456e3506b3ffd3ef56b8ec27c1d71a8a3"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-squashMaybe_nothing\\Main.hs",
+            "sha256": "1ce4cb86e1b2661a7ef0ed5478a663b58e4d42b0d7a65e3a73d89724248b64fb"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-squashMaybe_nothing\\replay.exe",
+          "sha256": "b2bdea5f4db6f194948f96d886f1505cc668bf87aa8dbb42e8a44c325e83a41b"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-squashMaybe_nothing-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-squashMaybe_nothing-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-squashMaybe_nothing-execute.stdout.txt",
+          "sha256": "bbb01b2f60e341482e0e6c6b57079ebaffb176c387a97369ae04f6fea1e04700"
+        },
+        "pass_labels": [
+          "wrong-squashMaybe_nothing"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "positive-isLeft",
+      "kind": "positive_oracle_witness",
+      "operation": "isLeft",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-isLeft\\Candidate.hs",
+            "sha256": "c3b068137441d08349dc4e66e908262ba17858727fdaf89e938782b0126968df"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-isLeft\\Main.hs",
+            "sha256": "bbe42538f578eaa219c81bf6ab1d76ec723e598804213744e28812c04c1a99d1"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-isLeft\\replay.exe",
+          "sha256": "9e4d456995dbd7d3da316f3c99155899ea5105edef53b8c82913a2eb50c529d9"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-isLeft-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-isLeft-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-isLeft-execute.stdout.txt",
+          "sha256": "143fd105439ba26471bcb73610f0f93c0fb25bb67e3dec229f905bd613b5fa44"
+        },
+        "pass_labels": [
+          "positive-isLeft"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "wrong-isLeft_negated",
+      "kind": "fully_typed_wrong_candidate",
+      "operation": "isLeft",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-isLeft_negated\\Candidate.hs",
+            "sha256": "4aea97a38aeeeb4af8fe48c7c97285d3881463850b1e42c87a6ec1e647ad56dc"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-isLeft_negated\\Main.hs",
+            "sha256": "6cb6deb87773be24136bf40ef9e3166ab1b0dfebbd145a9836f73c043cdf8799"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-isLeft_negated\\replay.exe",
+          "sha256": "7650031389441db7522101bcf0e2d77e6935fc82c9a0da78a9cb5e3ca24186b8"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-isLeft_negated-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-isLeft_negated-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-isLeft_negated-execute.stdout.txt",
+          "sha256": "ee6a4a6d706d9a55b6d699329b15b7baec44fbe49200fd57cd759129d03fc7c7"
+        },
+        "pass_labels": [
+          "wrong-isLeft_negated"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "positive-maybeEither",
+      "kind": "positive_oracle_witness",
+      "operation": "maybeEither",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-maybeEither\\Candidate.hs",
+            "sha256": "04da3b399f6ddad7a41ef0b4bf61096e644215720cd3929696e6a475a234e4a6"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-maybeEither\\Main.hs",
+            "sha256": "f4d4fd7c89404ed7786c848c37914799c6286ef1b80a185cd2e4ede3d8761c87"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-maybeEither\\replay.exe",
+          "sha256": "7c93e4ceada30d668503be43802ff3e27feb0960160d772c284fccb819bc92b0"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-maybeEither-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-maybeEither-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-positive-maybeEither-execute.stdout.txt",
+          "sha256": "b4db3c67b83d3cf10b745fa769ca794a99e49720af3b459b943891a2e65190cb"
+        },
+        "pass_labels": [
+          "positive-maybeEither"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    },
+    {
+      "id": "wrong-maybeEither_nothing",
+      "kind": "fully_typed_wrong_candidate",
+      "operation": "maybeEither",
+      "status": "passed",
+      "replay": {
+        "sources": [
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-maybeEither_nothing\\Candidate.hs",
+            "sha256": "937f2bfa0222e44346839a8db23b6464c637907ecea83c074323f1c1167f1417"
+          },
+          {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-maybeEither_nothing\\Main.hs",
+            "sha256": "5b4b6d22a45f72a6957d5397942f220b4219261bcda59232512e300211bdc3a4"
+          }
+        ],
+        "executable": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-maybeEither_nothing\\replay.exe",
+          "sha256": "b1de5a302e6555c2e931b840bb9754d1e3fefd7c2914c577797cfba460c432ac"
+        },
+        "compiler_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-maybeEither_nothing-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "compiler_stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-maybeEither_nothing-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "execution_stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-v2-remaining\\control-wrong-maybeEither_nothing-execute.stdout.txt",
+          "sha256": "d70ae0d3e162d7fa7480c1a6c7d04aee25a82f200e02c08048d759ff57b22c14"
+        },
+        "pass_labels": [
+          "wrong-maybeEither_nothing"
+        ],
+        "exact_full_type_definition_and_predicate_checked": true
+      }
+    }
+  ],
+  "all_50_processes_completed_exit_zero_without_outer_timeout": true,
+  "recorded_and_rechecked_source_executable_input_output_replay_integrity": true,
+  "updated_unique_coverage": {
+    "haskell_extended": {
+      "djinn": {
+        "accepted": 12,
+        "attempted": 13,
+        "missing": [
+          "maybeEither"
+        ]
+      },
+      "exference": {
+        "accepted": 12,
+        "attempted": 13,
+        "missing": [
+          "maybeEither"
+        ]
+      }
+    },
+    "selected_exference_explicit_defaults": {
+      "accepted": 2,
+      "attempted": 4,
+      "missing": [
+        "foldl1",
+        "at"
+      ]
+    }
+  },
+  "boundaries": [
+    "This is a disjoint seven-operation supplement, not a fresh thirteen-operation rerun.",
+    "The prior combined receipt and its historical harness/source hashes remain unchanged.",
+    "The separate native-Int partial at calibration is outside this receipt and was not inspected.",
+    "Source maps cover harness/specification/inputs, not all production source. The exact Djex and GHC binaries match the earlier runs.",
+    "No new compiler, synthesis, kernel, test or Git process was run during this offline read/hash audit.",
+    "All nineteen explicit-default cases and full cross-language/engine P4 acceptance remain required."
+  ],
+  "offline_audit": {
+    "script": {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\djinn-remaining-seven-audit-proposal-v1\\audit.py",
+      "sha256": "938fba34b2e4f27cb54892a2269a868f61cdc72ea754c893d6e0b7904b80559d"
+    },
+    "input_file_count": 192,
+    "manifest_sha256": "73b85f9d8b12d0ba96505f910757d32b2d9d3a3431edb388c81524ffb45224cd"
+  }
+}

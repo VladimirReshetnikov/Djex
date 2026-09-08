@@ -24,10 +24,19 @@ not that priority's broader contextual-evidence scope. Methods, superclass
 search, selected equal-predicate dictionaries and global contextual providers
 remain open. Priority 1's supported-fragment Haskell elaboration, including
 same-deadline failure-sample retention, is complete. Priorities 2–4 continue.
-Next are broader supplied-fold and tree acceptance after the native verification repair,
-broader Church behavior including all 19 explicit defaults, and one fully
+Next are the observed broader Church failures and remaining coverage,
+then supplied folds and trees after the native verification repair, and one fully
 described global `Type 0` provider under the current guard. Exact dictionary
 selection remains required before overlap restrictions are relaxed.
+
+The [current P4 coverage report](2026-09-07-priority4-behavioral-coverage.md)
+records **12/13 extended operations in each Haskell engine and 2/4 Exference
+explicit-default operations**, combining separate runs at their own
+harness pins. Fresh native-Int length acceptance passes in both Haskell engines.
+Lean Exference's selected first six now accept 6/6: five historical exact
+replays plus fresh native length. The separate runs preserve the original
+length fixture failure; they are not a fresh complete matrix. Original priority 4 remains open for the full 13 extended
+operations and all 19 explicit defaults across the required engines.
 
 The [accepted Leant environment repair](https://github.com/VladimirReshetnikov/Leant/blob/f35c243a9a2cf26d6c5ffe8c5e16ba4fba523b2e/docs/reports/2026-09-07-empty-environment-reuse.md) now reuses the exact empty user
 world for temporary behavioral checks. Original native Djinn append and length
@@ -337,22 +346,20 @@ acceptance and 680-test suite are recorded above. Broader priority 3 remains ope
   cells with exact owned provenance, full-type/payload replay, actual False
   controls and explicit metadata refusals. Do not substitute context erasure
   or broaden the supported universe/evidence fragment implicitly.
-- Advance priority 2 through reliable native verification and exact
-  candidate/request correlation. The [native trace receipt](https://github.com/VladimirReshetnikov/Leant/blob/469a822da0abfdc7a4d8228a203af0a0b7d2b59b/test-recursive/receipts/native-request-traces.json)
-  records passing length synthesis/replay and False control, but failed append
-  positive and False-control runs. Trace v1's sequential candidate/request
-  association does not establish a transport defect. Identify the failing
-  boundary before selecting a fix; retain original bounds, cancellation,
-  owned cleanup, context-preserving recovery and independent exact replay.
-  Supplied tree folds and accumulator programs can extend after native
-  verification is reliable, independently of dictionary selection.
-- Execute priority 4's additional totals and all nineteen explicit-default
-  counterparts, independently per engine and operation. Supplied-default
-  `head` passes live synthesis, GHC execution and False controls in both
-  Haskell engines. Both oracle preflights pass: 20 Lean files with 491 exact
-  inventories and 63 Haskell controls; all 736 observations remain. Most
-  expanded live cells remain open. Preflight and type inhabitation do not
-  establish behavioral synthesis.
+- Advance priority 2 from the accepted exact-empty-environment repair above.
+  Native Djinn append/length and their False controls now pass unchanged bounds;
+  retain lifecycle isolation, owned cleanup and context-preserving recovery as
+  regressions. Complete the remaining engine, supplied tree-fold and accumulator
+  coverage independently of dictionary selection. Earlier failed trace receipts
+  retain their historical diagnostic role.
+- Complete priority 4's full 13 extended operations and all nineteen explicit
+  defaults across both Haskell engines and all three Lean modes. Preserve the
+  current separate-run unions (12/13 extended operations in each Haskell
+  engine, 2/4 Exference defaults) and the Lean first-six composite 6/6 boundary. Close the exact
+  outstanding maybeEither and Exference foldl1/at cells, then the
+  unexecuted combinations. Earlier head and oracle receipts remain separate;
+  preflight, type inhabitation and repeating an accepted cell do not increase
+  behavioral coverage.
 - Extend priority 3 with one fully described global contextual provider in
   the existing `Type 0` fragment under the current non-overlap guard.
   Separately carry the proof-selected introduction and ordered slot through

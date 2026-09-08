@@ -124,3 +124,5 @@ Reports are listed oldest first.
 - 2026-09-06 — [Next synthesis priorities in Djex and Leant](2026-09-06-synthesis-next-priorities.md)
 - 2026-09-07 — [Implementation of synthesis priorities 1–4](2026-09-07-synthesis-priorities-1-4.md)
 - 2026-09-07 — [Synthesis re-triage after the Haskell elaboration checkpoint](2026-09-07-synthesis-retriage.md)
+
+- 2026-09-08 — [Expanded Church behavioral coverage and remaining delivery gates](2026-09-07-priority4-behavioral-coverage.md)

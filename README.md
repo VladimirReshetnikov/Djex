@@ -110,18 +110,24 @@ marks priority 1's supported-fragment Haskell elaboration complete: all 101
 CLI tests pass, including first/best/all repair selection, exact GHC replay,
 and retention of the original failed-candidate sample when its elaboration
 retry times out under the same deadline. Priorities 2–4 remain open. Next are
-broader supplied-fold and tree acceptance after the native Lean verification repair,
-broader Church behavior including all 19 explicit-default cases, and one fully
+the concrete broader Church failures and remaining defaulted cells, then
+supplied folds and trees after the native Lean verification repair, and one fully
 described global contextual provider under the existing `Type 0` non-overlap guard.
 Bounded Lean contexts now pass their complete 39-cell matrix and 680-test suite. Exact
 proof-selected dictionary transport remains required before that guard is
 relaxed, with payload-sensitive Haskell and Lean replay. Both partial oracle preflights now pass: all 20 Lean files with 491
 inventories (487 empty, four allowlisted observer/proofs), and all 63 Haskell
-controls. Expanded live behavioral acceptance for the additional totals and all
-19 supplied-default cases remains open. Supplied-default `head` now passes
-actual synthesis, exact GHC execution, and False controls in both Haskell
-engines; most expanded cells are still unaccepted. Oracle preflight and type
-inhabitation do not establish behavioral synthesis.
+controls. [Broader behavioral coverage](docs/reports/2026-09-07-priority4-behavioral-coverage.md)
+now combines separate accepted runs: **12/13 extended operations in each
+Haskell engine and 2/4 Exference explicit-default cases**.
+Fresh native-Int length synthesis and exact GHC replay pass in both Haskell
+engines. Both engines still lack `maybeEither`; Exference `foldl1` and `at`
+remain unaccepted at the recorded bounds. Lean Exference's selected first six accept 6/6 as a composite of five
+historical replays and the fresh native-length follow-up. These are subsets, not a
+fresh complete matrix: the full 13 extended operations and all 19 defaults
+across both Haskell engines and all three Lean modes remain required.
+Earlier supplied-default `head` acceptance has separate receipts. Oracle
+preflight and type inhabitation do not establish behavioral synthesis.
 
 The [supplied-fold composition report](docs/reports/2026-09-07-supplied-recursor-composition.md)
 describes synthesis of `map`, order-sensitive `append`, and generalized `length`

@@ -1,0 +1,884 @@
+{
+  "schema_version": 1,
+  "status": "partial P4 coverage with exact accepted operation union and preserved failures",
+  "whole_priority4_complete": false,
+  "validation_mode": "offline rehash of completed runs; no synthesis, GHC, kernel, tests or Git invoked",
+  "coverage": {
+    "haskell_exference_extended": {
+      "attempted_distinct": 13,
+      "accepted_distinct": 12,
+      "accepted_operations": [
+        "numeralAdd",
+        "fromMaybe",
+        "either",
+        "maybeToList",
+        "foldl",
+        "length",
+        "numeralSuccessor",
+        "foldr",
+        "listToMaybe",
+        "catMaybes",
+        "squashMaybe",
+        "isLeft"
+      ],
+      "unaccepted_operations": [
+        "maybeEither"
+      ]
+    },
+    "haskell_djinn_extended_first_batch": {
+      "attempted_distinct": 6,
+      "accepted_distinct": 6,
+      "accepted_operations": [
+        "numeralAdd",
+        "fromMaybe",
+        "either",
+        "maybeToList",
+        "foldl",
+        "length"
+      ],
+      "unaccepted_operations": []
+    },
+    "haskell_exference_selected_explicit_defaults": {
+      "attempted_distinct": 4,
+      "accepted_distinct": 2,
+      "accepted_operations": [
+        "last",
+        "atKey"
+      ],
+      "unaccepted_operations": [
+        "foldl1",
+        "at"
+      ]
+    }
+  },
+  "composition_rule": "Two disjoint Exference extended batches; Djinn first batch plus repaired length. Fresh Exference length repeats an already covered operation and adds no unique coverage. False/control runs do not count as operations.",
+  "executable": {
+    "path": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+    "sha256": "74e77fabd961d73b9629df1259d384d3fbfb055a4316f99ce5b6249645012706"
+  },
+  "ghc": {
+    "path": "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe",
+    "sha256": "0560906f7b7a046742d9e8433b95c0db49fc0c2fc28989e67cb23a7b347acc66"
+  },
+  "preserved_historical_audits": [
+    {
+      "receipt": {
+        "path": "haskell-exference-first-13-and-partial-four.json",
+        "sha256": "fc3cdcb7c50f42f4cefdb7f0de4a38c7a7ffb38506a43db6ca468e7a51328900"
+      },
+      "original": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-audit-proposal-v1\\receipt-proposal.json",
+        "sha256": "fc3cdcb7c50f42f4cefdb7f0de4a38c7a7ffb38506a43db6ca468e7a51328900"
+      },
+      "rehashed_artifact_count": 510,
+      "superseded_current_source_pins": [
+        {
+          "path": "C:\\Djex\\test-church\\behavior_extended_probe.py",
+          "historical_sha256": "efd59244dd4d19fba3115a0bfe50268f03c5b7a5e99f96a36608732ac1c26aee",
+          "current_sha256": "322efc48eb360517aec7315132e4830113d4e216f6651a6cdaafaa409eb73908",
+          "reason": "subsequent native-Int harness repair"
+        }
+      ]
+    },
+    {
+      "receipt": {
+        "path": "haskell-djinn-first-six.json",
+        "sha256": "8e21cda48c9686598010d170d979872ddac5c50278471cbb3af136f61bc36c21"
+      },
+      "original": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\djinn-first-six-audit-proposal-v1\\receipt-proposal.json",
+        "sha256": "8e21cda48c9686598010d170d979872ddac5c50278471cbb3af136f61bc36c21"
+      },
+      "rehashed_artifact_count": 168,
+      "superseded_current_source_pins": [
+        {
+          "path": "C:\\Djex\\test-church\\behavior_extended_probe.py",
+          "historical_sha256": "efd59244dd4d19fba3115a0bfe50268f03c5b7a5e99f96a36608732ac1c26aee",
+          "current_sha256": "322efc48eb360517aec7315132e4830113d4e216f6651a6cdaafaa409eb73908",
+          "reason": "subsequent native-Int harness repair"
+        }
+      ]
+    }
+  ],
+  "native_int_repair_runs": [
+    {
+      "run": "extended-djinn-length-native-int-v3",
+      "raw_receipt": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\results.json",
+        "sha256": "3b95a5286ec61d1c31cf59f2c22a83c6a98c71e323b4574e0518c7b5339cfc13"
+      },
+      "recorded_status": "passed",
+      "engine": "djinn",
+      "settings": {
+        "djinn": {
+          "window": 65536,
+          "budget": 500000,
+          "djinn_strategy": "interleave",
+          "steps": 100000,
+          "process_timeout": 300.0,
+          "queue": 8192
+        }
+      },
+      "live_query_timeout_seconds": 0,
+      "independent_evaluation_seconds": 2.0,
+      "source_manifest": {
+        "C:\\Djex\\test-church\\behavior_extended_probe.py": "322efc48eb360517aec7315132e4830113d4e216f6651a6cdaafaa409eb73908",
+        "C:\\Djex\\test-church\\behavior_extended_spec.py": "7c8f0f42c28b533e72ffe9debceaedad1192438820efc344dcbdfe76d04eb444",
+        "C:\\Djex\\test-church\\behavior_probe.py": "6093f0d122fc09e4fc5a84322042b106cce2f969fb417b9eb2d56c6c69332022",
+        "C:\\Djex\\test-church\\behavior_runtime.py": "b5240378e17d3fb25af8ad18fc0ba88f0226dc2116b99efe3300f4b006a88028",
+        "C:\\Djex\\test-church\\behavior_spec.py": "426fb6cf5e8a607608bed4ca52a74776cd38d1c5f7a5c49866fda6b2a98cedf4",
+        "C:\\Djex\\test-church\\manifest.json": "0c2954eeb36811ea065aba86187d09cd8761529de1acefd5111ccf088b189ed9",
+        "C:\\Djex\\docs\\examples\\Church.hs": "782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\numeric-fixture\\ExtendedNumeric.hs": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138"
+      },
+      "superseded_current_source_pins": [],
+      "numeric_fixture": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\numeric-fixture\\ExtendedNumeric.hs",
+        "sha256": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138",
+        "native_type": "Int (GHC implicit Prelude; checked unqualified external source type)",
+        "value_inventory": [
+          {
+            "name": "numericZero",
+            "type": "Int",
+            "definition": "0"
+          },
+          {
+            "name": "numericSuccessor",
+            "type": "Int -> Int",
+            "definition": "\\n -> n + 1"
+          }
+        ]
+      },
+      "cells": [
+        {
+          "id": "djinn-length",
+          "operation": "length",
+          "status": "passed",
+          "accepted": true,
+          "type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> Int))",
+          "search_type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> Int))",
+          "predicate_sha256": "b7452437eba6134d3fd6814ad95af874ff8f8f0cd37be111a1820711f7d1c406",
+          "observations": {
+            "checked": 9,
+            "true": 1,
+            "false": 8,
+            "error": 0,
+            "timeout": 0,
+            "window": 65536
+          },
+          "command": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\djinn-length.commands.txt",
+            "sha256": "1a13a4acb878c0ce3f2c54db3cf13b60fa534a14493403906b95198d3671ad4a"
+          },
+          "actual_stdin": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\djinn-length-synthesis.input.txt",
+            "sha256": "1a13a4acb878c0ce3f2c54db3cf13b60fa534a14493403906b95198d3671ad4a"
+          },
+          "actual_stdin_equals_commands": true,
+          "stdout": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\djinn-length-synthesis.stdout.txt",
+            "sha256": "008124001ac5b61ce964d3e35853e62f37fd445488027dbb645ef09fca71f9c7"
+          },
+          "stderr": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\djinn-length-synthesis.stderr.txt",
+            "sha256": "f29cedb25be65c156ce123c82b01f193f0180823f875f75421b30eab1c6d24b6"
+          },
+          "process_seconds": 1.1892160000279546,
+          "validated_settings": {
+            "backend": "djinn",
+            "ranking": "balanced",
+            "select": "first",
+            "render": "definition",
+            "prompt": "\"\"",
+            "allow-unused": "on",
+            "djinn-axioms": "on",
+            "djinn-strategy": "interleave",
+            "candidate-limit": "65536",
+            "quality-window": "65536",
+            "choice-budget": "500000",
+            "max-steps": "100000",
+            "max-queue": "8192"
+          },
+          "definition": "extended_djinn_length a = a (\\_ -> numericSuccessor) numericZero",
+          "provider_inventory": [
+            {
+              "name": "numericZero",
+              "type": "Int",
+              "definition": "0"
+            },
+            {
+              "name": "numericSuccessor",
+              "type": "Int -> Int",
+              "definition": "\\n -> n + 1"
+            }
+          ],
+          "observed_inventory": {
+            "declarations": [
+              "numericZero :: Int",
+              "numericSuccessor :: Int -> Int",
+              "data [] v0 = [] | (:) v0 [v0]",
+              "data () = ()",
+              "type Int :: Type"
+            ],
+            "builtin_declarations": [
+              "data [] v0 = [] | (:) v0 [v0]",
+              "data () = ()"
+            ],
+            "values": {
+              "numericZero": "Int",
+              "numericSuccessor": "Int -> Int"
+            },
+            "type_aliases": [],
+            "abstract_types": [
+              "type Int :: Type"
+            ]
+          },
+          "replay": {
+            "status": "passed",
+            "source_files": [
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\candidate-djinn-length\\Candidate.hs",
+                "sha256": "635e16a6d3c0e32635bb129f37c28a35e3fff8bbf7d88973d5d17d5a6f09418e"
+              },
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\candidate-djinn-length\\Main.hs",
+                "sha256": "cb90ba8040d183493587749aa27824040196348237e5e1a5e3a4676788a06a28"
+              },
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\candidate-djinn-length\\ExtendedNumeric.hs",
+                "sha256": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138"
+              }
+            ],
+            "executable": {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\candidate-djinn-length\\replay.exe",
+              "sha256": "b625c01de9684d1d27c8c1f4463ab4c8b84064321e0211322d0475aa6018bb73"
+            },
+            "pass_labels": [
+              "djinn-length"
+            ],
+            "full_original_type_exact_definition_predicate_verified": true
+          }
+        },
+        {
+          "id": "djinn-reject-all",
+          "operation": null,
+          "status": "passed",
+          "accepted": true,
+          "type": "forall a. a -> a",
+          "search_type": "forall a. a -> a",
+          "predicate_sha256": "75a30f844f7c2393b1b42949eab35282db8362aed4ed22b85de05ac920f9d7d8",
+          "observations": {
+            "checked": 1,
+            "true": 0,
+            "false": 1,
+            "error": 0,
+            "timeout": 0,
+            "window": 65536
+          },
+          "command": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\djinn-reject-all.commands.txt",
+            "sha256": "5a5dd17f141402ac53e847702e4b0f3f0616a6c6d994e84cda8054c0751ce37e"
+          },
+          "actual_stdin": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\djinn-reject-all-synthesis.input.txt",
+            "sha256": "5a5dd17f141402ac53e847702e4b0f3f0616a6c6d994e84cda8054c0751ce37e"
+          },
+          "actual_stdin_equals_commands": true,
+          "stdout": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\djinn-reject-all-synthesis.stdout.txt",
+            "sha256": "34d76f869505d2f37f6899ed3c488008ce86058805326f2044a170efd76e2535"
+          },
+          "stderr": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\djinn-reject-all-synthesis.stderr.txt",
+            "sha256": "ed16817aff2618975bea0576b17f342d8a3fc928ce22694109dc0dec0a994e51"
+          },
+          "process_seconds": 0.9314607999986038,
+          "validated_settings": {
+            "backend": "djinn",
+            "ranking": "balanced",
+            "select": "first",
+            "render": "definition",
+            "prompt": "\"\"",
+            "allow-unused": "on",
+            "djinn-axioms": "off",
+            "djinn-strategy": "interleave",
+            "candidate-limit": "65536",
+            "quality-window": "65536",
+            "choice-budget": "500000",
+            "max-steps": "100000",
+            "max-queue": "8192"
+          }
+        }
+      ],
+      "oracle_controls": [
+        {
+          "id": "positive-length",
+          "replay": {
+            "status": "passed",
+            "source_files": [
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\control-positive-length\\Candidate.hs",
+                "sha256": "ddb8ef961dd69708758853b0209e6a7e65f2afa504415113f043f8d15ebc258f"
+              },
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\control-positive-length\\Main.hs",
+                "sha256": "86172b41c87de0388c3ec7459682e9f9dfee5563cb4a34d2842d39ba027dcdc1"
+              },
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\control-positive-length\\ExtendedNumeric.hs",
+                "sha256": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138"
+              }
+            ],
+            "executable": {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\control-positive-length\\replay.exe",
+              "sha256": "ca2e742ca8fb3c4322464379c5e5a86151f6d724df7f42c4995849b6d6b98582"
+            },
+            "pass_labels": [
+              "positive-length"
+            ],
+            "full_original_type_exact_definition_predicate_verified": true
+          }
+        },
+        {
+          "id": "wrong-length_zero",
+          "replay": {
+            "status": "passed",
+            "source_files": [
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\control-wrong-length_zero\\Candidate.hs",
+                "sha256": "74b2616c4b529771d7982f3de062dfbf2fd7e97f976da67c2470bb17df582581"
+              },
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\control-wrong-length_zero\\Main.hs",
+                "sha256": "22707f24ab1ee303f87bcd4b0fc7920435609d79cf58039b7995e819c922ae01"
+              },
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\control-wrong-length_zero\\ExtendedNumeric.hs",
+                "sha256": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138"
+              }
+            ],
+            "executable": {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v3\\control-wrong-length_zero\\replay.exe",
+              "sha256": "b93a8b5af47362685f57f38c8e47c76876bcd282fa4a004edece2816539573f9"
+            },
+            "pass_labels": [
+              "wrong-length_zero"
+            ],
+            "full_original_type_exact_definition_predicate_verified": true
+          }
+        }
+      ],
+      "all_owned_processes_completed_exit_zero_without_outer_timeout": true,
+      "process_count": 8,
+      "recorded_source_and_executable_integrity": true,
+      "saved_inputs_outputs_replays_and_executables_rehashed": true
+    },
+    {
+      "run": "extended-exference-length-native-int-v3",
+      "raw_receipt": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\results.json",
+        "sha256": "b20266424951b4e3f4d61ef3d7e1780404fd69b901d58aed14b5385b1c470d1b"
+      },
+      "recorded_status": "passed",
+      "engine": "exference",
+      "settings": {
+        "exference": {
+          "window": 256,
+          "budget": 100000,
+          "djinn_strategy": "depth-first",
+          "steps": 100000,
+          "process_timeout": 300.0,
+          "queue": 8192
+        }
+      },
+      "live_query_timeout_seconds": 0,
+      "independent_evaluation_seconds": 2.0,
+      "source_manifest": {
+        "C:\\Djex\\test-church\\behavior_extended_probe.py": "322efc48eb360517aec7315132e4830113d4e216f6651a6cdaafaa409eb73908",
+        "C:\\Djex\\test-church\\behavior_extended_spec.py": "7c8f0f42c28b533e72ffe9debceaedad1192438820efc344dcbdfe76d04eb444",
+        "C:\\Djex\\test-church\\behavior_probe.py": "6093f0d122fc09e4fc5a84322042b106cce2f969fb417b9eb2d56c6c69332022",
+        "C:\\Djex\\test-church\\behavior_runtime.py": "b5240378e17d3fb25af8ad18fc0ba88f0226dc2116b99efe3300f4b006a88028",
+        "C:\\Djex\\test-church\\behavior_spec.py": "426fb6cf5e8a607608bed4ca52a74776cd38d1c5f7a5c49866fda6b2a98cedf4",
+        "C:\\Djex\\test-church\\manifest.json": "0c2954eeb36811ea065aba86187d09cd8761529de1acefd5111ccf088b189ed9",
+        "C:\\Djex\\docs\\examples\\Church.hs": "782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\numeric-fixture\\ExtendedNumeric.hs": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138"
+      },
+      "superseded_current_source_pins": [],
+      "numeric_fixture": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\numeric-fixture\\ExtendedNumeric.hs",
+        "sha256": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138",
+        "native_type": "Int (GHC implicit Prelude; checked unqualified external source type)",
+        "value_inventory": [
+          {
+            "name": "numericZero",
+            "type": "Int",
+            "definition": "0"
+          },
+          {
+            "name": "numericSuccessor",
+            "type": "Int -> Int",
+            "definition": "\\n -> n + 1"
+          }
+        ]
+      },
+      "cells": [
+        {
+          "id": "exference-length",
+          "operation": "length",
+          "status": "passed",
+          "accepted": true,
+          "type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> Int))",
+          "search_type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> Int))",
+          "predicate_sha256": "735c08b248ae8a2f0a0b4c9cdb1859ffe4e98101bf42ad7f61d1aff4776f5f3b",
+          "observations": {
+            "checked": 7,
+            "true": 1,
+            "false": 6,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\exference-length.commands.txt",
+            "sha256": "2e7062f2379eae8abe6574cadbb6cab3bd87d581991a566683366a7750c32ea8"
+          },
+          "actual_stdin": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\exference-length-synthesis.input.txt",
+            "sha256": "2e7062f2379eae8abe6574cadbb6cab3bd87d581991a566683366a7750c32ea8"
+          },
+          "actual_stdin_equals_commands": true,
+          "stdout": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\exference-length-synthesis.stdout.txt",
+            "sha256": "15c8d71cd533a6b3b4558ecb1dfa90c2a377ec53de348294dcc5611a97921456"
+          },
+          "stderr": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\exference-length-synthesis.stderr.txt",
+            "sha256": "79ae645660da6e385a6ac360eb54da835491fbbb2487fbd398755f386a6efe68"
+          },
+          "process_seconds": 1.3626520999823697,
+          "validated_settings": {
+            "backend": "exference",
+            "ranking": "balanced",
+            "select": "first",
+            "render": "definition",
+            "prompt": "\"\"",
+            "allow-unused": "on",
+            "djinn-axioms": "off",
+            "djinn-strategy": "depth-first",
+            "candidate-limit": "256",
+            "quality-window": "256",
+            "choice-budget": "100000",
+            "max-steps": "100000",
+            "max-queue": "8192"
+          },
+          "definition": "extended_exference_length f1 =\n  f1\n  (\\_ -> ExtendedNumeric.numericSuccessor)\n  ExtendedNumeric.numericZero",
+          "provider_inventory": [
+            {
+              "name": "numericZero",
+              "type": "Int",
+              "definition": "0"
+            },
+            {
+              "name": "numericSuccessor",
+              "type": "Int -> Int",
+              "definition": "\\n -> n + 1"
+            }
+          ],
+          "observed_inventory": {
+            "declarations": [
+              "ExtendedNumeric.numericZero :: Int",
+              "ExtendedNumeric.numericSuccessor :: Int -> Int"
+            ],
+            "builtin_declarations": [],
+            "values": {
+              "numericZero": "Int",
+              "numericSuccessor": "Int -> Int"
+            },
+            "type_aliases": [],
+            "abstract_types": []
+          },
+          "replay": {
+            "status": "passed",
+            "source_files": [
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\candidate-exference-length\\Candidate.hs",
+                "sha256": "c1d833e0b5fb99a4190cce2f5b1a49537c8edb38432bb3d8770d9bd705bd77c8"
+              },
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\candidate-exference-length\\Main.hs",
+                "sha256": "788a042f02ddb62e6698eaafdbe1f8da900df20a44740c140aeca7e1ddca7cc1"
+              },
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\candidate-exference-length\\ExtendedNumeric.hs",
+                "sha256": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138"
+              }
+            ],
+            "executable": {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\candidate-exference-length\\replay.exe",
+              "sha256": "57a3ccf0ab8b1d7a3750ba4bf33607563bef0a255de7579b1dbabf54a5dc53c6"
+            },
+            "pass_labels": [
+              "exference-length"
+            ],
+            "full_original_type_exact_definition_predicate_verified": true
+          }
+        },
+        {
+          "id": "exference-reject-all",
+          "operation": null,
+          "status": "passed",
+          "accepted": true,
+          "type": "forall a. a -> a",
+          "search_type": "forall a. a -> a",
+          "predicate_sha256": "75a30f844f7c2393b1b42949eab35282db8362aed4ed22b85de05ac920f9d7d8",
+          "observations": {
+            "checked": 256,
+            "true": 0,
+            "false": 256,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\exference-reject-all.commands.txt",
+            "sha256": "1867ee4f1a82c6c35427d3b170c239ae834233ab03fc72f7cbebd75c38554ede"
+          },
+          "actual_stdin": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\exference-reject-all-synthesis.input.txt",
+            "sha256": "1867ee4f1a82c6c35427d3b170c239ae834233ab03fc72f7cbebd75c38554ede"
+          },
+          "actual_stdin_equals_commands": true,
+          "stdout": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\exference-reject-all-synthesis.stdout.txt",
+            "sha256": "bd7dd5a8695d8ab0e91c4821e56075c0af69f56a4d7689dad177d840d994f9d4"
+          },
+          "stderr": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\exference-reject-all-synthesis.stderr.txt",
+            "sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae"
+          },
+          "process_seconds": 1.2159863999695517,
+          "validated_settings": {
+            "backend": "exference",
+            "ranking": "balanced",
+            "select": "first",
+            "render": "definition",
+            "prompt": "\"\"",
+            "allow-unused": "on",
+            "djinn-axioms": "off",
+            "djinn-strategy": "depth-first",
+            "candidate-limit": "256",
+            "quality-window": "256",
+            "choice-budget": "100000",
+            "max-steps": "100000",
+            "max-queue": "8192"
+          }
+        }
+      ],
+      "oracle_controls": [
+        {
+          "id": "positive-length",
+          "replay": {
+            "status": "passed",
+            "source_files": [
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\control-positive-length\\Candidate.hs",
+                "sha256": "ddb8ef961dd69708758853b0209e6a7e65f2afa504415113f043f8d15ebc258f"
+              },
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\control-positive-length\\Main.hs",
+                "sha256": "86172b41c87de0388c3ec7459682e9f9dfee5563cb4a34d2842d39ba027dcdc1"
+              },
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\control-positive-length\\ExtendedNumeric.hs",
+                "sha256": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138"
+              }
+            ],
+            "executable": {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\control-positive-length\\replay.exe",
+              "sha256": "fdc24f7bdf1ceacfdd8278ef3200124604e30286e92106f766fca01583e25440"
+            },
+            "pass_labels": [
+              "positive-length"
+            ],
+            "full_original_type_exact_definition_predicate_verified": true
+          }
+        },
+        {
+          "id": "wrong-length_zero",
+          "replay": {
+            "status": "passed",
+            "source_files": [
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\control-wrong-length_zero\\Candidate.hs",
+                "sha256": "74b2616c4b529771d7982f3de062dfbf2fd7e97f976da67c2470bb17df582581"
+              },
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\control-wrong-length_zero\\Main.hs",
+                "sha256": "22707f24ab1ee303f87bcd4b0fc7920435609d79cf58039b7995e819c922ae01"
+              },
+              {
+                "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\control-wrong-length_zero\\ExtendedNumeric.hs",
+                "sha256": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138"
+              }
+            ],
+            "executable": {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-length-native-int-v3\\control-wrong-length_zero\\replay.exe",
+              "sha256": "aa1634c3114f8a2a67ddfb95668b4a6d7807f3a3d9c80d874f09b80ae03e7e66"
+            },
+            "pass_labels": [
+              "wrong-length_zero"
+            ],
+            "full_original_type_exact_definition_predicate_verified": true
+          }
+        }
+      ],
+      "all_owned_processes_completed_exit_zero_without_outer_timeout": true,
+      "process_count": 8,
+      "recorded_source_and_executable_integrity": true,
+      "saved_inputs_outputs_replays_and_executables_rehashed": true
+    }
+  ],
+  "retained_kind_row_fixture_failure": {
+    "run": "extended-djinn-length-native-int-v2",
+    "raw_receipt": {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\results.json",
+      "sha256": "b64bac04f230b951497274c6781181c9cf6b1fea8c39c48314e2e92a6323ab5a"
+    },
+    "recorded_status": "failed",
+    "engine": "djinn",
+    "settings": {
+      "djinn": {
+        "window": 65536,
+        "budget": 500000,
+        "djinn_strategy": "interleave",
+        "steps": 100000,
+        "process_timeout": 300.0,
+        "queue": 8192
+      }
+    },
+    "live_query_timeout_seconds": 0,
+    "independent_evaluation_seconds": 2.0,
+    "source_manifest": {
+      "C:\\Djex\\test-church\\behavior_extended_probe.py": "60bb3e2e1bad4b5a2c7138460df8289daf8e7b7b40d0beb810b6cf59edbf8507",
+      "C:\\Djex\\test-church\\behavior_extended_spec.py": "7c8f0f42c28b533e72ffe9debceaedad1192438820efc344dcbdfe76d04eb444",
+      "C:\\Djex\\test-church\\behavior_probe.py": "6093f0d122fc09e4fc5a84322042b106cce2f969fb417b9eb2d56c6c69332022",
+      "C:\\Djex\\test-church\\behavior_runtime.py": "b5240378e17d3fb25af8ad18fc0ba88f0226dc2116b99efe3300f4b006a88028",
+      "C:\\Djex\\test-church\\behavior_spec.py": "426fb6cf5e8a607608bed4ca52a74776cd38d1c5f7a5c49866fda6b2a98cedf4",
+      "C:\\Djex\\test-church\\manifest.json": "0c2954eeb36811ea065aba86187d09cd8761529de1acefd5111ccf088b189ed9",
+      "C:\\Djex\\docs\\examples\\Church.hs": "782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\numeric-fixture\\ExtendedNumeric.hs": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138"
+    },
+    "superseded_current_source_pins": [
+      {
+        "path": "C:\\Djex\\test-church\\behavior_extended_probe.py",
+        "historical_sha256": "60bb3e2e1bad4b5a2c7138460df8289daf8e7b7b40d0beb810b6cf59edbf8507",
+        "current_sha256": "322efc48eb360517aec7315132e4830113d4e216f6651a6cdaafaa409eb73908"
+      }
+    ],
+    "numeric_fixture": {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\numeric-fixture\\ExtendedNumeric.hs",
+      "sha256": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138",
+      "native_type": "Int (GHC implicit Prelude; checked unqualified external source type)",
+      "value_inventory": [
+        {
+          "name": "numericZero",
+          "type": "Int",
+          "definition": "0"
+        },
+        {
+          "name": "numericSuccessor",
+          "type": "Int -> Int",
+          "definition": "\\n -> n + 1"
+        }
+      ]
+    },
+    "cells": [
+      {
+        "id": "djinn-length",
+        "operation": "length",
+        "status": "failed",
+        "accepted": false,
+        "type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> Int))",
+        "search_type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> Int))",
+        "predicate_sha256": "b7452437eba6134d3fd6814ad95af874ff8f8f0cd37be111a1820711f7d1c406",
+        "observations": {
+          "checked": 9,
+          "true": 1,
+          "false": 8,
+          "error": 0,
+          "timeout": 0,
+          "window": 65536
+        },
+        "command": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\djinn-length.commands.txt",
+          "sha256": "a83baa8de48405a75ed51a73f16b62cd0a13f217bba024c777f3b0e7afd62ae0"
+        },
+        "actual_stdin": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\djinn-length-synthesis.input.txt",
+          "sha256": "a83baa8de48405a75ed51a73f16b62cd0a13f217bba024c777f3b0e7afd62ae0"
+        },
+        "actual_stdin_equals_commands": true,
+        "stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\djinn-length-synthesis.stdout.txt",
+          "sha256": "b5d189982bdb976005a950ffc9a2399bdcf161383fcc8c89d85ec62cf177e272"
+        },
+        "stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\djinn-length-synthesis.stderr.txt",
+          "sha256": "f29cedb25be65c156ce123c82b01f193f0180823f875f75421b30eab1c6d24b6"
+        },
+        "process_seconds": 1.317588300036732,
+        "validated_settings": {
+          "backend": "djinn",
+          "ranking": "balanced",
+          "select": "first",
+          "render": "definition",
+          "prompt": "\"\"",
+          "allow-unused": "on",
+          "djinn-axioms": "on",
+          "djinn-strategy": "interleave",
+          "candidate-limit": "65536",
+          "quality-window": "65536",
+          "choice-budget": "500000",
+          "max-steps": "100000",
+          "max-queue": "8192"
+        },
+        "failure": "unexpected declaration in numeric search inventory: type Int :: Type",
+        "failure_category": "fixture rejected actual abstract-kind browse row after live synthesis; no candidate replay accepted"
+      },
+      {
+        "id": "djinn-reject-all",
+        "operation": null,
+        "status": "passed",
+        "accepted": true,
+        "type": "forall a. a -> a",
+        "search_type": "forall a. a -> a",
+        "predicate_sha256": "75a30f844f7c2393b1b42949eab35282db8362aed4ed22b85de05ac920f9d7d8",
+        "observations": {
+          "checked": 1,
+          "true": 0,
+          "false": 1,
+          "error": 0,
+          "timeout": 0,
+          "window": 65536
+        },
+        "command": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\djinn-reject-all.commands.txt",
+          "sha256": "5a5dd17f141402ac53e847702e4b0f3f0616a6c6d994e84cda8054c0751ce37e"
+        },
+        "actual_stdin": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\djinn-reject-all-synthesis.input.txt",
+          "sha256": "5a5dd17f141402ac53e847702e4b0f3f0616a6c6d994e84cda8054c0751ce37e"
+        },
+        "actual_stdin_equals_commands": true,
+        "stdout": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\djinn-reject-all-synthesis.stdout.txt",
+          "sha256": "d4298b42efd573e031f4e4cda7553e37fbe4764d3fd8446199b558d1da86eb6f"
+        },
+        "stderr": {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\djinn-reject-all-synthesis.stderr.txt",
+          "sha256": "ed16817aff2618975bea0576b17f342d8a3fc928ce22694109dc0dec0a994e51"
+        },
+        "process_seconds": 0.9154013999504969,
+        "validated_settings": {
+          "backend": "djinn",
+          "ranking": "balanced",
+          "select": "first",
+          "render": "definition",
+          "prompt": "\"\"",
+          "allow-unused": "on",
+          "djinn-axioms": "off",
+          "djinn-strategy": "interleave",
+          "candidate-limit": "65536",
+          "quality-window": "65536",
+          "choice-budget": "500000",
+          "max-steps": "100000",
+          "max-queue": "8192"
+        }
+      }
+    ],
+    "oracle_controls": [
+      {
+        "id": "positive-length",
+        "replay": {
+          "status": "passed",
+          "source_files": [
+            {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\control-positive-length\\Candidate.hs",
+              "sha256": "ddb8ef961dd69708758853b0209e6a7e65f2afa504415113f043f8d15ebc258f"
+            },
+            {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\control-positive-length\\Main.hs",
+              "sha256": "86172b41c87de0388c3ec7459682e9f9dfee5563cb4a34d2842d39ba027dcdc1"
+            },
+            {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\control-positive-length\\ExtendedNumeric.hs",
+              "sha256": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138"
+            }
+          ],
+          "executable": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\control-positive-length\\replay.exe",
+            "sha256": "adea434eb04e3e9c52c43653e2027e2af78198b01dad680f0e5edc472e8cccb8"
+          },
+          "pass_labels": [
+            "positive-length"
+          ],
+          "full_original_type_exact_definition_predicate_verified": true
+        }
+      },
+      {
+        "id": "wrong-length_zero",
+        "replay": {
+          "status": "passed",
+          "source_files": [
+            {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\control-wrong-length_zero\\Candidate.hs",
+              "sha256": "74b2616c4b529771d7982f3de062dfbf2fd7e97f976da67c2470bb17df582581"
+            },
+            {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\control-wrong-length_zero\\Main.hs",
+              "sha256": "22707f24ab1ee303f87bcd4b0fc7920435609d79cf58039b7995e819c922ae01"
+            },
+            {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\control-wrong-length_zero\\ExtendedNumeric.hs",
+              "sha256": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138"
+            }
+          ],
+          "executable": {
+            "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-djinn-length-native-int-v2\\control-wrong-length_zero\\replay.exe",
+            "sha256": "11851bdf9dba834dd88ac1d1081f1b4a08aa7b9f8ad4e93cdd03564a56f8060b"
+          },
+          "pass_labels": [
+            "wrong-length_zero"
+          ],
+          "full_original_type_exact_definition_predicate_verified": true
+        }
+      }
+    ],
+    "all_owned_processes_completed_exit_zero_without_outer_timeout": true,
+    "process_count": 6,
+    "recorded_source_and_executable_integrity": true,
+    "saved_inputs_outputs_replays_and_executables_rehashed": true
+  },
+  "boundaries": [
+    "Not a fresh complete matrix: operation acceptance is drawn from the listed separate runs and their own harness hashes.",
+    "Only the subsequent numeric fixture harness bytes differ from the preserved audits; their saved captures, fixtures, replays and actual Djex/GHC executable pins were rehashed.",
+    "Source maps cover harnesses/specifications/manifest/Church/generated inputs, not a complete production-source manifest.",
+    "The native Int implementation uses real GHC Int, zero and successor. The checked Djinn abstract head is printed type Int :: Type, not a fake empty datatype.",
+    "The old first Djinn length failure and v2 kind-row fixture failure remain failures; v3 independently supplies accepted synthesis and exact replay.",
+    "Djinn foldl had eight rejected compilation errors before its accepted exact replay; Exference atKey likewise retains its rejected-error history in the preserved audit.",
+    "Missing tested acceptances remain Exference maybeEither, foldl1 and at. Other Djinn extended/defaulted cells and Lean coverage are outside this receipt.",
+    "All 19 explicit-default cases remain required by original P4. This selected four-operation partial batch does not replace them; earlier head acceptance has its own receipts.",
+    "Finite examples and exact type/execution checks do not establish universal semantics or completeness."
+  ],
+  "offline_audit": {
+    "script": {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\combined-coverage-proposal-v1\\audit.py",
+      "sha256": "0bc93d60cf43b285fc5e689a8348424983b09834104c125d0dc99c8555c34b78"
+    },
+    "input_file_count": 770,
+    "audited_files": {
+      "path": "audited-files.json",
+      "sha256": "d8fadd0bffd9b3d8b50105dc762b51199c42e8253acacedbac634175204b2380"
+    }
+  }
+}

@@ -1,5 +1,15 @@
 # Church signature synthesis acceptance
 
+The [expanded behavioral coverage report](../docs/reports/2026-09-07-priority4-behavioral-coverage.md)
+records 12 of 13 extended operations in each Haskell engine and the separate
+explicit-default results. `behavior_extended_probe.py` and
+`behavior_partial_probe.py` run the canonical specifications with exact provider
+inventories, actual False controls, and independent full-signature GHC replay.
+The partial suite retains all 19 supplied-default operations. Its successful
+oracle controls and unsuccessful synthesis cells are reported separately.
+Use a fresh output directory for every run; these behavioral results are
+distinct from signature inhabitation below.
+
 The [Djinn streaming acceptance report](../docs/reports/2026-09-06-djinn-behavioral-streaming.md)
 and [compact paired receipt](receipts/behavior-streaming-final.json) record the
 later behavioral milestone: all six operations in both Haskell engines and

@@ -1,0 +1,1052 @@
+{
+  "schema": "djex-p4-partial-at-native-int-failure-audit-v1",
+  "status": "failed_subset_preserved",
+  "aggregate_passed": false,
+  "receipt": {
+    "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\results.json",
+    "sha256": "db42c8fafbc656a1ba62b218060c1da581187351fe61bbf4b44f11f84900a518"
+  },
+  "runtime_executed_by_auditor": false,
+  "selected_operations": [
+    "at"
+  ],
+  "accepted_candidates": 0,
+  "candidate_cells": 2,
+  "actual_false_controls_passed": 2,
+  "independent_oracle_and_primitive_controls_passed": 6,
+  "process_counts": {
+    "total": 16,
+    "completed_exit_zero": 15,
+    "outer_timed_out": 1
+  },
+  "settings": {
+    "djinn": {
+      "window": 65536,
+      "budget": 500000,
+      "djinn_strategy": "interleave",
+      "steps": 100000,
+      "process_timeout": 300.0,
+      "queue": 8192
+    },
+    "exference": {
+      "window": 256,
+      "budget": 100000,
+      "djinn_strategy": "depth-first",
+      "steps": 100000,
+      "process_timeout": 300.0,
+      "queue": 8192
+    }
+  },
+  "independent_evaluation_seconds": 2.0,
+  "numeric_fixture": {
+    "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\numeric-fixture\\PartialNumeric.hs",
+    "sha256": "7dc1dced74e4934ab53c5d2acd70a7e8aaeb1ac1c2d0c86ddaa90a2c5d9c3ca7",
+    "loaded_for_operations": [
+      "at"
+    ],
+    "native_type": "Int (GHC implicit Prelude; checked unqualified external source type)",
+    "value_inventory": [
+      {
+        "name": "partialIntCase",
+        "type": "forall r. Int -> r -> r -> (Int -> r) -> r",
+        "definition": "\\n negative zero positive -> if n < 0 then negative else if n == 0 then zero else positive (n - 1)"
+      }
+    ],
+    "native_Int_semantics": "Source Int is preserved. Haskell Int is machine bounded; Lean Int is unbounded. The generic predecessor branch subtracts only from positive inputs. Shared fixtures use representable values."
+  },
+  "scope": "Haskell only; all selected original partial signatures use their explicit manifest-documented supplied default. No original partial signature or Lean case is promoted to acceptance.",
+  "partial19_status": "not completed; this subset adds no accepted candidate and promotes no original partial signature",
+  "source_provenance": {
+    "source": "docs/examples/Church.hs",
+    "source_sha256": "782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11",
+    "manifest_sha256": "0c2954eeb36811ea065aba86187d09cd8761529de1acefd5111ccf088b189ed9",
+    "spec_sha256": "85066eab8089205346e591e3673f936844005e3846705c74d92d3a7e635b5716",
+    "extended_spec_sha256": "7c8f0f42c28b533e72ffe9debceaedad1192438820efc344dcbdfe76d04eb444",
+    "operations": [
+      "head",
+      "last",
+      "at",
+      "foldl1",
+      "foldr1",
+      "fromJust",
+      "fromLeft",
+      "fromRight",
+      "maximumBy",
+      "maximumOn",
+      "minimumBy",
+      "minimumOn",
+      "minMaxBy",
+      "minmaxElement",
+      "atKey",
+      "reduce",
+      "maximum",
+      "minimum",
+      "minMax"
+    ],
+    "int_scope": "Source Int is preserved. Haskell Int is machine bounded; Lean Int is unbounded. The generic predecessor branch subtracts only from positive inputs. Shared fixtures use representable values."
+  },
+  "source_pins": [
+    {
+      "path": "C:\\Djex\\test-church\\behavior_partial_probe.py",
+      "sha256": "c522ad9cbb27140733ea0cf933dbb937a9c9a5c4359061ae383e1dd639812dc4"
+    },
+    {
+      "path": "C:\\Djex\\test-church\\behavior_partial_spec.py",
+      "sha256": "85066eab8089205346e591e3673f936844005e3846705c74d92d3a7e635b5716"
+    },
+    {
+      "path": "C:\\Djex\\test-church\\behavior_extended_probe.py",
+      "sha256": "322efc48eb360517aec7315132e4830113d4e216f6651a6cdaafaa409eb73908"
+    },
+    {
+      "path": "C:\\Djex\\test-church\\behavior_extended_spec.py",
+      "sha256": "7c8f0f42c28b533e72ffe9debceaedad1192438820efc344dcbdfe76d04eb444"
+    },
+    {
+      "path": "C:\\Djex\\test-church\\behavior_probe.py",
+      "sha256": "6093f0d122fc09e4fc5a84322042b106cce2f969fb417b9eb2d56c6c69332022"
+    },
+    {
+      "path": "C:\\Djex\\test-church\\behavior_runtime.py",
+      "sha256": "b5240378e17d3fb25af8ad18fc0ba88f0226dc2116b99efe3300f4b006a88028"
+    },
+    {
+      "path": "C:\\Djex\\test-church\\behavior_spec.py",
+      "sha256": "426fb6cf5e8a607608bed4ca52a74776cd38d1c5f7a5c49866fda6b2a98cedf4"
+    },
+    {
+      "path": "C:\\Djex\\test-church\\manifest.json",
+      "sha256": "0c2954eeb36811ea065aba86187d09cd8761529de1acefd5111ccf088b189ed9"
+    },
+    {
+      "path": "C:\\Djex\\docs\\examples\\Church.hs",
+      "sha256": "782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\numeric-fixture\\PartialNumeric.hs",
+      "sha256": "7dc1dced74e4934ab53c5d2acd70a7e8aaeb1ac1c2d0c86ddaa90a2c5d9c3ca7"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\djinn-at.commands.txt",
+      "sha256": "7651bb03238a81a04e5893737dd1a8039f53dd22260429d11cc0276c0c272469"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\djinn-reject-all.commands.txt",
+      "sha256": "cabba9544c0c3d4123ac4ba91da1292ca33ab87bab800602a918a3bc6b5be557"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\exference-at.commands.txt",
+      "sha256": "6ae04e567ed93004321e6b27a141b671a379bef510bb29fd1fe6035e1fc74dcd"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\exference-reject-all.commands.txt",
+      "sha256": "f57d368bfd0890a44beac0926163a1a43ef386d4568abcb210cda322f4070b7c"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at\\Oracle.hs",
+      "sha256": "d962c13f36172012776012b72fbb717da4244a3b8fbb38ba03750491f8f0a6c7"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at\\Main.hs",
+      "sha256": "5c9bf6551153b7aee3c1a8d25494803d02c3368a911870544c1d2d11e1246275"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at\\Oracle.hs",
+      "sha256": "37e34e1da7672df8bb79d7441aedd0794fa69d86a280939675fb8c2db384a722"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at\\Main.hs",
+      "sha256": "396bee08653d12d07bbdf64ec664a44a957aa2e503a29aced03fc6fb3ae943fd"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at\\PartialNumeric.hs",
+      "sha256": "7dc1dced74e4934ab53c5d2acd70a7e8aaeb1ac1c2d0c86ddaa90a2c5d9c3ca7"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default\\Oracle.hs",
+      "sha256": "d23a19ce4567031e5b5ba62339ca78229ec0018e1b5fbb4b2eb250cd6978987c"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default\\Main.hs",
+      "sha256": "3c5ec069d420717ff2f1552e3cfe1f50ab4bc2aea67d267f0343efc38d97e444"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index\\Oracle.hs",
+      "sha256": "fb9c25839a708e0294e6209f728c9d5c3fb86f4637415162df0a4ca76cb1d100"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index\\Main.hs",
+      "sha256": "a50514d9671dc44992d84a1298331084669bbf0600d6f597a71db04356921bee"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive\\PartialNumeric.hs",
+      "sha256": "7dc1dced74e4934ab53c5d2acd70a7e8aaeb1ac1c2d0c86ddaa90a2c5d9c3ca7"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive\\Main.hs",
+      "sha256": "982ab2c6cad1e04eeaa2c356782881ff84edc846d62256f4c8569aba77a3c1e3"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean\\PartialNumeric.hs",
+      "sha256": "7dc1dced74e4934ab53c5d2acd70a7e8aaeb1ac1c2d0c86ddaa90a2c5d9c3ca7"
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean\\Main.hs",
+      "sha256": "7101362a76de04a6575afac0a37413457bb84103e131fe36321dcb2e61d89ebe"
+    }
+  ],
+  "executable_pins": [
+    {
+      "path": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+      "sha256": "74e77fabd961d73b9629df1259d384d3fbfb055a4316f99ce5b6249645012706"
+    },
+    {
+      "path": "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe",
+      "sha256": "0560906f7b7a046742d9e8433b95c0db49fc0c2fc28989e67cb23a7b347acc66"
+    }
+  ],
+  "recorded_and_rechecked_integrity": true,
+  "source_manifest_sha256": "8fe92c6c6130e572c021eb13efb562a76ac6bd34c25a7419a26ece6a915d9a1b",
+  "production_source_boundary": "Recorded runner/specification/generated-input hashes plus exact executable identity; not a complete production-source manifest.",
+  "cells": [
+    {
+      "id": "djinn-at",
+      "engine": "djinn",
+      "operation": "at",
+      "kind": "synthesis",
+      "status": "failed",
+      "accepted": false,
+      "type": "(forall church0. (church0 -> (Int -> ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> church0))))",
+      "search_type": "(forall church0. (church0 -> (Int -> ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> church0))))",
+      "finite_observation_count": 168,
+      "failure": "owned process exceeded the separate wall-clock guard: djinn-at-synthesis",
+      "classification": "outer_owned_process_timeout_without_completed_behavioral_summary",
+      "behavioral_observations_from_capture": null,
+      "no_displayed_definition": true,
+      "no_independent_candidate_replay": true,
+      "settings_rechecked_from_capture": {
+        "prompt": "\"\"",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "allow-unused": "on",
+        "djinn-axioms": "on",
+        "djinn-strategy": "interleave",
+        "candidate-limit": "65536",
+        "quality-window": "65536",
+        "choice-budget": "500000",
+        "max-steps": "100000",
+        "max-queue": "8192"
+      },
+      "query_timeout_seconds": 0,
+      "actual_ordered_inventory_from_capture": [
+        "partialIntCase :: Int -> v0 -> v0 -> (Int -> v0) -> v0",
+        "data [] v0 = [] | (:) v0 [v0]",
+        "data () = ()",
+        "type Int :: Type"
+      ],
+      "capture_inventory_is_offline_verified": true,
+      "original_harness_inventory_validation_completed": false,
+      "command": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\djinn-at.commands.txt",
+        "sha256": "7651bb03238a81a04e5893737dd1a8039f53dd22260429d11cc0276c0c272469"
+      },
+      "actual_stdin_equals_command_bytes": true,
+      "predicate_sha256": "104a5df68d6429cb4349cc240398726a7312f3c8c883c770a8a9c899ef004b73",
+      "diagnostic_lines": [
+        "warning: unknown type constructor 'Int' used in the binding PartialNumeric.partialIntCase"
+      ],
+      "process_label": "djinn-at-synthesis"
+    },
+    {
+      "id": "djinn-reject-all",
+      "engine": "djinn",
+      "operation": null,
+      "kind": "false_oracle_query",
+      "status": "passed",
+      "accepted": true,
+      "type": "forall a. a -> a",
+      "search_type": "forall a. a -> a",
+      "finite_observation_count": 1,
+      "failure": null,
+      "classification": "actual_false_oracle_rejection",
+      "behavioral_observations_from_capture": {
+        "checked": 1,
+        "true": 0,
+        "false": 1,
+        "error": 0,
+        "timeout": 0,
+        "window": 65536
+      },
+      "no_displayed_definition": true,
+      "no_independent_candidate_replay": true,
+      "settings_rechecked_from_capture": {
+        "prompt": "\"\"",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "interleave",
+        "candidate-limit": "65536",
+        "quality-window": "65536",
+        "choice-budget": "500000",
+        "max-steps": "100000",
+        "max-queue": "8192"
+      },
+      "query_timeout_seconds": 0,
+      "actual_ordered_inventory_from_capture": [
+        "data [] v0 = [] | (:) v0 [v0]",
+        "data () = ()"
+      ],
+      "capture_inventory_is_offline_verified": true,
+      "original_harness_inventory_validation_completed": true,
+      "command": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\djinn-reject-all.commands.txt",
+        "sha256": "cabba9544c0c3d4123ac4ba91da1292ca33ab87bab800602a918a3bc6b5be557"
+      },
+      "actual_stdin_equals_command_bytes": true,
+      "predicate_sha256": "75a30f844f7c2393b1b42949eab35282db8362aed4ed22b85de05ac920f9d7d8",
+      "diagnostic_lines": [
+        "info [DJEX_REPL_BEHAVIORAL_OBSERVATIONS]: behavioral predicate observations",
+        "  context: checked=1, true=0, false=1, error=0, timeout=0, window=65536",
+        "info [DJEX_REPL_BEHAVIORAL_NO_MATCH]: no candidate passed the behavioral predicate in the observed search"
+      ],
+      "process_label": "djinn-reject-all-synthesis"
+    },
+    {
+      "id": "exference-at",
+      "engine": "exference",
+      "operation": "at",
+      "kind": "synthesis",
+      "status": "failed",
+      "accepted": false,
+      "type": "(forall church0. (church0 -> (Int -> ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> church0))))",
+      "search_type": "(forall church0. (church0 -> (Int -> ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> church0))))",
+      "finite_observation_count": 168,
+      "failure": "displayed success lacks a successful behavioral observation",
+      "classification": "completed_finite_observation_window_no_survivor",
+      "behavioral_observations_from_capture": {
+        "checked": 256,
+        "true": 0,
+        "false": 256,
+        "error": 0,
+        "timeout": 0,
+        "window": 256
+      },
+      "no_displayed_definition": true,
+      "no_independent_candidate_replay": true,
+      "settings_rechecked_from_capture": {
+        "prompt": "\"\"",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "depth-first",
+        "candidate-limit": "256",
+        "quality-window": "256",
+        "choice-budget": "100000",
+        "max-steps": "100000",
+        "max-queue": "8192"
+      },
+      "query_timeout_seconds": 0,
+      "actual_ordered_inventory_from_capture": [
+        "PartialNumeric.partialIntCase :: Int -> v0 -> v0 -> (Int -> v0) -> v0"
+      ],
+      "capture_inventory_is_offline_verified": true,
+      "original_harness_inventory_validation_completed": true,
+      "command": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\exference-at.commands.txt",
+        "sha256": "6ae04e567ed93004321e6b27a141b671a379bef510bb29fd1fe6035e1fc74dcd"
+      },
+      "actual_stdin_equals_command_bytes": true,
+      "predicate_sha256": "97531031d6aa1aeaa25a2ff9cffe757c3f7e646a2652fb24f174745eb0a5af1c",
+      "diagnostic_lines": [
+        "warning: unknown type constructor 'Int' used in the binding PartialNumeric.partialIntCase",
+        "info [DJEX_REPL_BEHAVIORAL_OBSERVATIONS]: behavioral predicate observations",
+        "  context: checked=256, true=0, false=256, error=0, timeout=0, window=256",
+        "info [DJEX_REPL_BEHAVIORAL_NO_MATCH]: no candidate passed the behavioral predicate in the observed search",
+        "warning [DJEX_REPL_BEHAVIORAL_WINDOW]: behavioral observation window reached",
+        "  context: rejected and failed candidates consumed their original slots; search was not refilled"
+      ],
+      "process_label": "exference-at-synthesis"
+    },
+    {
+      "id": "exference-reject-all",
+      "engine": "exference",
+      "operation": null,
+      "kind": "false_oracle_query",
+      "status": "passed",
+      "accepted": true,
+      "type": "forall a. a -> a",
+      "search_type": "forall a. a -> a",
+      "finite_observation_count": 1,
+      "failure": null,
+      "classification": "actual_false_oracle_rejection",
+      "behavioral_observations_from_capture": {
+        "checked": 256,
+        "true": 0,
+        "false": 256,
+        "error": 0,
+        "timeout": 0,
+        "window": 256
+      },
+      "no_displayed_definition": true,
+      "no_independent_candidate_replay": true,
+      "settings_rechecked_from_capture": {
+        "prompt": "\"\"",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "depth-first",
+        "candidate-limit": "256",
+        "quality-window": "256",
+        "choice-budget": "100000",
+        "max-steps": "100000",
+        "max-queue": "8192"
+      },
+      "query_timeout_seconds": 0,
+      "actual_ordered_inventory_from_capture": [
+        "(no declarations)"
+      ],
+      "capture_inventory_is_offline_verified": true,
+      "original_harness_inventory_validation_completed": true,
+      "command": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\exference-reject-all.commands.txt",
+        "sha256": "f57d368bfd0890a44beac0926163a1a43ef386d4568abcb210cda322f4070b7c"
+      },
+      "actual_stdin_equals_command_bytes": true,
+      "predicate_sha256": "75a30f844f7c2393b1b42949eab35282db8362aed4ed22b85de05ac920f9d7d8",
+      "diagnostic_lines": [
+        "info [DJEX_REPL_BEHAVIORAL_OBSERVATIONS]: behavioral predicate observations",
+        "  context: checked=256, true=0, false=256, error=0, timeout=0, window=256",
+        "info [DJEX_REPL_BEHAVIORAL_NO_MATCH]: no candidate passed the behavioral predicate in the observed search",
+        "warning [DJEX_REPL_BEHAVIORAL_WINDOW]: behavioral observation window reached",
+        "  context: rejected and failed candidates consumed their original slots; search was not refilled"
+      ],
+      "process_label": "exference-reject-all-synthesis"
+    }
+  ],
+  "controls": [
+    {
+      "id": "positive-at",
+      "kind": "positive_oracle_witness",
+      "status": "passed",
+      "sources": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at\\Oracle.hs",
+          "sha256": "d962c13f36172012776012b72fbb717da4244a3b8fbb38ba03750491f8f0a6c7"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at\\Main.hs",
+          "sha256": "5c9bf6551153b7aee3c1a8d25494803d02c3368a911870544c1d2d11e1246275"
+        }
+      ],
+      "executable": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at\\replay.exe",
+        "sha256": "d85a995899bb29b715df2885d736f6bafbfc7e6b8af14d10b979e0be91ba82b8"
+      },
+      "exact_pass_labels": [
+        "positive-at"
+      ],
+      "compiler_label": "control-positive-at-ghc",
+      "execution_label": "control-positive-at-execute"
+    },
+    {
+      "id": "positive-primitive-at",
+      "kind": "positive_primitive_witness",
+      "status": "passed",
+      "sources": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at\\Oracle.hs",
+          "sha256": "37e34e1da7672df8bb79d7441aedd0794fa69d86a280939675fb8c2db384a722"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at\\Main.hs",
+          "sha256": "396bee08653d12d07bbdf64ec664a44a957aa2e503a29aced03fc6fb3ae943fd"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at\\PartialNumeric.hs",
+          "sha256": "7dc1dced74e4934ab53c5d2acd70a7e8aaeb1ac1c2d0c86ddaa90a2c5d9c3ca7"
+        }
+      ],
+      "executable": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at\\replay.exe",
+        "sha256": "af1eac07f04e4433b5b2e30f6a25740e8f5a5e58b648b019f6353df76363a913"
+      },
+      "exact_pass_labels": [
+        "positive-primitive-at"
+      ],
+      "compiler_label": "control-positive-primitive-at-ghc",
+      "execution_label": "control-positive-primitive-at-execute"
+    },
+    {
+      "id": "wrong-at-always_default",
+      "kind": "fully_typed_wrong_control",
+      "status": "passed",
+      "sources": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default\\Oracle.hs",
+          "sha256": "d23a19ce4567031e5b5ba62339ca78229ec0018e1b5fbb4b2eb250cd6978987c"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default\\Main.hs",
+          "sha256": "3c5ec069d420717ff2f1552e3cfe1f50ab4bc2aea67d267f0343efc38d97e444"
+        }
+      ],
+      "executable": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default\\replay.exe",
+        "sha256": "5cf020ab64419eff031af77b01b6b7d59f180e0a6724641601ff2f734de9f265"
+      },
+      "exact_pass_labels": [
+        "wrong-at-always_default"
+      ],
+      "compiler_label": "control-wrong-at-always_default-ghc",
+      "execution_label": "control-wrong-at-always_default-execute"
+    },
+    {
+      "id": "wrong-at-ignores_index",
+      "kind": "fully_typed_wrong_control",
+      "status": "passed",
+      "sources": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index\\Oracle.hs",
+          "sha256": "fb9c25839a708e0294e6209f728c9d5c3fb86f4637415162df0a4ca76cb1d100"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index\\Main.hs",
+          "sha256": "a50514d9671dc44992d84a1298331084669bbf0600d6f597a71db04356921bee"
+        }
+      ],
+      "executable": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index\\replay.exe",
+        "sha256": "13fac238258833f8bc915c0b25a636095059e4ec713cc36f73cec8a38a14f372"
+      },
+      "exact_pass_labels": [
+        "wrong-at-ignores_index"
+      ],
+      "compiler_label": "control-wrong-at-ignores_index-ghc",
+      "execution_label": "control-wrong-at-ignores_index-execute"
+    },
+    {
+      "id": "primitive-int_negative_zero_positive",
+      "kind": "generic_primitive_control",
+      "status": "passed",
+      "sources": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive\\PartialNumeric.hs",
+          "sha256": "7dc1dced74e4934ab53c5d2acd70a7e8aaeb1ac1c2d0c86ddaa90a2c5d9c3ca7"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive\\Main.hs",
+          "sha256": "982ab2c6cad1e04eeaa2c356782881ff84edc846d62256f4c8569aba77a3c1e3"
+        }
+      ],
+      "executable": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive\\replay.exe",
+        "sha256": "3bdb2dfbeb602bcc8878e8e40aa69d3824b9606dd4728d5b026f990b2efbd1de"
+      },
+      "exact_pass_labels": [
+        "primitive-int_negative_zero_positive"
+      ],
+      "compiler_label": "control-primitive-int_negative_zero_positive-ghc",
+      "execution_label": "control-primitive-int_negative_zero_positive-execute"
+    },
+    {
+      "id": "primitive-int_polymorphic_boolean",
+      "kind": "generic_primitive_control",
+      "status": "passed",
+      "sources": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean\\PartialNumeric.hs",
+          "sha256": "7dc1dced74e4934ab53c5d2acd70a7e8aaeb1ac1c2d0c86ddaa90a2c5d9c3ca7"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean\\Main.hs",
+          "sha256": "7101362a76de04a6575afac0a37413457bb84103e131fe36321dcb2e61d89ebe"
+        }
+      ],
+      "executable": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean\\replay.exe",
+        "sha256": "2a3b9ccba3a53f14492591ced133ae928b5112ba525593da6da28b2274ee5373"
+      },
+      "exact_pass_labels": [
+        "primitive-int_polymorphic_boolean"
+      ],
+      "compiler_label": "control-primitive-int_polymorphic_boolean-ghc",
+      "execution_label": "control-primitive-int_polymorphic_boolean-execute"
+    }
+  ],
+  "processes": [
+    {
+      "label": "control-positive-at-ghc",
+      "command": [
+        "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe",
+        "-v0",
+        "-O0",
+        "-fforce-recomp",
+        "-i",
+        "-iC:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at",
+        "-outputdir",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at\\Main.hs",
+        "-o",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at\\replay.exe"
+      ],
+      "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 1.3057015999802388,
+      "started_utc": "2026-09-08T06:52:30Z",
+      "finished_utc": "2026-09-08T06:52:31Z",
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at-ghc.stdout.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at-ghc.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "control-positive-at-execute",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at\\replay.exe"
+      ],
+      "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 0.13434089999645948,
+      "started_utc": "2026-09-08T06:52:31Z",
+      "finished_utc": "2026-09-08T06:52:31Z",
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at-execute.stdout.txt",
+        "sha256": "28906baf39a4b7b9dabbd007c39dc3656a87c282d6181fc3ae3fabdf200a080d"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-at-execute.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "control-positive-primitive-at-ghc",
+      "command": [
+        "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe",
+        "-v0",
+        "-O0",
+        "-fforce-recomp",
+        "-i",
+        "-iC:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at",
+        "-outputdir",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at\\Main.hs",
+        "-o",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at\\replay.exe"
+      ],
+      "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 1.433125099982135,
+      "started_utc": "2026-09-08T06:52:31Z",
+      "finished_utc": "2026-09-08T06:52:33Z",
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at-ghc.stdout.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at-ghc.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "control-positive-primitive-at-execute",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at\\replay.exe"
+      ],
+      "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 0.12264590000268072,
+      "started_utc": "2026-09-08T06:52:33Z",
+      "finished_utc": "2026-09-08T06:52:33Z",
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at-execute.stdout.txt",
+        "sha256": "ee5b55d09bab9beedcf2f2be00109e661e7bc0647c90bca7c5060cedbda47867"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-positive-primitive-at-execute.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "control-wrong-at-always_default-ghc",
+      "command": [
+        "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe",
+        "-v0",
+        "-O0",
+        "-fforce-recomp",
+        "-i",
+        "-iC:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default",
+        "-outputdir",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default\\Main.hs",
+        "-o",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default\\replay.exe"
+      ],
+      "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 1.3337293000076897,
+      "started_utc": "2026-09-08T06:52:33Z",
+      "finished_utc": "2026-09-08T06:52:34Z",
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default-ghc.stdout.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default-ghc.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "control-wrong-at-always_default-execute",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default\\replay.exe"
+      ],
+      "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 0.13868019997607917,
+      "started_utc": "2026-09-08T06:52:34Z",
+      "finished_utc": "2026-09-08T06:52:34Z",
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default-execute.stdout.txt",
+        "sha256": "4bf76d3fb2f4e000849b8b67e8662223c5ece01ad9f610da7e23df86f94535ff"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-always_default-execute.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "control-wrong-at-ignores_index-ghc",
+      "command": [
+        "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe",
+        "-v0",
+        "-O0",
+        "-fforce-recomp",
+        "-i",
+        "-iC:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index",
+        "-outputdir",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index\\Main.hs",
+        "-o",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index\\replay.exe"
+      ],
+      "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 1.3028765000053681,
+      "started_utc": "2026-09-08T06:52:34Z",
+      "finished_utc": "2026-09-08T06:52:36Z",
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index-ghc.stdout.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index-ghc.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "control-wrong-at-ignores_index-execute",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index\\replay.exe"
+      ],
+      "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 0.14816089998930693,
+      "started_utc": "2026-09-08T06:52:36Z",
+      "finished_utc": "2026-09-08T06:52:36Z",
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index-execute.stdout.txt",
+        "sha256": "53548476fc0e65daf08f7a6464199a7b1519d12b6eb346d6c150cc0c427bf970"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-wrong-at-ignores_index-execute.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "control-primitive-int_negative_zero_positive-ghc",
+      "command": [
+        "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe",
+        "-v0",
+        "-O0",
+        "-fforce-recomp",
+        "-i",
+        "-iC:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive",
+        "-outputdir",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive\\Main.hs",
+        "-o",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive\\replay.exe"
+      ],
+      "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 1.0434319999767467,
+      "started_utc": "2026-09-08T06:52:36Z",
+      "finished_utc": "2026-09-08T06:52:37Z",
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive-ghc.stdout.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive-ghc.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "control-primitive-int_negative_zero_positive-execute",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive\\replay.exe"
+      ],
+      "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 0.42822509998222813,
+      "started_utc": "2026-09-08T06:52:37Z",
+      "finished_utc": "2026-09-08T06:52:37Z",
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive-execute.stdout.txt",
+        "sha256": "fe47cd3685dd201cbc19d45e70e737abb6643123afea69bbc99235c174b463d5"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_negative_zero_positive-execute.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "control-primitive-int_polymorphic_boolean-ghc",
+      "command": [
+        "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe",
+        "-v0",
+        "-O0",
+        "-fforce-recomp",
+        "-i",
+        "-iC:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean",
+        "-outputdir",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean\\Main.hs",
+        "-o",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean\\replay.exe"
+      ],
+      "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 1.0386509000090882,
+      "started_utc": "2026-09-08T06:52:37Z",
+      "finished_utc": "2026-09-08T06:52:39Z",
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean-ghc.stdout.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean-ghc.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "control-primitive-int_polymorphic_boolean-execute",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean\\replay.exe"
+      ],
+      "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 0.41708280000602826,
+      "started_utc": "2026-09-08T06:52:39Z",
+      "finished_utc": "2026-09-08T06:52:39Z",
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean-execute.stdout.txt",
+        "sha256": "6c91eba1f7ea899648347477d9bf89c49860015575c665867b42b00c6e1ada43"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\control-primitive-int_polymorphic_boolean-execute.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "djinn-at-synthesis",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+        "repl",
+        "--ignore-startup",
+        "--environment",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\empty-environment"
+      ],
+      "cwd": "C:\\Djex",
+      "status": "timed_out",
+      "exit_code": null,
+      "timed_out": true,
+      "wall_seconds": 300.0607554000453,
+      "started_utc": "2026-09-08T06:52:39Z",
+      "finished_utc": "2026-09-08T06:57:39Z",
+      "input": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\djinn-at-synthesis.input.txt",
+        "sha256": "7651bb03238a81a04e5893737dd1a8039f53dd22260429d11cc0276c0c272469"
+      },
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\djinn-at-synthesis.stdout.txt",
+        "sha256": "01a97db30597307cf0eb1484abd0a5fce26a2e9bc8c6b958b16679f6f6e6e4e6"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\djinn-at-synthesis.stderr.txt",
+        "sha256": "a0e794ef2ee47b396c25d40c75b2b9651bf8626a62825c5a53b8c1275c3515c8"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": 124
+    },
+    {
+      "label": "djinn-reject-all-synthesis",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+        "repl",
+        "--ignore-startup",
+        "--environment",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\empty-environment"
+      ],
+      "cwd": "C:\\Djex",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 1.3913708999752998,
+      "started_utc": "2026-09-08T06:57:40Z",
+      "finished_utc": "2026-09-08T06:57:41Z",
+      "input": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\djinn-reject-all-synthesis.input.txt",
+        "sha256": "cabba9544c0c3d4123ac4ba91da1292ca33ab87bab800602a918a3bc6b5be557"
+      },
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\djinn-reject-all-synthesis.stdout.txt",
+        "sha256": "2be9a244bffa2e93104a184e8163a2327002500f030b1542d16c15cba448ba0e"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\djinn-reject-all-synthesis.stderr.txt",
+        "sha256": "ed16817aff2618975bea0576b17f342d8a3fc928ce22694109dc0dec0a994e51"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "exference-at-synthesis",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+        "repl",
+        "--ignore-startup",
+        "--environment",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\empty-environment"
+      ],
+      "cwd": "C:\\Djex",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 35.27283349999925,
+      "started_utc": "2026-09-08T06:57:41Z",
+      "finished_utc": "2026-09-08T06:58:16Z",
+      "input": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\exference-at-synthesis.input.txt",
+        "sha256": "6ae04e567ed93004321e6b27a141b671a379bef510bb29fd1fe6035e1fc74dcd"
+      },
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\exference-at-synthesis.stdout.txt",
+        "sha256": "651910c545dbf147bbbd393f7b3f71f4a8743cb5e5d0997468ca689c3dabbe5e"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\exference-at-synthesis.stderr.txt",
+        "sha256": "3af20425f077ac90d5367d810022ac27d2240ee668b1bb4f7b5135cc699910eb"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    },
+    {
+      "label": "exference-reject-all-synthesis",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+        "repl",
+        "--ignore-startup",
+        "--environment",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\empty-environment"
+      ],
+      "cwd": "C:\\Djex",
+      "status": "completed",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 1.8572166999801993,
+      "started_utc": "2026-09-08T06:58:17Z",
+      "finished_utc": "2026-09-08T06:58:19Z",
+      "input": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\exference-reject-all-synthesis.input.txt",
+        "sha256": "f57d368bfd0890a44beac0926163a1a43ef386d4568abcb210cda322f4070b7c"
+      },
+      "stdout": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\exference-reject-all-synthesis.stdout.txt",
+        "sha256": "76bbb7694d9c9e73a4db8317b7fcb1550682b4089289e93fc8ef06833f3bc020"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-at-native-int-v1\\exference-reject-all-synthesis.stderr.txt",
+        "sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae"
+      },
+      "separate_outer_guard_seconds": 300.0,
+      "exit_after_tree_cleanup": null
+    }
+  ],
+  "interpretation": [
+    "Djinn: the 300s owned process guard includes setup, search and behavioral work. No completed behavioral summary was captured; counts and internal budget exhaustion are unknown, not zero.",
+    "Exference: completed exit0, checked256/false256/error0/timeout0, explicit observation-window exhaustion and no definition. This is not an outer or per-predicate timeout.",
+    "The runner displayed-success failure wording occurs before definition parsing and does not establish a displayed result.",
+    "Both source captures retain the exact native Int primitive inventory. The initial Int source warning is preserved, but neither run reports an UnknownTypeConstructor query failure.",
+    "Both genuine False controls and all six isolated compiled/executed controls passed. There was no synthesized-candidate replay."
+  ]
+}

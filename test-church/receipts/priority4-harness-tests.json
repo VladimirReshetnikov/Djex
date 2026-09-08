@@ -1,0 +1,42 @@
+{
+  "status": "passed",
+  "test_count": 21,
+  "command": "python -B -m unittest test_behavior_extended_probe test_behavior_partial_probe -v",
+  "cwd": "test-church",
+  "tests": [
+    "test_behavior_extended_probe.ExtendedInventoryTests.test_builtin_allowance_does_not_relax_numeric_provider_isolation",
+    "test_behavior_extended_probe.ExtendedInventoryTests.test_exact_djinn_builtins_are_recorded_without_ordinary_providers",
+    "test_behavior_extended_probe.ExtendedInventoryTests.test_existing_empty_inventory_remains_valid_for_both_engines",
+    "test_behavior_extended_probe.ExtendedInventoryTests.test_incomplete_duplicate_empty_or_wrong_engine_inventory_fails",
+    "test_behavior_extended_probe.ExtendedInventoryTests.test_length_preserves_exact_numeric_providers_and_existing_exference_behavior",
+    "test_behavior_extended_probe.ExtendedInventoryTests.test_unknown_values_and_changed_constructor_families_fail",
+    "test_behavior_extended_probe.ExtendedNativeIntFixtureTests.test_djinn_cannot_accept_values_without_the_registered_int_head",
+    "test_behavior_extended_probe.ExtendedNativeIntFixtureTests.test_only_djinn_length_enables_the_exact_value_axioms",
+    "test_behavior_extended_probe.ExtendedNativeIntFixtureTests.test_settings_require_actual_on_only_in_numeric_djinn_cell",
+    "test_behavior_partial_probe.PartialInventoryTests.test_builtin_allowance_does_not_relax_numeric_provider_isolation",
+    "test_behavior_partial_probe.PartialInventoryTests.test_djinn_requires_the_registered_native_int_head",
+    "test_behavior_partial_probe.PartialInventoryTests.test_exact_djinn_builtins_are_recorded_without_ordinary_providers",
+    "test_behavior_partial_probe.PartialInventoryTests.test_existing_empty_inventory_remains_valid_for_both_engines",
+    "test_behavior_partial_probe.PartialInventoryTests.test_incomplete_duplicate_empty_or_wrong_engine_inventory_fails",
+    "test_behavior_partial_probe.PartialInventoryTests.test_numeric_provider_keeps_its_complete_scheme_and_separate_builtins",
+    "test_behavior_partial_probe.PartialInventoryTests.test_scheme_normalization_preserves_polymorphism_and_callback_grouping",
+    "test_behavior_partial_probe.PartialInventoryTests.test_unknown_values_and_changed_constructor_families_fail",
+    "test_behavior_partial_probe.PartialNativeIntFixtureTests.test_both_existing_primitive_controls_replay_the_exact_shared_source",
+    "test_behavior_partial_probe.PartialNativeIntFixtureTests.test_displayed_candidate_replay_keeps_full_type_and_only_the_primitive_import",
+    "test_behavior_partial_probe.PartialNativeIntFixtureTests.test_only_djinn_at_enables_the_exact_value_axiom",
+    "test_behavior_partial_probe.PartialNativeIntFixtureTests.test_settings_require_the_actual_cell_policy_and_unchanged_limits"
+  ],
+  "log": {
+    "path": "C:\\Djex\\dist-newstyle\\priority4-live\\publication-harness-tests.log",
+    "sha256": "15f8b29498c8b4ad7f0ed3313af3e310b13d72c52b40c3f4479e2ceeac3133f4"
+  },
+  "source_sha256": {
+    "test-church/behavior_extended_probe.py": "322efc48eb360517aec7315132e4830113d4e216f6651a6cdaafaa409eb73908",
+    "test-church/test_behavior_extended_probe.py": "3abb7f11eec647f572dcc983cfee755f251a992d9e6ef8485e1be348a290ff43",
+    "test-church/behavior_partial_probe.py": "c522ad9cbb27140733ea0cf933dbb937a9c9a5c4359061ae383e1dd639812dc4",
+    "test-church/test_behavior_partial_probe.py": "ecb05683eec5fec537dec7fd8b9290774bee302b2607c38a5e9a092c2421e96e",
+    "test-church/behavior_extended_spec.py": "7c8f0f42c28b533e72ffe9debceaedad1192438820efc344dcbdfe76d04eb444",
+    "test-church/behavior_partial_spec.py": "85066eab8089205346e591e3673f936844005e3846705c74d92d3a7e635b5716"
+  },
+  "scope": "Pure harness checks; separate live synthesis and GHC/kernel receipts establish executable acceptance."
+}

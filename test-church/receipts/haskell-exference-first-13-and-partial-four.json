@@ -1,0 +1,2576 @@
+{
+  "schema": "djex-p4-exference-offline-audit-proposal-v1",
+  "status": "partial_acceptance_with_preserved_failures",
+  "aggregate_passed": false,
+  "audit_mode": "read existing source, input, output, replay and executable files and recompute hashes; no synthesis/compiler/kernel/test execution",
+  "extended": {
+    "attempted_unique": 13,
+    "accepted_exact_replays": 12,
+    "failed": [
+      "maybeEither"
+    ],
+    "false_control_runs": 2,
+    "oracle_controls": 28
+  },
+  "explicit_default_partial": {
+    "attempted_unique": 4,
+    "accepted_exact_replays": 2,
+    "failed": [
+      "foldl1",
+      "at"
+    ],
+    "false_control_runs": 1,
+    "oracle_controls": 16
+  },
+  "false_control_observations": 768,
+  "independent_candidate_replays": 14,
+  "independent_oracle_replays": 44,
+  "process_count": 136,
+  "evidence_boundaries": [
+    "The two extended operation sets are disjoint; repeated False controls are separate process runs, not additional operations.",
+    "Accepted candidate equations, complete original signatures and exact predicates are retained and independently executed by GHC in isolated modules.",
+    "The extended length search uses a checked NumericInt alias for Int with exactly numericZero and numericSuccessor; no oracle providers.",
+    "The failed defaulted at search uses checked IndexInt for Int and exactly partialIntCase; its primitive controls passed.",
+    "Defaulted partial tests concern explicitly supplied defaults, not the original partial functions on undefined inputs.",
+    "Failure means no survivor in this fixed 256-slot observation window, not uninhabitation or exhaustion of the global search space.",
+    "The recorded source maps pin runners, specifications, manifest, Church and generated fixtures; they are not a complete production-source manifest. The exact synthesized executable is pinned independently.",
+    "Finite observations and independent GHC checking do not establish a universal semantic or parametricity theorem.",
+    "This is Haskell Exference evidence only; it does not establish Djinn or Lean matrix acceptance."
+  ],
+  "audit_file_count": 510,
+  "audited_file_manifest_sha256": "373ea937de87f50dcfd983db5530f2f53447d4d44c69d72012018d6fb5daf5eb",
+  "runs": [
+    {
+      "run": "extended-exference-v1",
+      "receipt": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-v1\\results.json",
+        "sha256": "3007fa460a5608db554a167f55070adc23a4c3953d3093ef6c248a5cc06a67da"
+      },
+      "recorded_status": "passed",
+      "settings": {
+        "exference": {
+          "window": 256,
+          "budget": 100000,
+          "djinn_strategy": "depth-first",
+          "steps": 100000,
+          "process_timeout": 300.0,
+          "queue": 8192
+        }
+      },
+      "live_query_timeout_seconds": 0,
+      "independent_evaluation_seconds": 2.0,
+      "executable_pins": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+          "sha256": "74e77fabd961d73b9629df1259d384d3fbfb055a4316f99ce5b6249645012706"
+        },
+        {
+          "path": "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe",
+          "sha256": "0560906f7b7a046742d9e8433b95c0db49fc0c2fc28989e67cb23a7b347acc66"
+        }
+      ],
+      "recorded_and_rechecked_integrity": true,
+      "all_processes_completed_exit_zero": true,
+      "process_count": 45,
+      "process_wall_seconds_sum": 44.009476099861786,
+      "scope": "Haskell extended Church total operations plus two Church numeral extensions.",
+      "artifact_paths_relative_to_source_receipt_directory": true,
+      "source_manifest_entry_count": 8,
+      "source_manifest_sha256": "d2899910dc1938caf86b746afcdd7bc53fa456759c6f1aea84141def0f52eb66",
+      "cells": [
+        {
+          "id": "exference-numeralAdd",
+          "operation": "numeralAdd",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_numeralAdd",
+          "type": "(forall r. (r -> r) -> r -> r) -> (forall r. (r -> r) -> r -> r) -> (forall r. (r -> r) -> r -> r)",
+          "search_type": "(forall r. (r -> r) -> r -> r) -> (forall r. (r -> r) -> r -> r) -> (forall r. (r -> r) -> r -> r)",
+          "finite_observation_count": 75,
+          "provider_inventory": [],
+          "definition": "extended_exference_numeralAdd f1 f2 f4 e = f2 f4 (f1 f4 e)",
+          "observations_from_raw_capture": {
+            "checked": 34,
+            "true": 1,
+            "false": 33,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-numeralAdd.commands.txt",
+            "sha256": "3e2cf572f2f787ca9184b8f8584465c8b5220b019b0e4a4f9f574b60696f2680"
+          },
+          "actual_stdin": {
+            "path": "exference-numeralAdd-synthesis.input.txt",
+            "sha256": "3e2cf572f2f787ca9184b8f8584465c8b5220b019b0e4a4f9f574b60696f2680"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "f4fecaebe8e0c348c5159e1f8693326395fb04df0962a446a47b2677246ca5c4",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-numeralAdd-synthesis",
+            "wall_seconds": 1.967149599979166,
+            "input": {
+              "path": "exference-numeralAdd-synthesis.input.txt",
+              "sha256": "3e2cf572f2f787ca9184b8f8584465c8b5220b019b0e4a4f9f574b60696f2680"
+            },
+            "stdout": {
+              "path": "exference-numeralAdd-synthesis.stdout.txt",
+              "sha256": "0f74ff75140757c6fbe019aecda1e0f2473e48485b07377866c78e260706ce47"
+            },
+            "stderr": {
+              "path": "exference-numeralAdd-synthesis.stderr.txt",
+              "sha256": "9ad32746b2ffef5f1e9c137bd940265da72380c7afc29352b25a7dfa2b4b70ce"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-numeralAdd\\Candidate.hs",
+                "sha256": "1d8d14d9c30332107667ac73c243d619c20d904b0b18cf8fe379f92954f88ad7"
+              },
+              {
+                "path": "candidate-exference-numeralAdd\\Main.hs",
+                "sha256": "2139501d1ef6f2621edbffc1a5142c27ba95d60f23d66c8fbeda5f69814978c0"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-numeralAdd\\replay.exe",
+              "sha256": "2e87854a8c781d76acc26e9a9efc4f8310655c995048b28eb61417ff3352920c"
+            },
+            "pass_labels": [
+              "exference-numeralAdd"
+            ],
+            "compiler": {
+              "label": "candidate-exference-numeralAdd-ghc",
+              "wall_seconds": 1.1778820999898016,
+              "stdout": {
+                "path": "candidate-exference-numeralAdd-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-numeralAdd-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-numeralAdd-execute",
+              "wall_seconds": 0.4058346000383608,
+              "stdout": {
+                "path": "candidate-exference-numeralAdd-execute.stdout.txt",
+                "sha256": "2082e1e33ea32f45dc24954023d212ebd211bd803902b509d4913deba4c32564"
+              },
+              "stderr": {
+                "path": "candidate-exference-numeralAdd-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-fromMaybe",
+          "operation": "fromMaybe",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_fromMaybe",
+          "type": "(forall church0. (church0 -> ((forall church1. (church1 -> ((church0 -> church1) -> church1))) -> church0)))",
+          "search_type": "(forall church0. (church0 -> ((forall church1. (church1 -> ((church0 -> church1) -> church1))) -> church0)))",
+          "finite_observation_count": 18,
+          "provider_inventory": [],
+          "source_case_id": "church_case_094",
+          "definition": "extended_exference_fromMaybe a f2 = f2 a (\\f -> f)",
+          "observations_from_raw_capture": {
+            "checked": 2,
+            "true": 1,
+            "false": 1,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-fromMaybe.commands.txt",
+            "sha256": "50f397e82532454e70276f2a7ea4f85aaed455e6e1188928f49eb928ce7c1abf"
+          },
+          "actual_stdin": {
+            "path": "exference-fromMaybe-synthesis.input.txt",
+            "sha256": "50f397e82532454e70276f2a7ea4f85aaed455e6e1188928f49eb928ce7c1abf"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "055c80b949a689722d9a019fbd2cab47b8604732ac17bfc11909cb0b924773e8",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-fromMaybe-synthesis",
+            "wall_seconds": 1.1274292999878526,
+            "input": {
+              "path": "exference-fromMaybe-synthesis.input.txt",
+              "sha256": "50f397e82532454e70276f2a7ea4f85aaed455e6e1188928f49eb928ce7c1abf"
+            },
+            "stdout": {
+              "path": "exference-fromMaybe-synthesis.stdout.txt",
+              "sha256": "cd409c1399d3f6e69ec27c7989c7c1e84aebe8c5a3caec073a14b52e49f595c3"
+            },
+            "stderr": {
+              "path": "exference-fromMaybe-synthesis.stderr.txt",
+              "sha256": "5ab10d3a96773d7cf81cafa785582e32cee46591089050c0fb86065c2b53e1be"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-fromMaybe\\Candidate.hs",
+                "sha256": "6325c175e6a2399596f740c84cbbaf58ce537aafd9d137de7f2526a990c1d506"
+              },
+              {
+                "path": "candidate-exference-fromMaybe\\Main.hs",
+                "sha256": "5919dd045c3c963ba03c2ad5b42b182fb036c91686f527ea8e2051c8ee356015"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-fromMaybe\\replay.exe",
+              "sha256": "46bde8233a65d2b810db8d277094eea83799a8458accf370e2795244ae5e8281"
+            },
+            "pass_labels": [
+              "exference-fromMaybe"
+            ],
+            "compiler": {
+              "label": "candidate-exference-fromMaybe-ghc",
+              "wall_seconds": 1.0399909000261687,
+              "stdout": {
+                "path": "candidate-exference-fromMaybe-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-fromMaybe-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-fromMaybe-execute",
+              "wall_seconds": 0.3655534999561496,
+              "stdout": {
+                "path": "candidate-exference-fromMaybe-execute.stdout.txt",
+                "sha256": "8b6d90be9192038c571db345b34c533eef3298ed9a549e7f44ae0b745ad2f39e"
+              },
+              "stderr": {
+                "path": "candidate-exference-fromMaybe-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-either",
+          "operation": "either",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_either",
+          "type": "(forall church0 church1 church2. ((church0 -> church1) -> ((church2 -> church1) -> ((forall church3. ((church0 -> church3) -> ((church2 -> church3) -> church3))) -> church1))))",
+          "search_type": "(forall church0 church1 church2. ((church0 -> church1) -> ((church2 -> church1) -> ((forall church3. ((church0 -> church3) -> ((church2 -> church3) -> church3))) -> church1))))",
+          "finite_observation_count": 15,
+          "provider_inventory": [],
+          "source_case_id": "church_case_109",
+          "definition": "extended_exference_either f1 f2 f3 = f3 f1 f2",
+          "observations_from_raw_capture": {
+            "checked": 1,
+            "true": 1,
+            "false": 0,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-either.commands.txt",
+            "sha256": "6306d192f8ce69420e5180153d537acd075e33ef4ad0e2f122a675cd617b606f"
+          },
+          "actual_stdin": {
+            "path": "exference-either-synthesis.input.txt",
+            "sha256": "6306d192f8ce69420e5180153d537acd075e33ef4ad0e2f122a675cd617b606f"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "8b68b09b11cb7d9124a40e919ddcc1e0c19c707645b122aa5cecd3a7206fa7ff",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-either-synthesis",
+            "wall_seconds": 1.430877699982375,
+            "input": {
+              "path": "exference-either-synthesis.input.txt",
+              "sha256": "6306d192f8ce69420e5180153d537acd075e33ef4ad0e2f122a675cd617b606f"
+            },
+            "stdout": {
+              "path": "exference-either-synthesis.stdout.txt",
+              "sha256": "a41ef26a69497c2a85cde721dd5a47ff8b292867742fa82c07f5b9a433070a70"
+            },
+            "stderr": {
+              "path": "exference-either-synthesis.stderr.txt",
+              "sha256": "17d3b288b9525a4be9cca6639ba16b744fb18570b523e51e20a5921b35e26137"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-either\\Candidate.hs",
+                "sha256": "6ea4e20b2540d4a029182155b24c1462f2c48c9ae5dad0a6ae10e71d68699a32"
+              },
+              {
+                "path": "candidate-exference-either\\Main.hs",
+                "sha256": "22e0e594a0ec76273ff66b61e6b701ef0bc4dab3f1719e0e2d7b269699896056"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-either\\replay.exe",
+              "sha256": "296d47d57b5a94e8db3f446c4dd8c96e05458c317b1332ca990a14ebd0df73b1"
+            },
+            "pass_labels": [
+              "exference-either"
+            ],
+            "compiler": {
+              "label": "candidate-exference-either-ghc",
+              "wall_seconds": 1.1355223000282422,
+              "stdout": {
+                "path": "candidate-exference-either-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-either-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-either-execute",
+              "wall_seconds": 0.11876540002413094,
+              "stdout": {
+                "path": "candidate-exference-either-execute.stdout.txt",
+                "sha256": "f75e52210792984fa9f4c038e56e87ef7a73fdbb9ed36840d96b481a148b3ba1"
+              },
+              "stderr": {
+                "path": "candidate-exference-either-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-maybeToList",
+          "operation": "maybeToList",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_maybeToList",
+          "type": "(forall church0. ((forall church1. (church1 -> ((church0 -> church1) -> church1))) -> (forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2)))))",
+          "search_type": "(forall church0. ((forall church1. (church1 -> ((church0 -> church1) -> church1))) -> (forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2)))))",
+          "finite_observation_count": 7,
+          "provider_inventory": [],
+          "source_case_id": "church_case_095",
+          "definition": "extended_exference_maybeToList f1 f3 d = f1 d (\\h -> f3 h d)",
+          "observations_from_raw_capture": {
+            "checked": 2,
+            "true": 1,
+            "false": 1,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-maybeToList.commands.txt",
+            "sha256": "d06427f989bbf078108eec0b979ee552e978db241920385402d3de3663f90058"
+          },
+          "actual_stdin": {
+            "path": "exference-maybeToList-synthesis.input.txt",
+            "sha256": "d06427f989bbf078108eec0b979ee552e978db241920385402d3de3663f90058"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "5d190bf65114ae24a6fbafbcbe97873dcf961d003b0d6e8b7e62d8d20a860d57",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-maybeToList-synthesis",
+            "wall_seconds": 1.0933370999991894,
+            "input": {
+              "path": "exference-maybeToList-synthesis.input.txt",
+              "sha256": "d06427f989bbf078108eec0b979ee552e978db241920385402d3de3663f90058"
+            },
+            "stdout": {
+              "path": "exference-maybeToList-synthesis.stdout.txt",
+              "sha256": "c681fa6bc8f3adb07b52a6dc5b5c313d986a8b8435f1ef69a17bf0e89d650c7a"
+            },
+            "stderr": {
+              "path": "exference-maybeToList-synthesis.stderr.txt",
+              "sha256": "5ab10d3a96773d7cf81cafa785582e32cee46591089050c0fb86065c2b53e1be"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-maybeToList\\Candidate.hs",
+                "sha256": "710d608b6e61008ec504a1f7034ec87d189ee68ef77df361afaf1cb65b168fdb"
+              },
+              {
+                "path": "candidate-exference-maybeToList\\Main.hs",
+                "sha256": "d6da409f4c4d117fd137d0f2ec3a295f679befaf186a18f6fb17d80d2f66f79b"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-maybeToList\\replay.exe",
+              "sha256": "099d2803d09d7044d5d1f8d21f1a0b83b31d334c87eff865c1352c2eb46c9b34"
+            },
+            "pass_labels": [
+              "exference-maybeToList"
+            ],
+            "compiler": {
+              "label": "candidate-exference-maybeToList-ghc",
+              "wall_seconds": 1.11970109998947,
+              "stdout": {
+                "path": "candidate-exference-maybeToList-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-maybeToList-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-maybeToList-execute",
+              "wall_seconds": 0.3825485000270419,
+              "stdout": {
+                "path": "candidate-exference-maybeToList-execute.stdout.txt",
+                "sha256": "0bfee5a480859eafd6f1cab63415775e8643ee696c0132d9d93d2845e4bd1a97"
+              },
+              "stderr": {
+                "path": "candidate-exference-maybeToList-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-foldl",
+          "operation": "foldl",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_foldl",
+          "type": "(forall church0 church1. ((church0 -> (church1 -> church0)) -> (church0 -> ((forall church2. ((church1 -> (church2 -> church2)) -> (church2 -> church2))) -> church0))))",
+          "search_type": "(forall church0 church1. ((church0 -> (church1 -> church0)) -> (church0 -> ((forall church2. ((church1 -> (church2 -> church2)) -> (church2 -> church2))) -> church0))))",
+          "finite_observation_count": 400,
+          "provider_inventory": [],
+          "source_case_id": "church_case_037",
+          "definition": "extended_exference_foldl f1 b f3 =\n  f3 (\\h -> \\f9 -> \\j -> f9 (f1 j h)) (\\l -> l) b",
+          "observations_from_raw_capture": {
+            "checked": 82,
+            "true": 1,
+            "false": 81,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-foldl.commands.txt",
+            "sha256": "6ae5716c0b3666ee0385d16303c052882ac0583d36c6264c7212ce0e5d971b95"
+          },
+          "actual_stdin": {
+            "path": "exference-foldl-synthesis.input.txt",
+            "sha256": "6ae5716c0b3666ee0385d16303c052882ac0583d36c6264c7212ce0e5d971b95"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "b3da2e70a8f2cb79006724aa3624a3c7a70a20abd657ab62b3b8318489e3618b",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-foldl-synthesis",
+            "wall_seconds": 3.238281600002665,
+            "input": {
+              "path": "exference-foldl-synthesis.input.txt",
+              "sha256": "6ae5716c0b3666ee0385d16303c052882ac0583d36c6264c7212ce0e5d971b95"
+            },
+            "stdout": {
+              "path": "exference-foldl-synthesis.stdout.txt",
+              "sha256": "95dc06a27c5567242bd57517c366e003afcae5e3e31d19c845adf4065de127df"
+            },
+            "stderr": {
+              "path": "exference-foldl-synthesis.stderr.txt",
+              "sha256": "1b1fae0a0fa13f2fd0fc56c9e2328750fc182e6f389416e01a728f392ef44af0"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-foldl\\Candidate.hs",
+                "sha256": "9ca0ebc444c672360f24deddf901731d32967cc3a29e8ebb3a29c5ab10424a5b"
+              },
+              {
+                "path": "candidate-exference-foldl\\Main.hs",
+                "sha256": "9096fb521bdc903506b97691bb80bfbab68586f8005ad66250702a84e1899b0a"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-foldl\\replay.exe",
+              "sha256": "9f640c579d1975f300e97b3e82fe13e0e3f9bf7d61a798f7e9aa73041a0a4456"
+            },
+            "pass_labels": [
+              "exference-foldl"
+            ],
+            "compiler": {
+              "label": "candidate-exference-foldl-ghc",
+              "wall_seconds": 1.1949026999645866,
+              "stdout": {
+                "path": "candidate-exference-foldl-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-foldl-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-foldl-execute",
+              "wall_seconds": 0.3706720999907702,
+              "stdout": {
+                "path": "candidate-exference-foldl-execute.stdout.txt",
+                "sha256": "bfc0549b20dd6b8207b5e682575284a84758ac4344bebfc4ccaf6da7262dd337"
+              },
+              "stderr": {
+                "path": "candidate-exference-foldl-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-length",
+          "operation": "length",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_length",
+          "type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> Int))",
+          "search_type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> NumericInt))",
+          "finite_observation_count": 44,
+          "provider_inventory": [
+            {
+              "name": "numericZero",
+              "type": "Int",
+              "definition": "0"
+            },
+            {
+              "name": "numericSuccessor",
+              "type": "Int -> Int",
+              "definition": "\\n -> n + 1"
+            }
+          ],
+          "source_case_id": "church_case_060",
+          "definition": "extended_exference_length f1 =\n  f1\n  (\\_ -> ExtendedNumeric.numericSuccessor)\n  ExtendedNumeric.numericZero",
+          "observations_from_raw_capture": {
+            "checked": 7,
+            "true": 1,
+            "false": 6,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-length.commands.txt",
+            "sha256": "79bf6602f2907d140b3fa080722a381330703faee45a12979c1f05c73462abfe"
+          },
+          "actual_stdin": {
+            "path": "exference-length-synthesis.input.txt",
+            "sha256": "79bf6602f2907d140b3fa080722a381330703faee45a12979c1f05c73462abfe"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "735c08b248ae8a2f0a0b4c9cdb1859ffe4e98101bf42ad7f61d1aff4776f5f3b",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-length-synthesis",
+            "wall_seconds": 1.503593000001274,
+            "input": {
+              "path": "exference-length-synthesis.input.txt",
+              "sha256": "79bf6602f2907d140b3fa080722a381330703faee45a12979c1f05c73462abfe"
+            },
+            "stdout": {
+              "path": "exference-length-synthesis.stdout.txt",
+              "sha256": "d09e90e7c69a91d2b820f93584c5ca6889ee0492977260d2e0ad5cc396ac019b"
+            },
+            "stderr": {
+              "path": "exference-length-synthesis.stderr.txt",
+              "sha256": "938785ef6b5caec0e612c923715dcff711f8afb86355fa0420c299710b07de97"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-length\\Candidate.hs",
+                "sha256": "06e83d489a76f9dc18417349df4b0282366b4d76fd01b3e1965492f2b9e88edd"
+              },
+              {
+                "path": "candidate-exference-length\\Main.hs",
+                "sha256": "788a042f02ddb62e6698eaafdbe1f8da900df20a44740c140aeca7e1ddca7cc1"
+              },
+              {
+                "path": "candidate-exference-length\\ExtendedNumeric.hs",
+                "sha256": "34fa11915af2704a3606301b07d1377ad5e31e4b91eca08ac05c48c9bdeb12c9"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-length\\replay.exe",
+              "sha256": "f410b7645314dc21c93a46195616f434067cd9a9b092e7bcf5013dfc83719753"
+            },
+            "pass_labels": [
+              "exference-length"
+            ],
+            "compiler": {
+              "label": "candidate-exference-length-ghc",
+              "wall_seconds": 1.3837708000210114,
+              "stdout": {
+                "path": "candidate-exference-length-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-length-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-length-execute",
+              "wall_seconds": 0.4201321000000462,
+              "stdout": {
+                "path": "candidate-exference-length-execute.stdout.txt",
+                "sha256": "a0b3902174afa318b64f518b7d1c3758c885640d93c5caa53bfd0fdfd0668cd5"
+              },
+              "stderr": {
+                "path": "candidate-exference-length-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-reject-all",
+          "kind": "false_oracle_query",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_reject_all",
+          "type": "forall a. a -> a",
+          "search_type": "forall a. a -> a",
+          "finite_observation_count": 1,
+          "provider_inventory": [],
+          "observations_from_raw_capture": {
+            "checked": 256,
+            "true": 0,
+            "false": 256,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-reject-all.commands.txt",
+            "sha256": "1867ee4f1a82c6c35427d3b170c239ae834233ab03fc72f7cbebd75c38554ede"
+          },
+          "actual_stdin": {
+            "path": "exference-reject-all-synthesis.input.txt",
+            "sha256": "1867ee4f1a82c6c35427d3b170c239ae834233ab03fc72f7cbebd75c38554ede"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "75a30f844f7c2393b1b42949eab35282db8362aed4ed22b85de05ac920f9d7d8",
+          "synthesis": {
+            "label": "exference-reject-all-synthesis",
+            "wall_seconds": 1.744737199973315,
+            "input": {
+              "path": "exference-reject-all-synthesis.input.txt",
+              "sha256": "1867ee4f1a82c6c35427d3b170c239ae834233ab03fc72f7cbebd75c38554ede"
+            },
+            "stdout": {
+              "path": "exference-reject-all-synthesis.stdout.txt",
+              "sha256": "6043ca17a73adcf728a5920b852f704a0c2631c24010e0fc7b048471f186cf00"
+            },
+            "stderr": {
+              "path": "exference-reject-all-synthesis.stderr.txt",
+              "sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae"
+            }
+          }
+        }
+      ],
+      "oracle_controls": [
+        {
+          "id": "positive-numeralAdd",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-numeralAdd"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "a2bd2f03ff54f51753f378784775472b2a751819a12b64869bb830850d5abab5",
+            "Main.hs": "7e265219499c1005f4aad12ecb43eecaa16cde2da2820e7bda26f95848f03a81"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "bfcb34039b6b5d8d7b008cf1372eb3ed91403d139005aa86d7f97bc3742cdcf8",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "d1019aee7276f229505e5d3a598b09651e6550cbe0a8e076c9f43b5063e15ac9"
+        },
+        {
+          "id": "wrong-add_first",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-add_first"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "eee4a0eb92f56c00bb60d3e4995f8bcb96c8a535bd15e1259a8a9ef6003482be",
+            "Main.hs": "4ce165c2404fe2140d120efacb3ea8d1ce6f7664cbcf91563c401431721f9a5e"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "725f278c56ab01ae68fbe15eec1d85ebc346d1a2fb15b6b0dacf76a4b26a8252",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "1580b4d5c29c26d6d5c859fbc9c709ed2dd1c6aad5600f0160773a8d3e5faa73"
+        },
+        {
+          "id": "positive-fromMaybe",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-fromMaybe"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "b4605ad000ed02ecac54b7b181e07e3e2887453709545cb85367dbada10a6fa1",
+            "Main.hs": "f4f0ff393bc36d63e4f8fdaed1f4e358505df8d7a40c00d2e24f95f426e069a5"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "e061de7e94d98868a3422247980fb678ab459dc3f9407b713a0f82dca605d6f3",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "c49276c80a16718b1d84db04c5a341cbc1fb1151c44337e2761e633aad376bf5"
+        },
+        {
+          "id": "wrong-fromMaybe_default",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-fromMaybe_default"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "937a305d1098adfcf235e0efef79007ff4d7fa9855003e8f771f06347c8e5316",
+            "Main.hs": "306fd31429046d5560db094b7b11f0e6f1f4445d9d624174ddb3de34b25200b5"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "0cef1a01562ec1bba239aa6c2a7ed767d8e8ed9e65c986405a823db222758472",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "fa55ddebd8468f2aac548fa4e47a0160ddd3e77a7e12843c22772fdf115af112"
+        },
+        {
+          "id": "positive-either",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-either"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "374ada17ca58c72b127ba99028308570429a4bb032d8099f6f9752fb7556a99d",
+            "Main.hs": "02eaadeab9627cfe14ec91f713a6c05aa83d645118aa0bfa4b08522107d19847"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "141c323925044bd18a8354a0a422a2853d2abf6c5d86f6e330f41a1ce249696c",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "e0a6202074b85950afcab37c55d109b2e1bf70bd4967ce63fdb121b236f08a5e"
+        },
+        {
+          "id": "positive-maybeToList",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-maybeToList"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "59bededddb060c627ca3d038bb318641c048de940bd930e764b2e37bdac5c8d7",
+            "Main.hs": "d05e11dc78050e5e7c57015b88942e25efaa4747fd2396eb7d72299efe7e22ac"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "0ebff20dec0c142b74ae9f4b211892d76ae90635c3a6e50d9e9c261440657f27",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "78770601f9f82bb45583c302992f6ffd1b72ddad3bb965157c65f96972f3826c"
+        },
+        {
+          "id": "wrong-maybeToList_empty",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-maybeToList_empty"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "06ac09ca120f504aed67520b7d87409468c9f17ee26ab287ae37a2bc313e26b4",
+            "Main.hs": "54f21f001a7898d51ded3fccff8f701395f9cd584adf9a5312585f05e28e7eb3"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "5bdb6c9d940e2d7c05157636131a87a138f01c0f7ecf3f0a3c4604115393b27c",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "7d92d72c33295ecb331dfed080345b97c59cd8ee328215d19dbdbee39c809874"
+        },
+        {
+          "id": "positive-foldl",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-foldl"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "437c0b7330051dabfcf9ac9e4b6f9aea315849116ce7a53c42b2cc1fcb17904d",
+            "Main.hs": "375ddbba0b2519ef8ec1f30c35c4c4e672f795c322deeaa82bfeedf8ccbf56f2"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "74fdb9790fea7aab66e713da6b1ad5576a88d15ed5cf8583f815a56293aa77cf",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "1ffb5c5923ca3cd61b0d29d5e0d09c8d8cd4eeadd008cd337b823453622eeb63"
+        },
+        {
+          "id": "wrong-foldl_seed",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-foldl_seed"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "42884f5b52c69e0fe835bf38218b7aa50c8ca852472f910edcf437a02b9d6841",
+            "Main.hs": "2bdbfba846cfd30cd90526d8ae3f5845f43b5ccbc1ff71aae90ddf5caf682c33"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "4612ff8b1593741a82d40c3fa178513c037cda79252a254ea7ffa5598ad6a026",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "244071a8d050c1dccfc624f4126eb3806cb47cb05b4c8a6fcd801bceaecaacd3"
+        },
+        {
+          "id": "wrong-foldl_reversed",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-foldl_reversed"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "dda079210b54065f5189436b26350c63be664bf8b43838c3559eeb6a6834e043",
+            "Main.hs": "1ac4303e73a2566b02943156b3d149120bb15b3a2c15135f82b1bc35715b0dba"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "a3a462fc7d16061b2fc0bc1df02bfd54b97669b14533a8897ba5c65fdb7babfd",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "688f7c7c88fdd6ec620ab392b8e7bbd5d131ddf6543f70c12f56a7c11fa07106"
+        },
+        {
+          "id": "positive-length",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-length"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "6bc7e0af80e5837dfa04ca5f9db4c4cae4132b8c4b2ed6caa1cf4ac44503e457",
+            "Main.hs": "86172b41c87de0388c3ec7459682e9f9dfee5563cb4a34d2842d39ba027dcdc1",
+            "ExtendedNumeric.hs": "34fa11915af2704a3606301b07d1377ad5e31e4b91eca08ac05c48c9bdeb12c9"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "eeb81d9e138fe9d3a2cd1af5a614b0321661fa8013c29a86a52e0bfd4fa6e0f5",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "49778077db96cd7009fcf23c18f23a6f1a8a83c0596241e98890409b60205530"
+        },
+        {
+          "id": "wrong-length_zero",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-length_zero"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "6450dc0e05e2a79ae557129f3a1826980f900c1a6df8a5d9b12697a49bc0e356",
+            "Main.hs": "22707f24ab1ee303f87bcd4b0fc7920435609d79cf58039b7995e819c922ae01",
+            "ExtendedNumeric.hs": "34fa11915af2704a3606301b07d1377ad5e31e4b91eca08ac05c48c9bdeb12c9"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "fafa569c04d76bd9c0d7867cf736505ee94e72772ce9e14e065d1ed851313b60",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "da64b490b0f3e6f7ad350a3d7cead21e610e8b150bafad2d56e19dec45893742"
+        },
+        {
+          "id": "wrong-either-specialized-handler",
+          "kind": "monomorphic_observation_adapter_not_a_polymorphic_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-either-specialized-handler"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "e3b9568c08338ce341286a217a721779c5d1f4cea0f7f56bf082615099893baa",
+            "Main.hs": "d930c40c24f8e11950790f0d8ac9f294ffc991d19a28f562029e2d9f01dfe3a6"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "00c9b244407401449c1b14e47128c51e74e4c718079bd90bb1a66d5af1780b63",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "b79ba2355f5cfaf408afffb06b69681ecf041e6f6e03151de824a9226ebf4efd"
+        }
+      ]
+    },
+    {
+      "run": "extended-exference-v2-remaining",
+      "receipt": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-v2-remaining\\results.json",
+        "sha256": "4d63710bb034d23fce596d49963ab1bcdf7e6c3a1adbd98c222a97f039061b93"
+      },
+      "recorded_status": "failed",
+      "settings": {
+        "exference": {
+          "window": 256,
+          "budget": 100000,
+          "djinn_strategy": "depth-first",
+          "steps": 100000,
+          "process_timeout": 300.0,
+          "queue": 8192
+        }
+      },
+      "live_query_timeout_seconds": 0,
+      "independent_evaluation_seconds": 2.0,
+      "executable_pins": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+          "sha256": "74e77fabd961d73b9629df1259d384d3fbfb055a4316f99ce5b6249645012706"
+        },
+        {
+          "path": "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe",
+          "sha256": "0560906f7b7a046742d9e8433b95c0db49fc0c2fc28989e67cb23a7b347acc66"
+        }
+      ],
+      "recorded_and_rechecked_integrity": true,
+      "all_processes_completed_exit_zero": true,
+      "process_count": 50,
+      "process_wall_seconds_sum": 48.86400790011976,
+      "scope": "Haskell extended Church total operations plus two Church numeral extensions.",
+      "artifact_paths_relative_to_source_receipt_directory": true,
+      "source_manifest_entry_count": 8,
+      "source_manifest_sha256": "d2fe62a2cdf1cbc133fb4ea2804e22f07b6d5f5155c69539be1bbcff10e77d7c",
+      "cells": [
+        {
+          "id": "exference-numeralSuccessor",
+          "operation": "numeralSuccessor",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_numeralSuccessor",
+          "type": "(forall r. (r -> r) -> r -> r) -> (forall r. (r -> r) -> r -> r)",
+          "search_type": "(forall r. (r -> r) -> r -> r) -> (forall r. (r -> r) -> r -> r)",
+          "finite_observation_count": 15,
+          "provider_inventory": [],
+          "definition": "extended_exference_numeralSuccessor f1 f3 d = f3 (f1 f3 d)",
+          "observations_from_raw_capture": {
+            "checked": 5,
+            "true": 1,
+            "false": 4,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-numeralSuccessor.commands.txt",
+            "sha256": "6d3873986b2c627e05ef2782dae7527bb86364981af7c4520c5a5e87adb832c0"
+          },
+          "actual_stdin": {
+            "path": "exference-numeralSuccessor-synthesis.input.txt",
+            "sha256": "6d3873986b2c627e05ef2782dae7527bb86364981af7c4520c5a5e87adb832c0"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "ba3c2b56e3898023fbccd68c3053303f810517cd352c34b448895bf793f5592f",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-numeralSuccessor-synthesis",
+            "wall_seconds": 1.1124609000398777,
+            "input": {
+              "path": "exference-numeralSuccessor-synthesis.input.txt",
+              "sha256": "6d3873986b2c627e05ef2782dae7527bb86364981af7c4520c5a5e87adb832c0"
+            },
+            "stdout": {
+              "path": "exference-numeralSuccessor-synthesis.stdout.txt",
+              "sha256": "2508658e5874d7dc98a50cfa30f84dfad540d2c4eca5a02c4a105d8f3a9d17b6"
+            },
+            "stderr": {
+              "path": "exference-numeralSuccessor-synthesis.stderr.txt",
+              "sha256": "1cde06016fb376941a0988075a9e4fde0fb695c0ea700782ab8561605c0ef088"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-numeralSuccessor\\Candidate.hs",
+                "sha256": "8cd13e21e2b8375e5f6eaa4792ebbec02e2b0d743f76035d19dc36c986ca97fb"
+              },
+              {
+                "path": "candidate-exference-numeralSuccessor\\Main.hs",
+                "sha256": "27fa21a9dca75228d3731bbe76c9f8fe9648e0279b0c70a919738df4f91c990d"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-numeralSuccessor\\replay.exe",
+              "sha256": "57c070783aa200231d8421d570416085c2de6c563e3483e435845845bbe4ac15"
+            },
+            "pass_labels": [
+              "exference-numeralSuccessor"
+            ],
+            "compiler": {
+              "label": "candidate-exference-numeralSuccessor-ghc",
+              "wall_seconds": 1.0100668999948539,
+              "stdout": {
+                "path": "candidate-exference-numeralSuccessor-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-numeralSuccessor-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-numeralSuccessor-execute",
+              "wall_seconds": 0.43334230000618845,
+              "stdout": {
+                "path": "candidate-exference-numeralSuccessor-execute.stdout.txt",
+                "sha256": "9d353766e32b27f663c273944065182b9155392db9b5ebcaf7c2360be3e90f0e"
+              },
+              "stderr": {
+                "path": "candidate-exference-numeralSuccessor-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-foldr",
+          "operation": "foldr",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_foldr",
+          "type": "(forall church0 church1. ((church0 -> (church1 -> church1)) -> (church1 -> ((forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2))) -> church1))))",
+          "search_type": "(forall church0 church1. ((church0 -> (church1 -> church1)) -> (church1 -> ((forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2))) -> church1))))",
+          "finite_observation_count": 400,
+          "provider_inventory": [],
+          "source_case_id": "church_case_036",
+          "definition": "extended_exference_foldr f1 b f3 = f3 f1 b",
+          "observations_from_raw_capture": {
+            "checked": 2,
+            "true": 1,
+            "false": 1,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-foldr.commands.txt",
+            "sha256": "31801070c36742f9d47508a2b7895ecca1fe45337af48fb1b9da969639d3ddf0"
+          },
+          "actual_stdin": {
+            "path": "exference-foldr-synthesis.input.txt",
+            "sha256": "31801070c36742f9d47508a2b7895ecca1fe45337af48fb1b9da969639d3ddf0"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "9d676609959ea57adac9aa89c321b99233daf55166b488aa91d28c14623bdbc8",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-foldr-synthesis",
+            "wall_seconds": 1.1287181000225246,
+            "input": {
+              "path": "exference-foldr-synthesis.input.txt",
+              "sha256": "31801070c36742f9d47508a2b7895ecca1fe45337af48fb1b9da969639d3ddf0"
+            },
+            "stdout": {
+              "path": "exference-foldr-synthesis.stdout.txt",
+              "sha256": "8f829f52ed90bc86c346ce2b83ffaeadfc2a84a1de96dfbf8de11a3a34537072"
+            },
+            "stderr": {
+              "path": "exference-foldr-synthesis.stderr.txt",
+              "sha256": "5ab10d3a96773d7cf81cafa785582e32cee46591089050c0fb86065c2b53e1be"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-foldr\\Candidate.hs",
+                "sha256": "fc132db6aec3ff2e55725a0c913955f2add28644afe43cf1f7a5b88aa626aab7"
+              },
+              {
+                "path": "candidate-exference-foldr\\Main.hs",
+                "sha256": "e258bb33ac9278ed5126fbd6b4c877125eb3d7e7f2f059ac5da816ef8bb0b9a2"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-foldr\\replay.exe",
+              "sha256": "94b0434fbb6e63969f5b860a0bc5d85c64f6654d95fe013360e754a05cb32a80"
+            },
+            "pass_labels": [
+              "exference-foldr"
+            ],
+            "compiler": {
+              "label": "candidate-exference-foldr-ghc",
+              "wall_seconds": 1.0429128999821842,
+              "stdout": {
+                "path": "candidate-exference-foldr-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-foldr-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-foldr-execute",
+              "wall_seconds": 0.17064520000712946,
+              "stdout": {
+                "path": "candidate-exference-foldr-execute.stdout.txt",
+                "sha256": "b1f917f7ad224c966fc6cce6ba84ded564f34f6e4509aff9fc9f7e14cb66631f"
+              },
+              "stderr": {
+                "path": "candidate-exference-foldr-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-listToMaybe",
+          "operation": "listToMaybe",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_listToMaybe",
+          "type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> (forall church2. (church2 -> ((church0 -> church2) -> church2)))))",
+          "search_type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> (forall church2. (church2 -> ((church0 -> church2) -> church2)))))",
+          "finite_observation_count": 44,
+          "provider_inventory": [],
+          "source_case_id": "church_case_096",
+          "definition": "extended_exference_listToMaybe f1 c f4 = f1 (\\h -> \\_ -> f4 h) c",
+          "observations_from_raw_capture": {
+            "checked": 3,
+            "true": 1,
+            "false": 2,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-listToMaybe.commands.txt",
+            "sha256": "372eed67be6dbb322e1a6c86035659603536f35f6025b05c3055eb63e592800c"
+          },
+          "actual_stdin": {
+            "path": "exference-listToMaybe-synthesis.input.txt",
+            "sha256": "372eed67be6dbb322e1a6c86035659603536f35f6025b05c3055eb63e592800c"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "959fe9c245257e749dd90d36f756f1d8eea9b1773d7e0c4b86cad04ea1449e89",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-listToMaybe-synthesis",
+            "wall_seconds": 1.125791200029198,
+            "input": {
+              "path": "exference-listToMaybe-synthesis.input.txt",
+              "sha256": "372eed67be6dbb322e1a6c86035659603536f35f6025b05c3055eb63e592800c"
+            },
+            "stdout": {
+              "path": "exference-listToMaybe-synthesis.stdout.txt",
+              "sha256": "4ccf9b601c6060709c6b519864818be484e948923bbc3497b1333f7ddf62d7b1"
+            },
+            "stderr": {
+              "path": "exference-listToMaybe-synthesis.stderr.txt",
+              "sha256": "f280ccd3734d0e6b73a80d37051dcc6c0083a2a87d057825ccd06dfe9b234584"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-listToMaybe\\Candidate.hs",
+                "sha256": "e6b4c37cfaf3904be47179be2956c998b86311ef2e98772b416240461bde63b0"
+              },
+              {
+                "path": "candidate-exference-listToMaybe\\Main.hs",
+                "sha256": "c277c4078e7f48ae003e303592b0a53c6ac71e236cdaa4084407170c1b374a24"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-listToMaybe\\replay.exe",
+              "sha256": "c461ab73a6903dc93ed1a8ccce155be140b4327f651e41695c51fcbd533426b8"
+            },
+            "pass_labels": [
+              "exference-listToMaybe"
+            ],
+            "compiler": {
+              "label": "candidate-exference-listToMaybe-ghc",
+              "wall_seconds": 1.027361300017219,
+              "stdout": {
+                "path": "candidate-exference-listToMaybe-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-listToMaybe-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-listToMaybe-execute",
+              "wall_seconds": 0.4106566000264138,
+              "stdout": {
+                "path": "candidate-exference-listToMaybe-execute.stdout.txt",
+                "sha256": "85fed0d819db33e6666558d7a10e58111b24c2bf4e0ac756d773d1b4ab897aa3"
+              },
+              "stderr": {
+                "path": "candidate-exference-listToMaybe-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-catMaybes",
+          "operation": "catMaybes",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_catMaybes",
+          "type": "(forall church0. ((forall church2. (((forall church1. (church1 -> ((church0 -> church1) -> church1))) -> (church2 -> church2)) -> (church2 -> church2))) -> (forall church3. ((church0 -> (church3 -> church3)) -> (church3 -> church3)))))",
+          "search_type": "(forall church0. ((forall church2. (((forall church1. (church1 -> ((church0 -> church1) -> church1))) -> (church2 -> church2)) -> (church2 -> church2))) -> (forall church3. ((church0 -> (church3 -> church3)) -> (church3 -> church3)))))",
+          "finite_observation_count": 40,
+          "provider_inventory": [],
+          "source_case_id": "church_case_097",
+          "definition": "extended_exference_catMaybes f1 f3 =\n  f1 (\\f8 -> \\i -> f8 i (\\m -> f3 m i))",
+          "observations_from_raw_capture": {
+            "checked": 4,
+            "true": 1,
+            "false": 3,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-catMaybes.commands.txt",
+            "sha256": "230a30ae24f1f4ffff165bad54a34e00ef0df7babfcb617e009fdd561f5aaedf"
+          },
+          "actual_stdin": {
+            "path": "exference-catMaybes-synthesis.input.txt",
+            "sha256": "230a30ae24f1f4ffff165bad54a34e00ef0df7babfcb617e009fdd561f5aaedf"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "048a96a58930d54dd9c57a5231d414b5cd83b6c6b036a02138c6579e11c9c2a5",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-catMaybes-synthesis",
+            "wall_seconds": 1.12689810001757,
+            "input": {
+              "path": "exference-catMaybes-synthesis.input.txt",
+              "sha256": "230a30ae24f1f4ffff165bad54a34e00ef0df7babfcb617e009fdd561f5aaedf"
+            },
+            "stdout": {
+              "path": "exference-catMaybes-synthesis.stdout.txt",
+              "sha256": "a513ae1ded492e5253aa89c1c06c8291cd910e86fe7a94e7a4348ac02c52278d"
+            },
+            "stderr": {
+              "path": "exference-catMaybes-synthesis.stderr.txt",
+              "sha256": "88c4d8e3cb09f60c970dd9c94a5b031e44e32db6b9ae755bb1e9a6f3d1524b52"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-catMaybes\\Candidate.hs",
+                "sha256": "7fc46a5c2fa4705208aa653716a33c745a3c4ad9766cab2c08aa1d7c0aa22ae7"
+              },
+              {
+                "path": "candidate-exference-catMaybes\\Main.hs",
+                "sha256": "602a44ad1d92fdf3d3c94e01ac39dacf14bbade3e7cf38ed364dc66895b1f439"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-catMaybes\\replay.exe",
+              "sha256": "a169d4ac8eb069be42d74c824f07932224fb56eb12eb49b3fd4f18d7b69c75d0"
+            },
+            "pass_labels": [
+              "exference-catMaybes"
+            ],
+            "compiler": {
+              "label": "candidate-exference-catMaybes-ghc",
+              "wall_seconds": 1.0453023000154644,
+              "stdout": {
+                "path": "candidate-exference-catMaybes-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-catMaybes-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-catMaybes-execute",
+              "wall_seconds": 0.4255863000289537,
+              "stdout": {
+                "path": "candidate-exference-catMaybes-execute.stdout.txt",
+                "sha256": "195d9004ca187f497c9ffc24af2b47facf98105c618148f46ece5cdd469a4a78"
+              },
+              "stderr": {
+                "path": "candidate-exference-catMaybes-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-squashMaybe",
+          "operation": "squashMaybe",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_squashMaybe",
+          "type": "(forall church0. ((forall church2. (church2 -> (((forall church1. (church1 -> ((church0 -> church1) -> church1))) -> church2) -> church2))) -> (forall church3. (church3 -> ((church0 -> church3) -> church3)))))",
+          "search_type": "(forall church0. ((forall church2. (church2 -> (((forall church1. (church1 -> ((church0 -> church1) -> church1))) -> church2) -> church2))) -> (forall church3. (church3 -> ((church0 -> church3) -> church3)))))",
+          "finite_observation_count": 8,
+          "provider_inventory": [],
+          "source_case_id": "church_case_099",
+          "definition": "extended_exference_squashMaybe f1 c f4 = f1 c (\\f8 -> f8 c f4)",
+          "observations_from_raw_capture": {
+            "checked": 3,
+            "true": 1,
+            "false": 2,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-squashMaybe.commands.txt",
+            "sha256": "e694d76a60b2daf1971a06571e6050d78e1d7b80400c3d923c778e857ea8b84f"
+          },
+          "actual_stdin": {
+            "path": "exference-squashMaybe-synthesis.input.txt",
+            "sha256": "e694d76a60b2daf1971a06571e6050d78e1d7b80400c3d923c778e857ea8b84f"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "953095b25c83f8ea8fb3fba2bb7aab2097468b5e00c4bf68eb39c00a18054f96",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-squashMaybe-synthesis",
+            "wall_seconds": 1.0944411999662407,
+            "input": {
+              "path": "exference-squashMaybe-synthesis.input.txt",
+              "sha256": "e694d76a60b2daf1971a06571e6050d78e1d7b80400c3d923c778e857ea8b84f"
+            },
+            "stdout": {
+              "path": "exference-squashMaybe-synthesis.stdout.txt",
+              "sha256": "eb418a357aeb676a1bff48942893ebd68798706e7088d12021d4cea5716b692a"
+            },
+            "stderr": {
+              "path": "exference-squashMaybe-synthesis.stderr.txt",
+              "sha256": "f280ccd3734d0e6b73a80d37051dcc6c0083a2a87d057825ccd06dfe9b234584"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-squashMaybe\\Candidate.hs",
+                "sha256": "c2b7a8e01d8f331ac5690dd5ad759aa3d9998b05edf1922bc804150343e536ff"
+              },
+              {
+                "path": "candidate-exference-squashMaybe\\Main.hs",
+                "sha256": "85b7bd7fa0dff215aaf48195297999811604a28c9cc02f8fda6f9852f996f635"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-squashMaybe\\replay.exe",
+              "sha256": "6af69e4d475c2a15685e4ebf78e1408de30281251806efddbd198b577a7c07a6"
+            },
+            "pass_labels": [
+              "exference-squashMaybe"
+            ],
+            "compiler": {
+              "label": "candidate-exference-squashMaybe-ghc",
+              "wall_seconds": 1.0523903999710456,
+              "stdout": {
+                "path": "candidate-exference-squashMaybe-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-squashMaybe-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-squashMaybe-execute",
+              "wall_seconds": 0.4058053999906406,
+              "stdout": {
+                "path": "candidate-exference-squashMaybe-execute.stdout.txt",
+                "sha256": "d40874738c4a00faadac9b5f4e040ce245fc500e23f1c61558e384a5e7aebee8"
+              },
+              "stderr": {
+                "path": "candidate-exference-squashMaybe-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-isLeft",
+          "operation": "isLeft",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_isLeft",
+          "type": "(forall church0 church1. ((forall church2. ((church0 -> church2) -> ((church1 -> church2) -> church2))) -> (forall church3. (church3 -> (church3 -> church3)))))",
+          "search_type": "(forall church0 church1. ((forall church2. ((church0 -> church2) -> ((church1 -> church2) -> church2))) -> (forall church3. (church3 -> (church3 -> church3)))))",
+          "finite_observation_count": 10,
+          "provider_inventory": [],
+          "source_case_id": "church_case_103",
+          "definition": "extended_exference_isLeft f1 c d = f1 (\\_ -> c) (\\_ -> d)",
+          "observations_from_raw_capture": {
+            "checked": 3,
+            "true": 1,
+            "false": 2,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-isLeft.commands.txt",
+            "sha256": "78ab4eb3d3432b46b5e489da409d482b611156db408e58fe71c8fbe99b4066a2"
+          },
+          "actual_stdin": {
+            "path": "exference-isLeft-synthesis.input.txt",
+            "sha256": "78ab4eb3d3432b46b5e489da409d482b611156db408e58fe71c8fbe99b4066a2"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "86bf98985f69fdae902dbcc95faf1414185fee01b78282cd1f5fe9941b49adc1",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-isLeft-synthesis",
+            "wall_seconds": 1.2600262999767438,
+            "input": {
+              "path": "exference-isLeft-synthesis.input.txt",
+              "sha256": "78ab4eb3d3432b46b5e489da409d482b611156db408e58fe71c8fbe99b4066a2"
+            },
+            "stdout": {
+              "path": "exference-isLeft-synthesis.stdout.txt",
+              "sha256": "ab4437938bb17b3e9a63784105a8180c9cfd6cf0bbea6e8c92d55182d7a61b7d"
+            },
+            "stderr": {
+              "path": "exference-isLeft-synthesis.stderr.txt",
+              "sha256": "f280ccd3734d0e6b73a80d37051dcc6c0083a2a87d057825ccd06dfe9b234584"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-isLeft\\Candidate.hs",
+                "sha256": "b02935e59b2f4111c4ddc428ff8e157e1e097850b01e6dd43a2a13e9a5f824b2"
+              },
+              {
+                "path": "candidate-exference-isLeft\\Main.hs",
+                "sha256": "05ce2ef2f06383906d3bf3d13a5198c64095b04408a8578e77ae77a26bfc8763"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-isLeft\\replay.exe",
+              "sha256": "845adc6a82a713c73a794712c9750dda6be94c26f92d9cca197cdfe744f6191e"
+            },
+            "pass_labels": [
+              "exference-isLeft"
+            ],
+            "compiler": {
+              "label": "candidate-exference-isLeft-ghc",
+              "wall_seconds": 1.163534899998922,
+              "stdout": {
+                "path": "candidate-exference-isLeft-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-isLeft-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-isLeft-execute",
+              "wall_seconds": 0.13697650004178286,
+              "stdout": {
+                "path": "candidate-exference-isLeft-execute.stdout.txt",
+                "sha256": "56232c3f172c6b7b8b1b8e6669e5b1f69d11b9a51c50c96cfca49557d3bb5edb"
+              },
+              "stderr": {
+                "path": "candidate-exference-isLeft-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-maybeEither",
+          "operation": "maybeEither",
+          "kind": "synthesis",
+          "status": "failed",
+          "accepted": false,
+          "name": "extended_exference_maybeEither",
+          "type": "(forall church0 church1. ((forall church4. (((forall church2. (church2 -> ((church0 -> church2) -> church2))) -> church4) -> (((forall church3. (church3 -> ((church1 -> church3) -> church3))) -> church4) -> church4))) -> (forall church6. (church6 -> (((forall church5. ((church0 -> church5) -> ((church1 -> church5) -> church5))) -> church6) -> church6)))))",
+          "search_type": "(forall church0 church1. ((forall church4. (((forall church2. (church2 -> ((church0 -> church2) -> church2))) -> church4) -> (((forall church3. (church3 -> ((church1 -> church3) -> church3))) -> church4) -> church4))) -> (forall church6. (church6 -> (((forall church5. ((church0 -> church5) -> ((church1 -> church5) -> church5))) -> church6) -> church6)))))",
+          "finite_observation_count": 7,
+          "provider_inventory": [],
+          "source_case_id": "church_case_107",
+          "failure": "displayed success lacks a successful behavioral observation",
+          "observations_from_raw_capture": {
+            "checked": 256,
+            "true": 0,
+            "false": 251,
+            "error": 5,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-maybeEither.commands.txt",
+            "sha256": "620b68a049401af2d33d0457b93ee441f785faf8920805c9f59104edaca58da5"
+          },
+          "actual_stdin": {
+            "path": "exference-maybeEither-synthesis.input.txt",
+            "sha256": "620b68a049401af2d33d0457b93ee441f785faf8920805c9f59104edaca58da5"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "fa714c3131b440be443d8dc32ef4d9c45329081d16820673feae728adc7ae0e1",
+          "classification": "bounded_observation_window_no_survivor",
+          "no_displayed_candidate": true,
+          "no_independent_candidate_replay": true,
+          "sampled_compilation_observation_indices": [
+            63,
+            117,
+            119
+          ],
+          "sampled_graph_absence_reasons": [
+            "NestedForallIntroduction",
+            "NestedForallIntroduction",
+            "NestedForallIntroduction"
+          ],
+          "synthesis": {
+            "label": "exference-maybeEither-synthesis",
+            "wall_seconds": 12.861069399979897,
+            "input": {
+              "path": "exference-maybeEither-synthesis.input.txt",
+              "sha256": "620b68a049401af2d33d0457b93ee441f785faf8920805c9f59104edaca58da5"
+            },
+            "stdout": {
+              "path": "exference-maybeEither-synthesis.stdout.txt",
+              "sha256": "40dd240b6e4e39dbf9cbbffaf988085b453684860f3780929bdb0d6cee9d431f"
+            },
+            "stderr": {
+              "path": "exference-maybeEither-synthesis.stderr.txt",
+              "sha256": "b4aa1d76080bf7b1994b6e5bd01a6e5d6f6a8e69361da9db4a876ed16390ae0b"
+            }
+          }
+        },
+        {
+          "id": "exference-reject-all",
+          "kind": "false_oracle_query",
+          "status": "passed",
+          "accepted": true,
+          "name": "extended_exference_reject_all",
+          "type": "forall a. a -> a",
+          "search_type": "forall a. a -> a",
+          "finite_observation_count": 1,
+          "provider_inventory": [],
+          "observations_from_raw_capture": {
+            "checked": 256,
+            "true": 0,
+            "false": 256,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-reject-all.commands.txt",
+            "sha256": "1867ee4f1a82c6c35427d3b170c239ae834233ab03fc72f7cbebd75c38554ede"
+          },
+          "actual_stdin": {
+            "path": "exference-reject-all-synthesis.input.txt",
+            "sha256": "1867ee4f1a82c6c35427d3b170c239ae834233ab03fc72f7cbebd75c38554ede"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "75a30f844f7c2393b1b42949eab35282db8362aed4ed22b85de05ac920f9d7d8",
+          "synthesis": {
+            "label": "exference-reject-all-synthesis",
+            "wall_seconds": 1.4257859999779612,
+            "input": {
+              "path": "exference-reject-all-synthesis.input.txt",
+              "sha256": "1867ee4f1a82c6c35427d3b170c239ae834233ab03fc72f7cbebd75c38554ede"
+            },
+            "stdout": {
+              "path": "exference-reject-all-synthesis.stdout.txt",
+              "sha256": "40dd240b6e4e39dbf9cbbffaf988085b453684860f3780929bdb0d6cee9d431f"
+            },
+            "stderr": {
+              "path": "exference-reject-all-synthesis.stderr.txt",
+              "sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae"
+            }
+          }
+        }
+      ],
+      "oracle_controls": [
+        {
+          "id": "positive-numeralSuccessor",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-numeralSuccessor"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "ffe798c6fd5571af49795c21c4179b75eb5e66a9bb68691de7237da23605b475",
+            "Main.hs": "211ba45530edfd975ef4d921578254868bb7194250584c639fe621686132a83c"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "796d03cb5d3e6daf59f2d72a977f87e73836c3b7c95abd3ff0c60abe6af1ffc0",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "bba6a52290f1325b758141bb9b8f07257c67a8e10c8cbea594d8bc75abb1616c"
+        },
+        {
+          "id": "wrong-successor_identity",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-successor_identity"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "f0c36c042f3ed7ff1418054ededd0025c287b365a38082ab1badf997b8160581",
+            "Main.hs": "124d45e55ce0a5c98012f2d13bb5abad97ad3fdd29b234d6d566ddfd206d2a12"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "48d200224f46f1dfc1ed58cbdc8ad04487101f250093a00c7237a6b00ff95c78",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "e3f3f24ee5e1390ac7ea0d55246b667a09715180589c65e8692e738b027b9c8a"
+        },
+        {
+          "id": "positive-foldr",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-foldr"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "0bc0277bc5f795f65f74876d44f092a5091bddfae4628a1db34d03edf63a83f3",
+            "Main.hs": "6c18e9654745e9f1910767727280421568d1fac449e51166241ffa9b1e837cde"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "a2cc7a7eb772d240d22c85eeafe93fbe817148ed1e68fc7b11d5dc3e87cbd697",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "824fddcfc4442e698e2b5fd525a0b5ba413752d0103c83f214a9a8bff9053e14"
+        },
+        {
+          "id": "wrong-foldr_seed",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-foldr_seed"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "282933054200b4cc14f8ce15192c4e3815aeca7c40bddf567e34fe3d09bbb34b",
+            "Main.hs": "942dab18f2a75bd65c8d67707f6a471d195d4fdadde905dc5d17e05e86e6df0a"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "84fa77d353aa4fd63a4cf7f06be15b5bfc4e430ff4d57ac5f4a88f56752db81d",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "91f787c0c1599afab5cd961b5eff9a5df6ad991f0cd1a1da89e5fbfbc33df4e8"
+        },
+        {
+          "id": "wrong-foldr_reversed",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-foldr_reversed"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "258433c442ef719b06baf2cc5042d344c648476bac846dadc86913f556ae04a2",
+            "Main.hs": "88099835d36941a724bf7cbb97082c8766540496ccab15444cd549288e5cdba3"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "9fc3085d7363a8b07980668d56116659a814457fea5de4c0608dbf1c7a21ccec",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "8935025e615e016ca0d3fec92aa5d36b0153597b8915285e1974c1a47b9db112"
+        },
+        {
+          "id": "positive-listToMaybe",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-listToMaybe"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "c9bc6ce3f2ceb3796870c929abfbc8dc4e0ff1510257b511c2946362244cc7ec",
+            "Main.hs": "3dcd45022e43fd58d0e83c21b31d15ddb986a0e6052be11947c00d063400f29b"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "1d3b2ed6c8f70513d8ce7753ec9d3b23391ee6d9afa2615b7c7262f718d0601f",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "ae2c58685be9884d5a2d3a4166cda01ce747f418fb78e05aacfedda4796a050d"
+        },
+        {
+          "id": "wrong-listToMaybe_nothing",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-listToMaybe_nothing"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "f4c63232896fd288963cafc96e3bf64a5609d4d2c49f5f7c4e0a66b5f581e3c4",
+            "Main.hs": "babf1688bb5e64a0e33cd296cc4a46eec0dccbfce595014bbcab22760b643355"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "ed26304c51b1c5085836aeed128f44ea333979e8ea8677538e006b1d968e9d05",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "d4a740aa7779af2bb513c2a164bfabb60d4ce49ace0899a47ebe9164b8a054e6"
+        },
+        {
+          "id": "positive-catMaybes",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-catMaybes"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "b20dbe686fd51301a4e9b5f138bd95812a188ba23e38255d1d6e56a8d94e5a8f",
+            "Main.hs": "1f122637cf220153af6f7e262b2e2a56cd40b299e41ce3cfad27e94f34ede10a"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "9f300bdc269128120a438c47b0de44a1411b977d4f0dee547e820e7e446b0b33",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "4be9f53fda156893c1d07f72cc9f5945b07728d0541cc2e747df1e6f84da211c"
+        },
+        {
+          "id": "wrong-catMaybes_empty",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-catMaybes_empty"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "1e8362d2c0d8593302534ec8601d665ff857342f0bd1cf781d0e5fb445479b5c",
+            "Main.hs": "0e1bbbaedd61b4c8b6b107a7813187cd2996764cd7f2f954f40bb7ac34878159"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "abeef0c0dc3eaea25c46b8981bb48bc34db6ef313a3806ff7a17e84ca8fc06da",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "e6ccc82473abadf7acaccd1c1e50b3c949b2f6d09dbf15edfea92401b2d98b70"
+        },
+        {
+          "id": "positive-squashMaybe",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-squashMaybe"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "a71672d73a2006fd837ba3a198a018902448b820d7a4f8cb8ca0a8549f40d2b3",
+            "Main.hs": "2e6ad78af92e24585dcfe7060b7c54bc05346fd8cffda7be08dcd7ea81c8bfd6"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "44e73bc06a44c35d3bb8d777aa142b29e139b2302a357302219b168ebde98d1a",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "eb7eae406d0b6575f2001d6279e9751394640216053d11492734c49fc81526fd"
+        },
+        {
+          "id": "wrong-squashMaybe_nothing",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-squashMaybe_nothing"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "862c4d6d75a02bcdca5ec92f807076b456e3506b3ffd3ef56b8ec27c1d71a8a3",
+            "Main.hs": "1ce4cb86e1b2661a7ef0ed5478a663b58e4d42b0d7a65e3a73d89724248b64fb"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "bbb01b2f60e341482e0e6c6b57079ebaffb176c387a97369ae04f6fea1e04700",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "9c3dc344224ca216f324e0f6c5904c7f4446f5385e528bc7f03fae3d3e03a7b0"
+        },
+        {
+          "id": "positive-isLeft",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-isLeft"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "c3b068137441d08349dc4e66e908262ba17858727fdaf89e938782b0126968df",
+            "Main.hs": "bbe42538f578eaa219c81bf6ab1d76ec723e598804213744e28812c04c1a99d1"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "143fd105439ba26471bcb73610f0f93c0fb25bb67e3dec229f905bd613b5fa44",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "d663b6ef477241985fedf8910a663b399758898eca94b2692fc7daf6248ae500"
+        },
+        {
+          "id": "wrong-isLeft_negated",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-isLeft_negated"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "4aea97a38aeeeb4af8fe48c7c97285d3881463850b1e42c87a6ec1e647ad56dc",
+            "Main.hs": "6cb6deb87773be24136bf40ef9e3166ab1b0dfebbd145a9836f73c043cdf8799"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "ee6a4a6d706d9a55b6d699329b15b7baec44fbe49200fd57cd759129d03fc7c7",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "848e921ebbaaa02a9f8c17b47a4fc0cb8ac34a45b8e7530b1045c5f17a82bbf7"
+        },
+        {
+          "id": "positive-maybeEither",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-maybeEither"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "04da3b399f6ddad7a41ef0b4bf61096e644215720cd3929696e6a475a234e4a6",
+            "Main.hs": "f4d4fd7c89404ed7786c848c37914799c6286ef1b80a185cd2e4ede3d8761c87"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "b4db3c67b83d3cf10b745fa769ca794a99e49720af3b459b943891a2e65190cb",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "0db8eef90ed51d5fae377600dbe2a1952110ff2901388d49cc965a33c49ae19c"
+        },
+        {
+          "id": "wrong-maybeEither_nothing",
+          "kind": "fully_typed_wrong_candidate",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-maybeEither_nothing"
+          ],
+          "source_sha256": {
+            "Candidate.hs": "937f2bfa0222e44346839a8db23b6464c637907ecea83c074323f1c1167f1417",
+            "Main.hs": "5b4b6d22a45f72a6957d5397942f220b4219261bcda59232512e300211bdc3a4"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "d70ae0d3e162d7fa7480c1a6c7d04aee25a82f200e02c08048d759ff57b22c14",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "34d8e6a38ae832b9c1d143aaa9eea335673011063ff9f77a507cf089a7da2d4d"
+        }
+      ]
+    },
+    {
+      "run": "partial-exference-v1",
+      "receipt": {
+        "path": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-exference-v1\\results.json",
+        "sha256": "e3430ac345706f5f8e3589d2ebff9e4719a734fb5f41ff26aace22a1269a3191"
+      },
+      "recorded_status": "failed",
+      "settings": {
+        "exference": {
+          "window": 256,
+          "budget": 100000,
+          "djinn_strategy": "depth-first",
+          "steps": 100000,
+          "process_timeout": 300.0,
+          "queue": 8192
+        }
+      },
+      "live_query_timeout_seconds": 0,
+      "independent_evaluation_seconds": 2.0,
+      "executable_pins": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+          "sha256": "74e77fabd961d73b9629df1259d384d3fbfb055a4316f99ce5b6249645012706"
+        },
+        {
+          "path": "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe",
+          "sha256": "0560906f7b7a046742d9e8433b95c0db49fc0c2fc28989e67cb23a7b347acc66"
+        }
+      ],
+      "recorded_and_rechecked_integrity": true,
+      "all_processes_completed_exit_zero": true,
+      "process_count": 41,
+      "process_wall_seconds_sum": 75.62079390039435,
+      "scope": "Haskell only; all selected original partial signatures use their explicit manifest-documented supplied default. No original partial signature or Lean case is promoted to acceptance.",
+      "artifact_paths_relative_to_source_receipt_directory": true,
+      "source_manifest_entry_count": 52,
+      "source_manifest_sha256": "d7f907302bbbd87aa6d47be974d51aa0e2316e969b2717e912cd2b78a0f2f727",
+      "cells": [
+        {
+          "id": "exference-last",
+          "operation": "last",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "partial_exference_last",
+          "type": "(forall church0. (church0 -> ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> church0)))",
+          "search_type": "(forall church0. (church0 -> ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> church0)))",
+          "finite_observation_count": 24,
+          "provider_inventory": [],
+          "source_case_id": "church_case_031",
+          "definition": "partial_exference_last a f2 =\n  f2 (\\g -> \\f8 -> \\_ -> f8 g) (\\k -> k) a",
+          "observations_from_raw_capture": {
+            "checked": 22,
+            "true": 1,
+            "false": 21,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-last.commands.txt",
+            "sha256": "2068f870d96675d694886694b0de5b415594239f5cfb7918779bca21d4049831"
+          },
+          "actual_stdin": {
+            "path": "exference-last-synthesis.input.txt",
+            "sha256": "2068f870d96675d694886694b0de5b415594239f5cfb7918779bca21d4049831"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "f3a1af6e4e100bff2989a6200f526cd24351ea0117b56985ad1c278a9eecfdde",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-last-synthesis",
+            "wall_seconds": 1.307907200010959,
+            "input": {
+              "path": "exference-last-synthesis.input.txt",
+              "sha256": "2068f870d96675d694886694b0de5b415594239f5cfb7918779bca21d4049831"
+            },
+            "stdout": {
+              "path": "exference-last-synthesis.stdout.txt",
+              "sha256": "56beb833affba8a59eeb2b58e44dfc44721b25a5915a4dc1d60366d3a7ed5a3e"
+            },
+            "stderr": {
+              "path": "exference-last-synthesis.stderr.txt",
+              "sha256": "bf9515350501aad629ee325e1ba048d9852e05a208e320610733f581609a47f4"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-last\\Candidate.hs",
+                "sha256": "fa3ac560748ade0d898765c6b1c593a3644844a344b3b25bc372cbcb28540148"
+              },
+              {
+                "path": "candidate-exference-last\\Main.hs",
+                "sha256": "fb202e684919e4b8bc5cfbcae4710165845490d8214b38075c3b05fd2904fbf0"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-last\\replay.exe",
+              "sha256": "3a247d4c6449ef7211db8b1bb280bebc8df78a313de1adfe6f2602e9efdcd883"
+            },
+            "pass_labels": [
+              "exference-last"
+            ],
+            "compiler": {
+              "label": "candidate-exference-last-ghc",
+              "wall_seconds": 1.0345164999598637,
+              "stdout": {
+                "path": "candidate-exference-last-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-last-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-last-execute",
+              "wall_seconds": 0.18410760001279414,
+              "stdout": {
+                "path": "candidate-exference-last-execute.stdout.txt",
+                "sha256": "526b52a8e3190d10700bfe5765c27c1aa86554230aaffba4def425a016157758"
+              },
+              "stderr": {
+                "path": "candidate-exference-last-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-foldl1",
+          "operation": "foldl1",
+          "kind": "synthesis",
+          "status": "failed",
+          "accepted": false,
+          "name": "partial_exference_foldl1",
+          "type": "(forall church0. (church0 -> ((church0 -> (church0 -> church0)) -> ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> church0))))",
+          "search_type": "(forall church0. (church0 -> ((church0 -> (church0 -> church0)) -> ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> church0))))",
+          "finite_observation_count": 36,
+          "provider_inventory": [],
+          "source_case_id": "church_case_038",
+          "failure": "displayed success lacks a successful behavioral observation",
+          "observations_from_raw_capture": {
+            "checked": 256,
+            "true": 0,
+            "false": 256,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-foldl1.commands.txt",
+            "sha256": "8e8bc92bb3ba806e0474f01e5bceebb6036b4939b772fbf5f0b4378b17a04885"
+          },
+          "actual_stdin": {
+            "path": "exference-foldl1-synthesis.input.txt",
+            "sha256": "8e8bc92bb3ba806e0474f01e5bceebb6036b4939b772fbf5f0b4378b17a04885"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "7431f1c2fb468355059e75d3208c2f62b81561e2c5b5152fc71a170d352eca4c",
+          "classification": "bounded_observation_window_no_survivor",
+          "no_displayed_candidate": true,
+          "no_independent_candidate_replay": true,
+          "sampled_compilation_observation_indices": [],
+          "sampled_graph_absence_reasons": [],
+          "synthesis": {
+            "label": "exference-foldl1-synthesis",
+            "wall_seconds": 8.162610300001688,
+            "input": {
+              "path": "exference-foldl1-synthesis.input.txt",
+              "sha256": "8e8bc92bb3ba806e0474f01e5bceebb6036b4939b772fbf5f0b4378b17a04885"
+            },
+            "stdout": {
+              "path": "exference-foldl1-synthesis.stdout.txt",
+              "sha256": "66d3d535e0125cb10b05bc721c4cd1d10315418353a81e34d364fb395496efdb"
+            },
+            "stderr": {
+              "path": "exference-foldl1-synthesis.stderr.txt",
+              "sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae"
+            }
+          }
+        },
+        {
+          "id": "exference-at",
+          "operation": "at",
+          "kind": "synthesis",
+          "status": "failed",
+          "accepted": false,
+          "name": "partial_exference_at",
+          "type": "(forall church0. (church0 -> (Int -> ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> church0))))",
+          "search_type": "(forall church0. (church0 -> (IndexInt -> ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> church0))))",
+          "finite_observation_count": 168,
+          "provider_inventory": [
+            {
+              "name": "partialIntCase",
+              "type": "forall r. Int -> r -> r -> (Int -> r) -> r",
+              "definition": "\\n negative zero positive -> if n < 0 then negative else if n == 0 then zero else positive (n - 1)"
+            }
+          ],
+          "source_case_id": "church_case_033",
+          "failure": "displayed success lacks a successful behavioral observation",
+          "observations_from_raw_capture": {
+            "checked": 256,
+            "true": 0,
+            "false": 256,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-at.commands.txt",
+            "sha256": "fb7a6dabc3331f00e212db1d28c4a3b197b0c0872bce3a3177d5fe1bbbf730ca"
+          },
+          "actual_stdin": {
+            "path": "exference-at-synthesis.input.txt",
+            "sha256": "fb7a6dabc3331f00e212db1d28c4a3b197b0c0872bce3a3177d5fe1bbbf730ca"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "97531031d6aa1aeaa25a2ff9cffe757c3f7e646a2652fb24f174745eb0a5af1c",
+          "classification": "bounded_observation_window_no_survivor",
+          "no_displayed_candidate": true,
+          "no_independent_candidate_replay": true,
+          "sampled_compilation_observation_indices": [],
+          "sampled_graph_absence_reasons": [],
+          "synthesis": {
+            "label": "exference-at-synthesis",
+            "wall_seconds": 30.306757499987725,
+            "input": {
+              "path": "exference-at-synthesis.input.txt",
+              "sha256": "fb7a6dabc3331f00e212db1d28c4a3b197b0c0872bce3a3177d5fe1bbbf730ca"
+            },
+            "stdout": {
+              "path": "exference-at-synthesis.stdout.txt",
+              "sha256": "7f7a3ae17914ee9809b8d0817e300470801da60c8b68e7fa1e3ae37a57f959b5"
+            },
+            "stderr": {
+              "path": "exference-at-synthesis.stderr.txt",
+              "sha256": "f62163f25e5dd1934b3c8ce0a5f73164f19f1dea3003ec78226b1985da4ca6c2"
+            }
+          }
+        },
+        {
+          "id": "exference-atKey",
+          "operation": "atKey",
+          "kind": "synthesis",
+          "status": "passed",
+          "accepted": true,
+          "name": "partial_exference_atKey",
+          "type": "(forall church0 church1 church2. (church2 -> ((church0 -> (church1 -> (forall church3. (church3 -> (church3 -> church3))))) -> (church1 -> ((forall church5. (((forall church4. ((church0 -> (church2 -> church4)) -> church4)) -> (church5 -> church5)) -> (church5 -> church5))) -> church2)))))",
+          "search_type": "(forall church0 church1 church2. (church2 -> ((church0 -> (church1 -> (forall church3. (church3 -> (church3 -> church3))))) -> (church1 -> ((forall church5. (((forall church4. ((church0 -> (church2 -> church4)) -> church4)) -> (church5 -> church5)) -> (church5 -> church5))) -> church2)))))",
+          "finite_observation_count": 54,
+          "provider_inventory": [],
+          "source_case_id": "church_case_248",
+          "definition": "partial_exference_atKey a f2 c f4 =\n  f4\n  (\\f8 ->\n     \\i ->\n       f8 (\\l -> \\m -> let f15 = f2 l in let f17 = f15 c in f17 m i))\n  a",
+          "observations_from_raw_capture": {
+            "checked": 136,
+            "true": 1,
+            "false": 132,
+            "error": 3,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-atKey.commands.txt",
+            "sha256": "5720390a70b7e47221360dd2b4d8f54beb6e0ece75341fbb1c62d136bf363de2"
+          },
+          "actual_stdin": {
+            "path": "exference-atKey-synthesis.input.txt",
+            "sha256": "5720390a70b7e47221360dd2b4d8f54beb6e0ece75341fbb1c62d136bf363de2"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "ab9805254bf1777c39249eb9b50cbdf930f07bb62ed1753f221b4d59967b905c",
+          "exact_original_signature_definition_predicate_checked": true,
+          "synthesis": {
+            "label": "exference-atKey-synthesis",
+            "wall_seconds": 8.950231200025883,
+            "input": {
+              "path": "exference-atKey-synthesis.input.txt",
+              "sha256": "5720390a70b7e47221360dd2b4d8f54beb6e0ece75341fbb1c62d136bf363de2"
+            },
+            "stdout": {
+              "path": "exference-atKey-synthesis.stdout.txt",
+              "sha256": "7fef728a3bcedf51cf55549b96a97a8b870c79a7da3437c49245bf4ae89553b5"
+            },
+            "stderr": {
+              "path": "exference-atKey-synthesis.stderr.txt",
+              "sha256": "903336849e343bb4b99a60267d83b2c4edb9818f5949bf95e97300136e20ad33"
+            }
+          },
+          "replay": {
+            "status": "passed",
+            "sources": [
+              {
+                "path": "candidate-exference-atKey\\Candidate.hs",
+                "sha256": "9fdbaa675a3b16c2d1e573e7d19593ac16fe8b4d47e47b70c45fa2508cbea884"
+              },
+              {
+                "path": "candidate-exference-atKey\\Main.hs",
+                "sha256": "dfcdcb6619b4b82c0c6cccd8ebad3e315cd8c594991c71bc00c2e0bbe4f84dca"
+              }
+            ],
+            "executable": {
+              "path": "candidate-exference-atKey\\replay.exe",
+              "sha256": "4c8d3fcdacbde2f5fa2200ea4994b4a72d2216f3d178c85734ae3143eb9e766c"
+            },
+            "pass_labels": [
+              "exference-atKey"
+            ],
+            "compiler": {
+              "label": "candidate-exference-atKey-ghc",
+              "wall_seconds": 1.3102481999667361,
+              "stdout": {
+                "path": "candidate-exference-atKey-ghc.stdout.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "stderr": {
+                "path": "candidate-exference-atKey-ghc.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "execution": {
+              "label": "candidate-exference-atKey-execute",
+              "wall_seconds": 0.38903650001157075,
+              "stdout": {
+                "path": "candidate-exference-atKey-execute.stdout.txt",
+                "sha256": "dfdd5d01ae5a1de34542d07b0f57d07f4ddb8a5ce0ca9f4b85d56ec6605c5aaa"
+              },
+              "stderr": {
+                "path": "candidate-exference-atKey-execute.stderr.txt",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        },
+        {
+          "id": "exference-reject-all",
+          "kind": "false_oracle_query",
+          "status": "passed",
+          "accepted": true,
+          "name": "partial_exference_reject_all",
+          "type": "forall a. a -> a",
+          "search_type": "forall a. a -> a",
+          "finite_observation_count": 1,
+          "provider_inventory": [],
+          "observations_from_raw_capture": {
+            "checked": 256,
+            "true": 0,
+            "false": 256,
+            "error": 0,
+            "timeout": 0,
+            "window": 256
+          },
+          "command": {
+            "path": "exference-reject-all.commands.txt",
+            "sha256": "f57d368bfd0890a44beac0926163a1a43ef386d4568abcb210cda322f4070b7c"
+          },
+          "actual_stdin": {
+            "path": "exference-reject-all-synthesis.input.txt",
+            "sha256": "f57d368bfd0890a44beac0926163a1a43ef386d4568abcb210cda322f4070b7c"
+          },
+          "command_equals_actual_stdin_bytes": true,
+          "exact_named_query_matches_record": true,
+          "predicate_utf8_sha256": "75a30f844f7c2393b1b42949eab35282db8362aed4ed22b85de05ac920f9d7d8",
+          "synthesis": {
+            "label": "exference-reject-all-synthesis",
+            "wall_seconds": 1.8878350000013597,
+            "input": {
+              "path": "exference-reject-all-synthesis.input.txt",
+              "sha256": "f57d368bfd0890a44beac0926163a1a43ef386d4568abcb210cda322f4070b7c"
+            },
+            "stdout": {
+              "path": "exference-reject-all-synthesis.stdout.txt",
+              "sha256": "66d3d535e0125cb10b05bc721c4cd1d10315418353a81e34d364fb395496efdb"
+            },
+            "stderr": {
+              "path": "exference-reject-all-synthesis.stderr.txt",
+              "sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae"
+            }
+          }
+        }
+      ],
+      "oracle_controls": [
+        {
+          "id": "positive-last",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-last"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "0b5fdefa788604de4e19561eae2b8c6698e57d9ea4425e2a28ac6ad99f2492c7",
+            "Main.hs": "935774a97ec84a2fa83651027af795a817d6aa6367b73eae42d398388a099b7a"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "44b614b584a5bb6d499ef031b140f78bd3a4cd40d5e1da063ab6ba40b12bde62",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "0acf63e343586c168ced9d951151d6e1a3169c0ab0a5b04db076eb11a5e4a8e3"
+        },
+        {
+          "id": "wrong-last-always_default",
+          "kind": "fully_typed_wrong_control",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-last-always_default"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "18860deaad0d5ab9678068537ac6a449a1b6a3d944a82eb3da7628566d3c106a",
+            "Main.hs": "8db5789ef30260f1bb38762175e5ee2468d7fe231481f0e8e2d96a9457c91cd5"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "7d2ff52bc9d695160a44d7fe6a0e1b97da51759d6be85633f4eb0d304325027f",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "a5f6861cd0e7826deb9766784cb98a2cf70229f21e749837e78af54418a95e94"
+        },
+        {
+          "id": "wrong-last-wrong_end",
+          "kind": "fully_typed_wrong_control",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-last-wrong_end"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "e125b4e242aebd1dbf0f02aec45207d26e978f36ee3f8e6d367dbda9bc462372",
+            "Main.hs": "1da6129de99396fd32e7902c2449373c5ab0a27b6f282df4652ded62ca937243"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "bff6921aaadc7069d172163b0cdd02991bf6b84b5b69a52030244d8c9113b5b2",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "19098a54129de14194934f771d1e5b7585864b51c4928a7c1d00131ed3be2998"
+        },
+        {
+          "id": "positive-foldl1",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-foldl1"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "77a40f0b7c757a3d030b4ef9a434662d5d6dc99aa9e5e0ee0d8f1b0bd4abd3cd",
+            "Main.hs": "90c96dae6d7a5f3e4c1bc16b799f4f19ed4ee9a519d0cc65322d49cdbfb46b40"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "ce247e5605105b498e43123d7c6ab05a375313c2c8cfe51a430dc4acc0d9ff64",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "11d94903d9762ab05d4f7feced8c49040c940b89bd859bc09fb39087973835b4"
+        },
+        {
+          "id": "wrong-foldl1-always_default",
+          "kind": "fully_typed_wrong_control",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-foldl1-always_default"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "6279bf5ab8b00c397dfedc954592a46353fcbc77df159848c3f80612c2030145",
+            "Main.hs": "a2b121ed6b49321cf6ca084a597d34a15cce1915816dbf62d2f012e04507c794"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "fdd0481c37035dc851c47fb9df923a672a49cf6f613d8ffff658d00072fb877b",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "e04974e29aa91976c3f152103e307357d1832fe2866ab60ac9029a2de3e90523"
+        },
+        {
+          "id": "wrong-foldl1-wrong_association",
+          "kind": "fully_typed_wrong_control",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-foldl1-wrong_association"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "e4a38c1f685f43e97c0ff8fa17a99f834c3f03e042dee4fa8d04f4951ad1e75c",
+            "Main.hs": "c31b72b1589da78690e91436471168e4e6e2da89937b1786e35bf0751aac23ca"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "30e475e0447e55293b3b5f0f9c666a3c7571031d95a57b108ab1b4a9d6235ef3",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "9be39e61f72615481d9e3dea3beae29d88d0e133b2f2d08640cc1fb6d34dca15"
+        },
+        {
+          "id": "wrong-foldl1-default_is_seed",
+          "kind": "fully_typed_wrong_control",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-foldl1-default_is_seed"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "cde86190ec315a70a23a706414758970b5bbab680ae1b9c3d45ebb9b99aef843",
+            "Main.hs": "bdbccbab95602e38ade46bf048da57177a7ec449195058a635b8cbcf6eca1adf"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "e99a6b6e255d77a3d2ddaf933877b1e02aaa583ad84de6c19a4a7f6e5fa75da4",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "84b0a1fdfd420173d0cec9db3ac118bb75b73fc7f9c57f6188a7de056f8ccb73"
+        },
+        {
+          "id": "positive-at",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-at"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "d962c13f36172012776012b72fbb717da4244a3b8fbb38ba03750491f8f0a6c7",
+            "Main.hs": "5c9bf6551153b7aee3c1a8d25494803d02c3368a911870544c1d2d11e1246275"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "28906baf39a4b7b9dabbd007c39dc3656a87c282d6181fc3ae3fabdf200a080d",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "4acc7b945549b4f8b58b1f646b46cb4e6ae1305bf072c1ab4aeb634aab929bab"
+        },
+        {
+          "id": "positive-primitive-at",
+          "kind": "positive_primitive_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-primitive-at"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "37e34e1da7672df8bb79d7441aedd0794fa69d86a280939675fb8c2db384a722",
+            "Main.hs": "396bee08653d12d07bbdf64ec664a44a957aa2e503a29aced03fc6fb3ae943fd",
+            "PartialNumeric.hs": "00a845db4730f1ff24c1c8399f1f089fde4eee2ff7703d4d26554fc89e079a1d"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "ee5b55d09bab9beedcf2f2be00109e661e7bc0647c90bca7c5060cedbda47867",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "ab0ae72103c65f11508494a8988d988c38eb7ee472149b0f8ad91844ce1323bc"
+        },
+        {
+          "id": "wrong-at-always_default",
+          "kind": "fully_typed_wrong_control",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-at-always_default"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "d23a19ce4567031e5b5ba62339ca78229ec0018e1b5fbb4b2eb250cd6978987c",
+            "Main.hs": "3c5ec069d420717ff2f1552e3cfe1f50ab4bc2aea67d267f0343efc38d97e444"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "4bf76d3fb2f4e000849b8b67e8662223c5ece01ad9f610da7e23df86f94535ff",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "b928646422e97899e1cde0236085244ae957fe58596d29772658fa9e10f18092"
+        },
+        {
+          "id": "wrong-at-ignores_index",
+          "kind": "fully_typed_wrong_control",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-at-ignores_index"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "fb9c25839a708e0294e6209f728c9d5c3fb86f4637415162df0a4ca76cb1d100",
+            "Main.hs": "a50514d9671dc44992d84a1298331084669bbf0600d6f597a71db04356921bee"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "53548476fc0e65daf08f7a6464199a7b1519d12b6eb346d6c150cc0c427bf970",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "e750cf49db08c640a3779a0bb91336fc16e9e8ccd7da5c58443e4c728499c9c0"
+        },
+        {
+          "id": "positive-atKey",
+          "kind": "positive_oracle_witness",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "positive-atKey"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "1237b959b7548f5e03ea2f8463afb29079c94df2d6aaaa3718f41abaed7a0a9b",
+            "Main.hs": "7c673f756509abff2a5df6b0691d9ec7b32826d41a8926930814bc3126074b7f"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "689de414db780505edf728ffb6ae438e1a95b6f10c00412d4cb784ecb3a604c5",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "e6469ed7699d20a726b6666c9d5132ac1173fa07cc309eca462ed46b07d00f92"
+        },
+        {
+          "id": "wrong-atKey-always_default",
+          "kind": "fully_typed_wrong_control",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-atKey-always_default"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "b7e1685501defc4b5622db958f9f955f41242e4bac716b36e10012e4933e5a47",
+            "Main.hs": "f96a9c1d4829f9b0f4604e40e90981638a875cc8fcb9f09e67bcb861d05d3190"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "172bd0cdea97af6d2867791ea52862018aa2c7b1fa25afdb36a117a174e3c75e",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "f6dce14f8953f00847211eb34e6ebc948c18e5be01b1e222f9e17d7933272dbb"
+        },
+        {
+          "id": "wrong-atKey-last_matching_value",
+          "kind": "fully_typed_wrong_control",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "wrong-atKey-last_matching_value"
+          ],
+          "source_sha256": {
+            "Oracle.hs": "9225ccf6ea6b9c0e5f5bac51e5659fd9b6e11eceb042e3e4e9fc7c0eca3d5535",
+            "Main.hs": "a98c41a9050f3e25f2041ace8cf9cb016d4e58ea5b7a3acec0bd1a6e04395777"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "e1f63291186eec7ef379a09eb28bc2d669f0de9c942e3cf228808930ae532cad",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "4b168d25474d0ba27521c34c71fa2c48a368cc020e71efd0e22aeff1b3522e1a"
+        },
+        {
+          "id": "primitive-int_negative_zero_positive",
+          "kind": "generic_primitive_control",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "primitive-int_negative_zero_positive"
+          ],
+          "source_sha256": {
+            "PartialNumeric.hs": "00a845db4730f1ff24c1c8399f1f089fde4eee2ff7703d4d26554fc89e079a1d",
+            "Main.hs": "982ab2c6cad1e04eeaa2c356782881ff84edc846d62256f4c8569aba77a3c1e3"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "fe47cd3685dd201cbc19d45e70e737abb6643123afea69bbc99235c174b463d5",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "cef5ae53fa59339cf29e64706284893e2317574076d4ad8fe8beb9c0c6439388"
+        },
+        {
+          "id": "primitive-int_polymorphic_boolean",
+          "kind": "generic_primitive_control",
+          "status": "passed",
+          "expected_and_observed_pass_labels": [
+            "primitive-int_polymorphic_boolean"
+          ],
+          "source_sha256": {
+            "PartialNumeric.hs": "00a845db4730f1ff24c1c8399f1f089fde4eee2ff7703d4d26554fc89e079a1d",
+            "Main.hs": "7101362a76de04a6575afac0a37413457bb84103e131fe36321dcb2e61d89ebe"
+          },
+          "compiler_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "compiler_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "execution_stdout_sha256": "6c91eba1f7ea899648347477d9bf89c49860015575c665867b42b00c6e1ada43",
+          "execution_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "executable_sha256": "e830dd9254bebc65a817a1b44d89bfc961e4883f57eb5caab24dedc817f4e46a"
+        }
+      ]
+    }
+  ],
+  "offline_audit_script": {
+    "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-audit-proposal-v1\\audit.py",
+    "sha256": "ed76e258b116bb1a58396bd5da7026cacbc70c41857127000cf9c0d2d7c26d22"
+  },
+  "complete_offline_audit_details": {
+    "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-audit-proposal-v1\\audit-details.json",
+    "sha256": "ea76e772aa02e208e518f8aebd5723ccb82185257ad66303724f5b8e2cadd99c"
+  },
+  "audited_files": {
+    "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-audit-proposal-v1\\audited-files.json",
+    "sha256": "bff582fa7831ca6c38cfe92eab6afc6ec7007561ad33e6891bd522acc3ea6225"
+  }
+}

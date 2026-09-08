@@ -110,9 +110,10 @@ marks priority 1's supported-fragment Haskell elaboration complete: all 101
 CLI tests pass, including first/best/all repair selection, exact GHC replay,
 and retention of the original failed-candidate sample when its elaboration
 retry times out under the same deadline. Priorities 2–4 remain open. Next are
-bounded Lean context integration, verification of already-found folds, and
-broader behavior. After bounded context publication, one fully described global
-provider can extend the existing Lean `Type 0` route under its current non-overlap guard. Exact
+reliable native Lean verification with exact candidate/request correlation,
+broader Church behavior including all 19 explicit-default cases, and one fully
+described global contextual provider under the existing `Type 0` non-overlap guard.
+Bounded Lean contexts now pass their complete 39-cell matrix and 680-test suite. Exact
 proof-selected dictionary transport remains required before that guard is
 relaxed, with payload-sensitive Haskell and Lean replay. Both partial oracle preflights now pass: all 20 Lean files with 491
 inventories (487 empty, four allowlisted observer/proofs), and all 63 Haskell
@@ -140,10 +141,10 @@ execution. Leant's isolated direct dictionary renderer passes 21 focused tests,
 seven full-signature Lean replays, and sixteen empty implementation/proof axiom
 inventories, including distinct equal-predicate dictionaries. The bounded
 earlier production subset passed three public Djinn behavioral queries and
-exact full-type replay. The fresh strict build, 52 focused tests, complete
-678-test suite, and two Djinn identity ordinary/`where` replays pass; the
-production matrix has 35/39 accepted cells and four ordinary-query timeouts
-remain open. Methods,
+exact full-type replay. The fresh complete 680-test suite and all 39 production
+cells now pass across ordinary and named-`where` queries in all three Lean modes.
+This bounded local-context milestone advances original priority 3. Global
+contextual providers, equal-predicate dictionary selection, methods,
 instance/superclass derivations, and complete Djinn constrained search remain
 open. The [conditional-Given increment](docs/reports/2026-09-07-djinn-conditional-givens.md)
 adds forced Djinn local/global uses under the exact root dictionaries, checked
@@ -151,9 +152,11 @@ dictionary erasure, and shared batch/stream budgets. All 92 private tests and
 the expanded sixteen-test Given target pass, including independent GHC replay.
 Qualified searches that omit class methods now report no evidence rather than
 incorrectly refuting the source type; genuine unconstrained refutations remain.
-Duplicate equal Givens, nested forall/Given interaction, methods, and partial
-constrained instantiation still need further work. Leant's published `922c5558` dependency
-does not yet contain this increment.
+Duplicate equal Givens, methods, partial constrained instantiation, and richer
+nested forall/Given combinations beyond the accepted bounded forms remain open;
+rank-N constrained forwarding is covered. Leant's published `922c5558` dependency
+did not contain this increment; the newly validated integration uses the guarded
+revision below.
 
 Its [validation receipt](test-integration/receipts/conditional-givens-checkpoint.json)
 records 2,168 passing tests across twelve complete affected suites, including
@@ -169,21 +172,22 @@ pass 106 and 147 tests, with the facade suite taking 234.23 seconds and includin
 24 contextual cases and GHC witnesses. The [checkpoint receipt](test-integration/receipts/guarded-nested-givens-checkpoint.json)
 records 1,048 Tasty cases, 700 Church cases and 100 scope queries across twelve
 complementary complete suites with unchanged production sources. Five fixture
-lines were corrected before the final reruns. Leant's guard integration remains
-under acceptance. Its strict build, 52 focused tests, and two own-variant Djinn
-identity ordinary/`where` full-type replays pass. The corrected
-[complete Leant suite](https://github.com/VladimirReshetnikov/Leant/blob/c17ce6655a64db348e92f6f7fb9a0889cbebaa25/test-context/receipts/unit-context-integration.json)
-passes **678/678 in 283.51 seconds** (283.64 seconds for the owned process).
-Its receipt preserves the earlier 675/678 result and three stale assertion
-corrections; production source and bounds stayed unchanged. The
-[contextual matrix receipt](https://github.com/VladimirReshetnikov/Leant/blob/af6483a658cf2e49db127405d5e22410e8e9fd78/test-context/receipts/production-context-initial.json)
-accepts **35/39 cells across two runs**: 14 exact outputs, three actual False
-controls and 18 metadata refusals. The initial run accepted 29; a separate
-six-cell replay passed after explicitly declaring the universe fixture's class
-as `Type`, with production unchanged. All nine named-`where` positives pass.
-Four ordinary forwarding/local-Given queries in Exference and Both still reach
-45-second command timeouts. Ordinary pool collection precedes first verification;
-an incremental collection patch is applied and undergoing validation.
+lines were corrected before the final reruns. Leant's integration of guarded
+Djex `38435709bf4e70c4b53c541c462b0bbd35837bf2` now has complete bounded acceptance.
+Its [fresh 39-cell matrix and full unit receipt](https://github.com/VladimirReshetnikov/Leant/blob/469a822da0abfdc7a4d8228a203af0a0b7d2b59b/test-context/receipts/ordinary-context-streaming.json)
+record **39/39 cells and 680/680 tests**: 18 exact full-type/payload outputs,
+three actual False controls and 18 explicit metadata refusals. Each accepted
+variant retains its own graph, renderer and engine, with the actual replay
+kernel pinned. The unit suite takes 293.73 seconds (293.86 seconds process wall).
+Bounded incremental collection resolves the four ordinary-query timeouts;
+earlier failures and fixture corrections remain in the linked receipts.
+This does not close original priority 3's broader contextual-evidence scope.
+
+Leant's [native request comparison](https://github.com/VladimirReshetnikov/Leant/blob/469a822da0abfdc7a4d8228a203af0a0b7d2b59b/test-recursive/receipts/native-request-traces.json)
+records a passing length query with exact kernel replay, but failed append
+positive and False-control runs. Candidate/request payload correlation and
+repeatable verification are next; these traces do not establish a transport fix
+or complete recursive synthesis.
 
 Leant also adds [bounded simplification of behavioral assertions](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-07-bounded-behavioral-simplification.md)
 after decision checks of the assertion and its negation. The three-engine live

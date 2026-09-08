@@ -6,32 +6,28 @@ implements the first four items in the
 within its original supported-fragment scope. The earlier streaming acceptance
 receipt belongs to its recorded source revisions.
 
-The [current re-triage](2026-09-07-synthesis-retriage.md) schedules the remaining
-deliveries. It preserves every completion requirement below. Bounded Lean
-simplification and the eight-case ordinary-data matrix now have live acceptance;
-the guarded nested-Given increment now also has complete affected-suite
-acceptance. Next are its bounded production Lean integration, reliable
-supplied-fold verification, and broader Church behavior. Same-candidate Haskell
-elaboration, including failure-sample retention across retry timeouts, is
-accepted. Full proof-selected dictionary transport remains required before
-relaxing overlap restrictions. The fresh Lean strict build and 52 focused tests pass,
-along with two Djinn identity replays through ordinary and named-`where`
-commands, each retaining its own accepted-variant provenance. The corrected
-[complete Leant suite](https://github.com/VladimirReshetnikov/Leant/blob/c17ce6655a64db348e92f6f7fb9a0889cbebaa25/test-context/receipts/unit-context-integration.json)
-passes 678/678 in 283.51 seconds (283.64 seconds for the owned process), retaining
-the earlier 675/678 result and three stale source-assertion corrections.
-Production source and bounds stayed unchanged. The
-[contextual matrix receipt](https://github.com/VladimirReshetnikov/Leant/blob/af6483a658cf2e49db127405d5e22410e8e9fd78/test-context/receipts/production-context-initial.json)
-accepts 35/39 cells across two runs: the initial 29 comprise 14 exact outputs,
-three actual False controls and 12 metadata refusals; six independent metadata
-replays pass after explicitly declaring the universe fixture's class as `Type`.
-Production stayed unchanged and all integrity checks pass. All nine named-`where`
-positives pass. Four ordinary forwarding/local-Given cells still reach 45-second
-timeouts in Exference and Both. A collection patch is applied but unvalidated;
-the complete matrix remains unaccepted.
-Corpus expansion remains part of each capability's acceptance;
-it does not wait for all richer context and recursion extensions. The current
-re-triage preserves the original priority numbers and completion requirements.
+The [current retriage](2026-09-07-synthesis-retriage.md) preserves every
+completion requirement below. **Bounded local Lean context integration is now
+accepted**, using Djex `38435709bf4e70c4b53c541c462b0bbd35837bf2`.
+The [fresh acceptance receipt](https://github.com/VladimirReshetnikov/Leant/blob/469a822da0abfdc7a4d8228a203af0a0b7d2b59b/test-context/receipts/ordinary-context-streaming.json)
+records all **39 public cells and 680 unit tests passing**. The matrix includes
+18 exact full-type outputs with 72 finite payload observations and 144 empty
+replay inventories, three actual False controls, and 18 explicit metadata
+refusals. Ordinary and named-`where` commands pass in all three Lean modes,
+retaining each accepted variant's own graph, renderer and engine and the
+exact replay kernel. The unit suite takes 293.73 seconds (293.86 seconds for
+the owned process). Earlier failures and fixture corrections remain in the
+receipt; they do not replace this fresh complete acceptance.
+
+This closes the bounded integration milestone within original priority 3,
+not that priority's broader contextual-evidence scope. Methods, superclass
+search, selected equal-predicate dictionaries and global contextual providers
+remain open. Priority 1's supported-fragment Haskell elaboration, including
+same-deadline failure-sample retention, is complete. Priorities 2–4 continue.
+Next are reliable native verification with exact candidate/request correlation,
+broader Church behavior including all 19 explicit defaults, and one fully
+described global `Type 0` provider under the current guard. Exact dictionary
+selection remains required before overlap restrictions are relaxed.
 
 Leant's [ordinary-data receipt](https://github.com/VladimirReshetnikov/Leant/blob/main/test-recursive/receipts/all-engines.json)
 records all eight cases under Djinn, Exference, and Both: 24 exact displayed
@@ -201,6 +197,10 @@ selection fixture, not acceptance of that experiment or a new Leant integration.
 
 ## Leant integration and recursive-case work in progress
 
+This historical checkpoint retains its original pending results. The fresh
+bounded 39-cell and 680-test acceptance at the top supersedes its integration
+status without enlarging its recorded recursion coverage.
+
 Leant `aab110e99e3c3d96549a05d3975b26bea93dc6ef` integrates Djex
 `6890bb5a8a56902c2baf137581e23c25a376fad0`. Retained receipts record the strict
 GHC build, 615 boundary tests, 18 existing corpus cases across three engine
@@ -315,46 +315,48 @@ lines were corrected to remove unsupported explicit datatype/synonym parameter
 kinds; the initial setup failures and final complete reruns are retained.
 That checkpoint's 100-test CLI suite includes the accepted first/best/all
 elaboration repairs; the later 101-test timeout acceptance is recorded above.
-Leant's working dependency contains the guard, but full integration acceptance
-remains required.
+Leant's validated dependency contains this guard; the fresh bounded 39-cell
+acceptance and 680-test suite are recorded above. Broader priority 3 remains open.
 
 ## Remaining work
 
-- Integrate priority 3's accepted guarded increment into Leant. Its prepared
-  exact displayed-Variant/graph/renderer/engine observations and direct hashed
-  replay kernel pass 14 pure harness controls; 12 extended-corpus and six
-  partial pure controls also pass. The new strict build, 52 focused tests,
-  two Djinn identity ordinary/`where` full-type replays, and corrected complete
-  678-test suite pass. The contextual matrix accepts 35/39 cells across the two
-  recorded runs. Resolve the four ordinary Exference/Both forwarding/local-Given
-  timeouts within the existing gate; all nine named-`where` positives, three
-  actual False controls and 18 metadata refusals already pass. Retain exact
-  full-type/payload replay and each accepted variant's own provenance.
-- Retain priority 2's accepted sixteen-cell Haskell matrix, 24-cell Lean replay
-  and historical 647-test integration receipt. Diagnose and repair live Lean
-  verification of already-found append/length candidates under unchanged limits,
-  with exact replay, actual False controls and environment-preserving recovery.
-  Broaden supplied tree folds and accumulator programs after that gate passes.
-- Execute priority 4's broader behavioral corpus and all nineteen supplied-default
-  cases. Supplied-default `head` now passes live synthesis, exact GHC
-  execution, and actual False controls in both Haskell engines. Most expanded
-  cells remain open. Both partial oracle preflights now pass: 20 Lean files with 491 axiom
-  inventories (487 empty, four allowlisted observer/proofs) and 63 Haskell
-  controls. All 736 observations remain; expanded live synthesis acceptance
-  remains open. Keep each engine/operation result separate
-  and retain bounded Lean simplification as a regression.
-- After bounded Lean publication, extend priority 3 with one fully described
-  global contextual provider in the existing `Type 0` fragment under the current
-  non-overlap guard. Independently, carry actual proof-selected introduction/slot
-  transport and require a forced equal-predicate outer/inner fixture before
-  relaxing that guard. Haskell and Lean replay must observe differing payload
-  behavior under faithful scoped capture; graph identity or successful GHC
-  compilation alone is insufficient. Then extend nested forall/Given interaction,
-  partial constrained use, exact provider/universe metadata, methods, conditional
-  instances and superclasses
-  from concrete missing programs.
-- Run the appropriate complete affected suites and live compiler/kernel
-  acceptance, update capability documentation, and integrate both repositories.
+- Preserve priority 3's accepted bounded context route as a regression gate:
+  strict build, 54 focused tests, complete 680-test suite, and all 39 public
+  cells with exact owned provenance, full-type/payload replay, actual False
+  controls and explicit metadata refusals. Do not substitute context erasure
+  or broaden the supported universe/evidence fragment implicitly.
+- Advance priority 2 through reliable native verification and exact
+  candidate/request correlation. The [native trace receipt](https://github.com/VladimirReshetnikov/Leant/blob/469a822da0abfdc7a4d8228a203af0a0b7d2b59b/test-recursive/receipts/native-request-traces.json)
+  records passing length synthesis/replay and False control, but failed append
+  positive and False-control runs. Trace v1's sequential candidate/request
+  association does not establish a transport defect. Identify the failing
+  boundary before selecting a fix; retain original bounds, cancellation,
+  owned cleanup, context-preserving recovery and independent exact replay.
+  Supplied tree folds and accumulator programs can extend after native
+  verification is reliable, independently of dictionary selection.
+- Execute priority 4's additional totals and all nineteen explicit-default
+  counterparts, independently per engine and operation. Supplied-default
+  `head` passes live synthesis, GHC execution and False controls in both
+  Haskell engines. Both oracle preflights pass: 20 Lean files with 491 exact
+  inventories and 63 Haskell controls; all 736 observations remain. Most
+  expanded live cells remain open. Preflight and type inhabitation do not
+  establish behavioral synthesis.
+- Extend priority 3 with one fully described global contextual provider in
+  the existing `Type 0` fragment under the current non-overlap guard.
+  Separately carry the proof-selected introduction and ordered slot through
+  lowering and reconstruction. Before relaxing overlap guards, require
+  differing outer/inner payload behavior under faithful scoped capture in
+  Haskell and Lean; graph identity or successful compilation alone is
+  insufficient. Methods, superclass evidence and further schemes require
+  their own source metadata and replay.
+- Keep native Windows Length acquisition conditional on a concrete workflow;
+  require actual bounded acquisition, solver execution and replay. Optimize
+  measured costs while preserving budget charges and source ownership.
+  Replace brittle source-text counts with executable routing/boundary controls
+  when those tests are touched, preserving coverage without a broad cleanup.
+  Defer broad rewrites, caches and frontier expansion absent a demonstrated
+  missing program or bottleneck. Run appropriate complete affected suites
+  and compiler/kernel acceptance for each change.
 
 The goal remains all four priorities; this checkpoint does not replace it with
 the currently implemented rendering path.

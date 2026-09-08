@@ -1,0 +1,631 @@
+{
+  "schema": "synthesis-retriage-diagnostics-v1",
+  "scope": "Diagnostic extraction from completed local runs; no new synthesis acceptance",
+  "published_implementation_baselines": {
+    "Djex": "a44f70570c9287d3fc377e9df18978e1c6a692fa",
+    "Leant": "e1ed6f7eb308b9a431db1ec8c956f9eb7a30d05f"
+  },
+  "local_artifact_policy": "Raw paths identify retained local runs. Selected captures and patches are embedded below; omitted raw artifacts are hash-addressed, not bundled.",
+  "maybeEither": {
+    "exact_cli": {
+      "raw_receipt": {
+        "path": "C:\\Djex\\dist-newstyle\\maybe-either-cli-reproduction-v1\\results.json",
+        "sha256": "3ca40c0e4bb98b84aa731b24d938ca50e49aebb9fd387499a4864547ce0a236b",
+        "bytes": 1755
+      },
+      "result": {
+        "exit_code": 0,
+        "processes": [
+          {
+            "label": "exact-cli",
+            "command": [
+              "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+              "repl",
+              "--ignore-startup",
+              "--environment",
+              "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\empty-environment"
+            ],
+            "process_timeout_seconds": 300,
+            "cwd": "C:\\Djex",
+            "status": "completed",
+            "started_utc": "2026-09-08T14:43:48Z",
+            "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+            "input_path": "C:\\Djex\\dist-newstyle\\maybe-either-cli-reproduction-v1\\exact-cli.input.txt",
+            "input_sha256": "620b68a049401af2d33d0457b93ee441f785faf8920805c9f59104edaca58da5",
+            "stdout_path": "C:\\Djex\\dist-newstyle\\maybe-either-cli-reproduction-v1\\exact-cli.stdout.txt",
+            "stderr_path": "C:\\Djex\\dist-newstyle\\maybe-either-cli-reproduction-v1\\exact-cli.stderr.txt",
+            "owned_root_pid": 44348,
+            "exit_code": 0,
+            "timed_out": false,
+            "wall_seconds": 19.092216299963184,
+            "finished_utc": "2026-09-08T14:44:08Z",
+            "stdout_sha256": "9520deff2021b3ccd08554adf2a9d46e39268555f6cba7fce17e350b4b9ae032",
+            "stderr_sha256": "516ce6dcc4bebd588b58571df573d6ef0bd034c5f8767fe0a35096e42619838f"
+          }
+        ],
+        "original_receipt": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\results.json",
+        "original_sha256": "7f36c66851441bc128217d12597bc944ad40fc72aa7da11d4ed6e2b0769a78c5",
+        "source_sha256": "620b68a049401af2d33d0457b93ee441f785faf8920805c9f59104edaca58da5",
+        "executables_unchanged": true
+      },
+      "input": {
+        "path": "C:\\Djex\\dist-newstyle\\maybe-either-cli-reproduction-v1\\exact-cli.input.txt",
+        "sha256": "620b68a049401af2d33d0457b93ee441f785faf8920805c9f59104edaca58da5",
+        "bytes": 6377,
+        "text": ":set prompt \"\"\r\n:backend exference\r\n:set ranking balanced\r\n:set select first\r\n:set render definition\r\n:set allow-unused on\r\n:set djinn-axioms off\r\n:set djinn-strategy depth-first\r\n:set candidate-limit 256\r\n:set quality-window 256\r\n:set choice-budget 100000\r\n:set max-steps 100000\r\n:set max-queue 8192\r\n:browse\r\n:show settings\r\n:synth extended_exference_maybeEither :: (forall church0 church1. ((forall church4. (((forall church2. (church2 -> ((church0 -> church2) -> church2))) -> church4) -> (((forall church3. (church3 -> ((church1 -> church3) -> church3))) -> church4) -> church4))) -> (forall church6. (church6 -> (((forall church5. ((church0 -> church5) -> ((church1 -> church5) -> church5))) -> church6) -> church6))))) where let { enc :: forall a. [a] -> (forall r. (a -> r -> r) -> r -> r); enc xs step zero = Prelude.foldr step zero xs; dec :: forall a. (forall r. (a -> r -> r) -> r -> r) -> [a]; dec xs = xs (:) []; encMaybe :: forall a. Prelude.Maybe a -> (forall r. r -> (a -> r) -> r); encMaybe m zero some = Prelude.maybe zero some m; decMaybe :: forall a. (forall r. r -> (a -> r) -> r) -> Prelude.Maybe a; decMaybe m = m Prelude.Nothing Prelude.Just; encEither :: forall a b. Prelude.Either a b -> (forall r. (a -> r) -> (b -> r) -> r); encEither e onLeft onRight = Prelude.either onLeft onRight e; decEither :: forall a b. (forall r. (a -> r) -> (b -> r) -> r) -> Prelude.Either a b; decEither e = e Prelude.Left Prelude.Right; encMaybes :: forall a. [Prelude.Maybe a] -> (forall r. ((forall r. r -> (a -> r) -> r) -> r -> r) -> r -> r); encMaybes xs step zero = Prelude.foldr (\\m rest -> step (encMaybe m) rest) zero xs; encNestedMaybe :: forall a. Prelude.Maybe (Prelude.Maybe a) -> (forall r. r -> ((forall r. r -> (a -> r) -> r) -> r) -> r); encNestedMaybe mm zero some = Prelude.maybe zero (\\m -> some (encMaybe m)) mm; encMaybeEither :: forall a b. Prelude.Either (Prelude.Maybe a) (Prelude.Maybe b) -> (forall r. ((forall r. r -> (a -> r) -> r) -> r) -> ((forall r. r -> (b -> r) -> r) -> r) -> r); encMaybeEither e onLeft onRight = Prelude.either (\\m -> onLeft (encMaybe m)) (\\m -> onRight (encMaybe m)) e; decMaybeEither :: forall a b. (forall r. r -> ((forall r. (a -> r) -> (b -> r) -> r) -> r) -> r) -> Prelude.Maybe (Prelude.Either a b); decMaybeEither m = m Prelude.Nothing (\\e -> Prelude.Just (decEither e)); encNum :: Prelude.Int -> (forall r. (r -> r) -> r -> r); encNum n step zero = Prelude.iterate step zero Prelude.!! n; decNum :: (forall r. (r -> r) -> r -> r) -> Prelude.Int; decNum n = n (\\x -> x + 1) 0; inputs :: [[Prelude.Int]]; inputs = [[], [-1], [0], [2], [-1, -1], [-1, 0], [-1, 2], [0, -1], [0, 0], [0, 2], [2, -1], [2, 0], [2, 2], [-1, -1, -1], [-1, -1, 0], [-1, -1, 2], [-1, 0, -1], [-1, 0, 0], [-1, 0, 2], [-1, 2, -1], [-1, 2, 0], [-1, 2, 2], [0, -1, -1], [0, -1, 0], [0, -1, 2], [0, 0, -1], [0, 0, 0], [0, 0, 2], [0, 2, -1], [0, 2, 0], [0, 2, 2], [2, -1, -1], [2, -1, 0], [2, -1, 2], [2, 0, -1], [2, 0, 0], [2, 0, 2], [2, 2, -1], [2, 2, 0], [2, 2, 2]]; boolInputs :: [[Prelude.Bool]]; boolInputs = [[],[Prelude.False],[Prelude.True],[Prelude.True,Prelude.False]]; maybeInputs :: [Prelude.Maybe Prelude.Int]; maybeInputs = [Prelude.Nothing,Prelude.Just (-1),Prelude.Just 0,Prelude.Just 2]; maybeBools :: [Prelude.Maybe Prelude.Bool]; maybeBools = [Prelude.Nothing,Prelude.Just Prelude.False,Prelude.Just Prelude.True]; maybeLists :: [[Prelude.Maybe Prelude.Int]]; maybeLists = [[],[Prelude.Nothing],[(Prelude.Just (-1))],[(Prelude.Just (2))],[Prelude.Nothing,Prelude.Nothing],[Prelude.Nothing,(Prelude.Just (-1))],[Prelude.Nothing,(Prelude.Just (2))],[(Prelude.Just (-1)),Prelude.Nothing],[(Prelude.Just (-1)),(Prelude.Just (-1))],[(Prelude.Just (-1)),(Prelude.Just (2))],[(Prelude.Just (2)),Prelude.Nothing],[(Prelude.Just (2)),(Prelude.Just (-1))],[(Prelude.Just (2)),(Prelude.Just (2))],[Prelude.Nothing,Prelude.Nothing,Prelude.Nothing],[Prelude.Nothing,Prelude.Nothing,(Prelude.Just (-1))],[Prelude.Nothing,Prelude.Nothing,(Prelude.Just (2))],[Prelude.Nothing,(Prelude.Just (-1)),Prelude.Nothing],[Prelude.Nothing,(Prelude.Just (-1)),(Prelude.Just (-1))],[Prelude.Nothing,(Prelude.Just (-1)),(Prelude.Just (2))],[Prelude.Nothing,(Prelude.Just (2)),Prelude.Nothing],[Prelude.Nothing,(Prelude.Just (2)),(Prelude.Just (-1))],[Prelude.Nothing,(Prelude.Just (2)),(Prelude.Just (2))],[(Prelude.Just (-1)),Prelude.Nothing,Prelude.Nothing],[(Prelude.Just (-1)),Prelude.Nothing,(Prelude.Just (-1))],[(Prelude.Just (-1)),Prelude.Nothing,(Prelude.Just (2))],[(Prelude.Just (-1)),(Prelude.Just (-1)),Prelude.Nothing],[(Prelude.Just (-1)),(Prelude.Just (-1)),(Prelude.Just (-1))],[(Prelude.Just (-1)),(Prelude.Just (-1)),(Prelude.Just (2))],[(Prelude.Just (-1)),(Prelude.Just (2)),Prelude.Nothing],[(Prelude.Just (-1)),(Prelude.Just (2)),(Prelude.Just (-1))],[(Prelude.Just (-1)),(Prelude.Just (2)),(Prelude.Just (2))],[(Prelude.Just (2)),Prelude.Nothing,Prelude.Nothing],[(Prelude.Just (2)),Prelude.Nothing,(Prelude.Just (-1))],[(Prelude.Just (2)),Prelude.Nothing,(Prelude.Just (2))],[(Prelude.Just (2)),(Prelude.Just (-1)),Prelude.Nothing],[(Prelude.Just (2)),(Prelude.Just (-1)),(Prelude.Just (-1))],[(Prelude.Just (2)),(Prelude.Just (-1)),(Prelude.Just (2))],[(Prelude.Just (2)),(Prelude.Just (2)),Prelude.Nothing],[(Prelude.Just (2)),(Prelude.Just (2)),(Prelude.Just (-1))],[(Prelude.Just (2)),(Prelude.Just (2)),(Prelude.Just (2))]]; nestedMaybes :: [Prelude.Maybe (Prelude.Maybe Prelude.Int)]; nestedMaybes = Prelude.Nothing : Prelude.map Prelude.Just maybeInputs; nestedBools :: [Prelude.Maybe (Prelude.Maybe Prelude.Bool)]; nestedBools = [Prelude.Nothing,Prelude.Just Prelude.Nothing,Prelude.Just (Prelude.Just Prelude.True)]; eitherInputs :: [Prelude.Either Prelude.Int Prelude.Bool]; eitherInputs = Prelude.map Prelude.Left [-1,0,2] Prelude.++ Prelude.map Prelude.Right [Prelude.False,Prelude.True]; maybeEitherInputs :: [Prelude.Either (Prelude.Maybe Prelude.Int) (Prelude.Maybe Prelude.Bool)]; maybeEitherInputs = Prelude.map Prelude.Left maybeInputs Prelude.++ Prelude.map Prelude.Right maybeBools; foldSteps :: [Prelude.Int -> Prelude.Int -> Prelude.Int]; foldSteps = [(\\x y -> x - y),(\\x y -> 2*x + y),(\\x y -> x + 3*y)] } in Prelude.and [decMaybeEither (extended_exference_maybeEither (encMaybeEither e)) == Prelude.either (Prelude.fmap Prelude.Left) (Prelude.fmap Prelude.Right) e | e <- maybeEitherInputs]\r\n:quit\r\n"
+      },
+      "stderr": {
+        "path": "C:\\Djex\\dist-newstyle\\maybe-either-cli-reproduction-v1\\exact-cli.stderr.txt",
+        "sha256": "516ce6dcc4bebd588b58571df573d6ef0bd034c5f8767fe0a35096e42619838f",
+        "bytes": 22390,
+        "text": "info [DJEX_REPL_BEHAVIORAL_OBSERVATIONS]: behavioral predicate observations\r\n  context: checked=256, true=0, false=256, error=0, timeout=0, window=256\r\ninfo [DJEX_REPL_BEHAVIORAL_NO_MATCH]: no candidate passed the behavioral predicate in the observed search\r\nwarning [DJEX_REPL_BEHAVIORAL_WINDOW]: behavioral observation window reached\r\n  context: rejected and failed candidates consumed their original slots; search was not refilled\r\ninfo [DJEX_REPL_BEHAVIORAL_ELABORATION]: source-graph elaboration retries\r\n  context: checks=5; retries retain the same candidate and original observation slot\r\ninfo [DJEX_REPL_BEHAVIORAL_SOURCE_SAMPLE]: bounded candidate compilation sample\r\n  context: candidate observation: 63\r\ncandidate evidence: graph present; root=TermNodeId 50817198201; nodes=18\r\nrequested type: (forall church0 church1. ((forall church4. (((forall church2. (church2 -> ((church0 -> church2) -> church2))) -> church4) -> (((forall church3. (church3 -> ((church1 -> church3) -> church3))) -> church4) -> church4))) -> (forall church6. (church6 -> (((forall church5. ((church0 -> church5) -> ((church1 -> church5) -> church5))) -> church6) -> church6)))))\r\noriginal expression: \\f1 c _ -> f1 (\\_ -> \\_ -> c) (\\_ -> \\_ -> c) f1\r\noriginal check: BehavioralCompilationError \"Couldn't match expected type `t0'\\n            with actual type `((forall church2.\\n                                church2 -> (church0 -> church2) -> church2)\\n                               -> church40)\\n                              -> ((forall church3. church3 -> (church1 -> church3) -> church3)\\n                                  -> church40)\\n                              -> church40'\\nCannot instantiate unification variable `t0'\\nwith a type involving polytypes:\\n  ((forall church2. church2 -> (church0 -> church2) -> church2)\\n   -> church40)\\n  -> ((forall church3. church3 -> (church1 -> church3) -> church3)\\n      -> church40)\\n  -> church40\\nIn the third argument of `f1', namely `f1'\\nIn the expression: f1 (\\\\ _ -> \\\\ _ -> c) (\\\\ _ -> \\\\ _ -> c) f1\\nIn the expression:\\n  \\\\ f1 c _ -> f1 (\\\\ _ -> \\\\ _ -> c) (\\\\ _ -> \\\\ _ -> c) f1\\nRelevant bindings include\\n  f1 :: forall church4.\\n        ((forall church2. church2 -> (church0 -> church2) -> church2)\\n         -> church4)\\n        -> ((forall church3. church3 -> (church1 -> church3) -> church3)\\n            -> church4)\\n        -> church4\\n    (bound at <interactive>:3:32)\\n  djexBehavioralCandidate0 :: (forall church4.\\n                               ((forall church2. church2 -> (church0 -> church2) -> church2)\\n                                -> church4)\\n                               -> ((forall church3. church3 -> (church1 -> church3) -> church3)\\n                                   -> church4)\\n                               -> church4)\\n                              -> forall church6.\\n                                 church6\\n                                 -> ((forall church5.\\n                                      (church0 -> church5) -> (church1 -> church5) -> church5)\\n                                     -> church6)\\n                                 -> church6\\n    (bound at <interactive>:3:3)\"\r\nelaborated expression: (let { djexPoly50817198201 :: forall djexSkolem50817198201. forall djexBound0_0. (forall djexBound1_0. ((forall djexBound2_0. djexBound2_0 -> (djexSkolem50817198201 -> djexBound2_0) -> djexBound2_0) -> djexBound1_0) -> ((forall djexBound2_0. djexBound2_0 -> (djexBound0_0 -> djexBound2_0) -> djexBound2_0) -> djexBound1_0) -> djexBound1_0) -> forall djexBound1_0. djexBound1_0 -> ((forall djexBound2_0. (djexSkolem50817198201 -> djexBound2_0) -> (djexBound0_0 -> djexBound2_0) -> djexBound2_0) -> djexBound1_0) -> djexBound1_0; djexPoly50817198201 = (let { djexPoly50817517004 :: forall djexSkolem50817517004. (forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817198201 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817517004 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> forall djexBound0_0. djexBound0_0 -> ((forall djexBound1_0. (djexSkolem50817198201 -> djexBound1_0) -> (djexSkolem50817517004 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0; djexPoly50817517004 = (\\(x :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817198201 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817517004 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> (let { djexPoly50818154613 :: forall djexSkolem50818154613. djexSkolem50818154613 -> ((forall djexBound0_0. (djexSkolem50817198201 -> djexBound0_0) -> (djexSkolem50817517004 -> djexBound0_0) -> djexBound0_0) -> djexSkolem50818154613) -> djexSkolem50818154613; djexPoly50818154613 = (\\(x' :: djexSkolem50818154613) -> (\\(_ :: (forall djexBound0_0. (djexSkolem50817198201 -> djexBound0_0) -> (djexSkolem50817517004 -> djexBound0_0) -> djexBound0_0) -> djexSkolem50818154613) -> ((((((((x :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817198201 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817517004 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) @((forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817198201 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817517004 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> djexSkolem50818154613))) ((\\(_ :: forall djexBound0_0. djexBound0_0 -> (djexSkolem50817198201 -> djexBound0_0) -> djexBound0_0) -> (\\(_ :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817198201 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817517004 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> x')) :: (forall djexBound0_0. djexBound0_0 -> (djexSkolem50817198201 -> djexBound0_0) -> djexBound0_0) -> (forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817198201 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817517004 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> djexSkolem50818154613))) ((\\(_ :: forall djexBound0_0. djexBound0_0 -> (djexSkolem50817517004 -> djexBound0_0) -> djexBound0_0) -> (\\(_ :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817198201 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817517004 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> x')) :: (forall djexBound0_0. djexBound0_0 -> (djexSkolem50817517004 -> djexBound0_0) -> djexBound0_0) -> (forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817198201 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817517004 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> djexSkolem50818154613))) (x :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817198201 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem50817517004 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0)))) } in djexPoly50818154613)) } in djexPoly50817517004) } in djexPoly50817198201)\r\nfinal check: BehavioralFalse\r\ninfo [DJEX_REPL_BEHAVIORAL_SOURCE_SAMPLE]: bounded candidate compilation sample\r\n  context: candidate observation: 117\r\ncandidate evidence: graph present; root=TermNodeId 212233617316; nodes=24\r\nrequested type: (forall church0 church1. ((forall church4. (((forall church2. (church2 -> ((church0 -> church2) -> church2))) -> church4) -> (((forall church3. (church3 -> ((church1 -> church3) -> church3))) -> church4) -> church4))) -> (forall church6. (church6 -> (((forall church5. ((church0 -> church5) -> ((church1 -> church5) -> church5))) -> church6) -> church6)))))\r\noriginal expression: \\f1 c _ -> f1 (\\_ -> c) (\\f10 -> f10 (\\_ -> c) (\\_ -> \\_ -> c) f1)\r\noriginal check: BehavioralCompilationError \"Couldn't match expected type `t0'\\n            with actual type `((forall church2.\\n                                church2 -> (church0 -> church2) -> church2)\\n                               -> church40)\\n                              -> ((forall church3. church3 -> (church1 -> church3) -> church3)\\n                                  -> church40)\\n                              -> church40'\\nCannot instantiate unification variable `t0'\\nwith a type involving polytypes:\\n  ((forall church2. church2 -> (church0 -> church2) -> church2)\\n   -> church40)\\n  -> ((forall church3. church3 -> (church1 -> church3) -> church3)\\n      -> church40)\\n  -> church40\\nIn the third argument of `f10', namely `f1'\\nIn the expression: f10 (\\\\ _ -> c) (\\\\ _ -> \\\\ _ -> c) f1\\nIn the second argument of `f1', namely\\n  `(\\\\ f10 -> f10 (\\\\ _ -> c) (\\\\ _ -> \\\\ _ -> c) f1)'\\nRelevant bindings include\\n  f10 :: forall church3. church3 -> (church1 -> church3) -> church3\\n    (bound at <interactive>:3:57)\\n  f1 :: forall church4.\\n        ((forall church2. church2 -> (church0 -> church2) -> church2)\\n         -> church4)\\n        -> ((forall church3. church3 -> (church1 -> church3) -> church3)\\n            -> church4)\\n        -> church4\\n    (bound at <interactive>:3:32)\\n  djexBehavioralCandidate0 :: (forall church4.\\n                               ((forall church2. church2 -> (church0 -> church2) -> church2)\\n                                -> church4)\\n                               -> ((forall church3. church3 -> (church1 -> church3) -> church3)\\n                                   -> church4)\\n                               -> church4)\\n                              -> forall church6.\\n                                 church6\\n                                 -> ((forall church5.\\n                                      (church0 -> church5) -> (church1 -> church5) -> church5)\\n                                     -> church6)\\n                                 -> church6\\n    (bound at <interactive>:3:3)\"\r\nelaborated expression: (let { djexPoly212233617316 :: forall djexSkolem212233617316. forall djexBound0_0. (forall djexBound1_0. ((forall djexBound2_0. djexBound2_0 -> (djexSkolem212233617316 -> djexBound2_0) -> djexBound2_0) -> djexBound1_0) -> ((forall djexBound2_0. djexBound2_0 -> (djexBound0_0 -> djexBound2_0) -> djexBound2_0) -> djexBound1_0) -> djexBound1_0) -> forall djexBound1_0. djexBound1_0 -> ((forall djexBound2_0. (djexSkolem212233617316 -> djexBound2_0) -> (djexBound0_0 -> djexBound2_0) -> djexBound2_0) -> djexBound1_0) -> djexBound1_0; djexPoly212233617316 = (let { djexPoly212234268829 :: forall djexSkolem212234268829. (forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212233617316 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212234268829 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> forall djexBound0_0. djexBound0_0 -> ((forall djexBound1_0. (djexSkolem212233617316 -> djexBound1_0) -> (djexSkolem212234268829 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0; djexPoly212234268829 = (\\(x :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212233617316 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212234268829 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> (let { djexPoly212235571858 :: forall djexSkolem212235571858. djexSkolem212235571858 -> ((forall djexBound0_0. (djexSkolem212233617316 -> djexBound0_0) -> (djexSkolem212234268829 -> djexBound0_0) -> djexBound0_0) -> djexSkolem212235571858) -> djexSkolem212235571858; djexPoly212235571858 = (\\(x' :: djexSkolem212235571858) -> (\\(_ :: (forall djexBound0_0. (djexSkolem212233617316 -> djexBound0_0) -> (djexSkolem212234268829 -> djexBound0_0) -> djexBound0_0) -> djexSkolem212235571858) -> ((((((x :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212233617316 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212234268829 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) @(djexSkolem212235571858))) ((\\(_ :: forall djexBound0_0. djexBound0_0 -> (djexSkolem212233617316 -> djexBound0_0) -> djexBound0_0) -> x') :: (forall djexBound0_0. djexBound0_0 -> (djexSkolem212233617316 -> djexBound0_0) -> djexBound0_0) -> djexSkolem212235571858))) ((\\(x'' :: forall djexBound0_0. djexBound0_0 -> (djexSkolem212234268829 -> djexBound0_0) -> djexBound0_0) -> ((((((((x'' :: forall djexBound0_0. djexBound0_0 -> (djexSkolem212234268829 -> djexBound0_0) -> djexBound0_0) @((forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212233617316 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212234268829 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> djexSkolem212235571858))) ((\\(_ :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212233617316 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212234268829 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> x') :: (forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212233617316 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212234268829 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> djexSkolem212235571858))) ((\\(_ :: djexSkolem212234268829) -> (\\(_ :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212233617316 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212234268829 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> x')) :: djexSkolem212234268829 -> (forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212233617316 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212234268829 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> djexSkolem212235571858))) (x :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212233617316 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem212234268829 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0))) :: (forall djexBound0_0. djexBound0_0 -> (djexSkolem212234268829 -> djexBound0_0) -> djexBound0_0) -> djexSkolem212235571858)))) } in djexPoly212235571858)) } in djexPoly212234268829) } in djexPoly212233617316)\r\nfinal check: BehavioralFalse\r\ninfo [DJEX_REPL_BEHAVIORAL_SOURCE_SAMPLE]: bounded candidate compilation sample\r\n  context: candidate observation: 119\r\ncandidate evidence: graph present; root=TermNodeId 206346267666; nodes=24\r\nrequested type: (forall church0 church1. ((forall church4. (((forall church2. (church2 -> ((church0 -> church2) -> church2))) -> church4) -> (((forall church3. (church3 -> ((church1 -> church3) -> church3))) -> church4) -> church4))) -> (forall church6. (church6 -> (((forall church5. ((church0 -> church5) -> ((church1 -> church5) -> church5))) -> church6) -> church6)))))\r\noriginal expression: \\f1 c _ -> f1 (\\_ -> \\_ -> c) (\\f12 -> \\_ -> f12 c (\\_ -> c)) f1\r\noriginal check: BehavioralCompilationError \"Couldn't match expected type `t0'\\n            with actual type `((forall church2.\\n                                church2 -> (church0 -> church2) -> church2)\\n                               -> church40)\\n                              -> ((forall church3. church3 -> (church1 -> church3) -> church3)\\n                                  -> church40)\\n                              -> church40'\\nCannot instantiate unification variable `t0'\\nwith a type involving polytypes:\\n  ((forall church2. church2 -> (church0 -> church2) -> church2)\\n   -> church40)\\n  -> ((forall church3. church3 -> (church1 -> church3) -> church3)\\n      -> church40)\\n  -> church40\\nIn the third argument of `f1', namely `f1'\\nIn the expression:\\n  f1 (\\\\ _ -> \\\\ _ -> c) (\\\\ f12 -> \\\\ _ -> f12 c (\\\\ _ -> c)) f1\\nIn the expression:\\n  \\\\ f1 c _\\n    -> f1 (\\\\ _ -> \\\\ _ -> c) (\\\\ f12 -> \\\\ _ -> f12 c (\\\\ _ -> c)) f1\\nRelevant bindings include\\n  f1 :: forall church4.\\n        ((forall church2. church2 -> (church0 -> church2) -> church2)\\n         -> church4)\\n        -> ((forall church3. church3 -> (church1 -> church3) -> church3)\\n            -> church4)\\n        -> church4\\n    (bound at <interactive>:3:32)\\n  djexBehavioralCandidate0 :: (forall church4.\\n                               ((forall church2. church2 -> (church0 -> church2) -> church2)\\n                                -> church4)\\n                               -> ((forall church3. church3 -> (church1 -> church3) -> church3)\\n                                   -> church4)\\n                               -> church4)\\n                              -> forall church6.\\n                                 church6\\n                                 -> ((forall church5.\\n                                      (church0 -> church5) -> (church1 -> church5) -> church5)\\n                                     -> church6)\\n                                 -> church6\\n    (bound at <interactive>:3:3)\"\r\nelaborated expression: (let { djexPoly206346267666 :: forall djexSkolem206346267666. forall djexBound0_0. (forall djexBound1_0. ((forall djexBound2_0. djexBound2_0 -> (djexSkolem206346267666 -> djexBound2_0) -> djexBound2_0) -> djexBound1_0) -> ((forall djexBound2_0. djexBound2_0 -> (djexBound0_0 -> djexBound2_0) -> djexBound2_0) -> djexBound1_0) -> djexBound1_0) -> forall djexBound1_0. djexBound1_0 -> ((forall djexBound2_0. (djexSkolem206346267666 -> djexBound2_0) -> (djexBound0_0 -> djexBound2_0) -> djexBound2_0) -> djexBound1_0) -> djexBound1_0; djexPoly206346267666 = (let { djexPoly206346910079 :: forall djexSkolem206346910079. (forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346267666 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346910079 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> forall djexBound0_0. djexBound0_0 -> ((forall djexBound1_0. (djexSkolem206346267666 -> djexBound1_0) -> (djexSkolem206346910079 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0; djexPoly206346910079 = (\\(x :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346267666 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346910079 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> (let { djexPoly206348194908 :: forall djexSkolem206348194908. djexSkolem206348194908 -> ((forall djexBound0_0. (djexSkolem206346267666 -> djexBound0_0) -> (djexSkolem206346910079 -> djexBound0_0) -> djexBound0_0) -> djexSkolem206348194908) -> djexSkolem206348194908; djexPoly206348194908 = (\\(x' :: djexSkolem206348194908) -> (\\(_ :: (forall djexBound0_0. (djexSkolem206346267666 -> djexBound0_0) -> (djexSkolem206346910079 -> djexBound0_0) -> djexBound0_0) -> djexSkolem206348194908) -> ((((((((x :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346267666 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346910079 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) @((forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346267666 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346910079 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> djexSkolem206348194908))) ((\\(_ :: forall djexBound0_0. djexBound0_0 -> (djexSkolem206346267666 -> djexBound0_0) -> djexBound0_0) -> (\\(_ :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346267666 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346910079 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> x')) :: (forall djexBound0_0. djexBound0_0 -> (djexSkolem206346267666 -> djexBound0_0) -> djexBound0_0) -> (forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346267666 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346910079 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> djexSkolem206348194908))) ((\\(x'' :: forall djexBound0_0. djexBound0_0 -> (djexSkolem206346910079 -> djexBound0_0) -> djexBound0_0) -> (\\(_ :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346267666 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346910079 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> ((((((x'' :: forall djexBound0_0. djexBound0_0 -> (djexSkolem206346910079 -> djexBound0_0) -> djexBound0_0) @(djexSkolem206348194908))) (x' :: djexSkolem206348194908))) ((\\(_ :: djexSkolem206346910079) -> x') :: djexSkolem206346910079 -> djexSkolem206348194908)))) :: (forall djexBound0_0. djexBound0_0 -> (djexSkolem206346910079 -> djexBound0_0) -> djexBound0_0) -> (forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346267666 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346910079 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0) -> djexSkolem206348194908))) (x :: forall djexBound0_0. ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346267666 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> ((forall djexBound1_0. djexBound1_0 -> (djexSkolem206346910079 -> djexBound1_0) -> djexBound1_0) -> djexBound0_0) -> djexBound0_0)))) } in djexPoly206348194908)) } in djexPoly206346910079) } in djexPoly206346267666)\r\nfinal check: BehavioralFalse\r\n"
+      }
+    },
+    "matched_prefix": {
+      "raw_receipt": {
+        "path": "C:\\Djex\\dist-newstyle\\maybe-either-prefix-capture-v2\\results.json",
+        "sha256": "a9c3ad3096e17523f44c9c523057f19d87a3b7d73c2dab2f18e903866df49958",
+        "bytes": 1680110
+      },
+      "summary": {
+        "schema": "exference-public-prefix-v1",
+        "window": 256,
+        "observed": 256,
+        "batches_observed": 3346,
+        "last_observed_progress": "Continuing",
+        "stream_exhausted_by_observation": false,
+        "candidate_tail_inspected_at_cap": false,
+        "maximum_steps": 100000,
+        "maximum_queue": 8192,
+        "acceptance_claim": false
+      },
+      "last_consumed_batch": {
+        "batch": 3346,
+        "progress": "Continuing",
+        "evidence": "ValidatedCandidates",
+        "queue_pruned": 31165,
+        "depth_pruned": 0,
+        "binding_usages": "fromList [([],104),((:),2584),((),2521),((,),2584),((,,),2584),((,,,),2584),((,,,,),2584),((,,,,,),2584),((,,,,,,),2584)]",
+        "consumed_before": 255
+      },
+      "original_cli_sample_matches": [
+        {
+          "ordinal": 63,
+          "original_expression": "\\f1 c _ -> f1 (\\_ -> \\_ -> c) (\\_ -> \\_ -> c) f1",
+          "new_prefix_exact_match": true
+        },
+        {
+          "ordinal": 117,
+          "original_expression": "\\f1 c _ -> f1 (\\_ -> c) (\\f10 -> f10 (\\_ -> c) (\\_ -> \\_ -> c) f1)",
+          "new_prefix_exact_match": true
+        },
+        {
+          "ordinal": 119,
+          "original_expression": "\\f1 c _ -> f1 (\\_ -> \\_ -> c) (\\f12 -> \\_ -> f12 c (\\_ -> c)) f1",
+          "new_prefix_exact_match": true
+        }
+      ],
+      "graph_available_count": 256,
+      "typed_rendered_count": 256,
+      "source_result_extra_argument_count": 199,
+      "forall_introduction_histogram": {
+        "3": 232,
+        "4": 24
+      },
+      "interpretation": "post-check public observation slots; no rule tags or pending goals exist in this API; no predicate was executed",
+      "inventory": {
+        "path": "C:\\Djex\\dist-newstyle\\maybe-either-prefix-capture-v2\\prefix\\inventory.show",
+        "sha256": "a5ae0ef68be2400d0f1228e1ea516f972eccf818fff966e0606fabf3fff29857",
+        "bytes": 4364,
+        "text": "[DataTypeDeclaration () [] [TypeParameter {parameterVariable = FlexibleVariable 0, parameterKind = Nothing}] [DataConstructor {constructorAnnotation = (), constructorName = [], constructorFields = []},DataConstructor {constructorAnnotation = (), constructorName = (:), constructorFields = [TypeVariable (FlexibleVariable 0),TypeApplication (TypeConstructor []) (TypeVariable (FlexibleVariable 0))]}],DataTypeDeclaration () () [] [DataConstructor {constructorAnnotation = (), constructorName = (), constructorFields = []}],DataTypeDeclaration () (,) [TypeParameter {parameterVariable = FlexibleVariable 0, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 1, parameterKind = Nothing}] [DataConstructor {constructorAnnotation = (), constructorName = (,), constructorFields = [TypeVariable (FlexibleVariable 0),TypeVariable (FlexibleVariable 1)]}],DataTypeDeclaration () (,,) [TypeParameter {parameterVariable = FlexibleVariable 0, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 1, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 2, parameterKind = Nothing}] [DataConstructor {constructorAnnotation = (), constructorName = (,,), constructorFields = [TypeVariable (FlexibleVariable 0),TypeVariable (FlexibleVariable 1),TypeVariable (FlexibleVariable 2)]}],DataTypeDeclaration () (,,,) [TypeParameter {parameterVariable = FlexibleVariable 0, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 1, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 2, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 3, parameterKind = Nothing}] [DataConstructor {constructorAnnotation = (), constructorName = (,,,), constructorFields = [TypeVariable (FlexibleVariable 0),TypeVariable (FlexibleVariable 1),TypeVariable (FlexibleVariable 2),TypeVariable (FlexibleVariable 3)]}],DataTypeDeclaration () (,,,,) [TypeParameter {parameterVariable = FlexibleVariable 0, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 1, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 2, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 3, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 4, parameterKind = Nothing}] [DataConstructor {constructorAnnotation = (), constructorName = (,,,,), constructorFields = [TypeVariable (FlexibleVariable 0),TypeVariable (FlexibleVariable 1),TypeVariable (FlexibleVariable 2),TypeVariable (FlexibleVariable 3),TypeVariable (FlexibleVariable 4)]}],DataTypeDeclaration () (,,,,,) [TypeParameter {parameterVariable = FlexibleVariable 0, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 1, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 2, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 3, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 4, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 5, parameterKind = Nothing}] [DataConstructor {constructorAnnotation = (), constructorName = (,,,,,), constructorFields = [TypeVariable (FlexibleVariable 0),TypeVariable (FlexibleVariable 1),TypeVariable (FlexibleVariable 2),TypeVariable (FlexibleVariable 3),TypeVariable (FlexibleVariable 4),TypeVariable (FlexibleVariable 5)]}],DataTypeDeclaration () (,,,,,,) [TypeParameter {parameterVariable = FlexibleVariable 0, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 1, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 2, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 3, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 4, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 5, parameterKind = Nothing},TypeParameter {parameterVariable = FlexibleVariable 6, parameterKind = Nothing}] [DataConstructor {constructorAnnotation = (), constructorName = (,,,,,,), constructorFields = [TypeVariable (FlexibleVariable 0),TypeVariable (FlexibleVariable 1),TypeVariable (FlexibleVariable 2),TypeVariable (FlexibleVariable 3),TypeVariable (FlexibleVariable 4),TypeVariable (FlexibleVariable 5),TypeVariable (FlexibleVariable 6)]}]]\r\n"
+      },
+      "loader_diagnostics": {
+        "path": "C:\\Djex\\dist-newstyle\\maybe-either-prefix-capture-v2\\prefix\\loader-diagnostics.show",
+        "sha256": "da4d02ab82bd933835926b6d52f910a6c277347ba819b67bbf3d2dcb604ebbfa",
+        "bytes": 763,
+        "text": "[Diagnostic {diagnosticSeverity = Info, diagnosticCode = Nothing, diagnosticSource = Nothing, diagnosticSpan = Nothing, diagnosticMessage = \"got 0 classes\", diagnosticContext = []},Diagnostic {diagnosticSeverity = Info, diagnosticCode = Nothing, diagnosticSource = Nothing, diagnosticSpan = Nothing, diagnosticMessage = \"and 0 instances\", diagnosticContext = []},Diagnostic {diagnosticSeverity = Info, diagnosticCode = Nothing, diagnosticSource = Nothing, diagnosticSpan = Nothing, diagnosticMessage = \"(-> 0 superclass-completed resolution rules)\", diagnosticContext = []},Diagnostic {diagnosticSeverity = Info, diagnosticCode = Nothing, diagnosticSource = Nothing, diagnosticSpan = Nothing, diagnosticMessage = \"and 0 function decls\", diagnosticContext = []}]\r\n"
+      },
+      "source": {
+        "path": "C:\\Djex\\dist-newstyle\\maybe-either-prefix-diagnostic-v2\\PrefixProbe.hs",
+        "sha256": "c842ca330056d24b3f3a7ff026ac5facecab6dbce74850887b3287d8fbed1b49",
+        "bytes": 14237
+      },
+      "driver": {
+        "path": "C:\\Djex\\dist-newstyle\\maybe-either-prefix-diagnostic-v2\\run_prefix.py",
+        "sha256": "a8834bf57c983cff6e5eb12ab441958834de007c43c7dea5d110743b690757fe",
+        "bytes": 10386
+      },
+      "integrity": {
+        "source_integrity": true,
+        "library_archive_integrity": true,
+        "tool_integrity": true,
+        "input_integrity": true,
+        "probe_executable_integrity": true
+      },
+      "supersedes": "v1 manually constructed an empty environment and failed sample correspondence; v2 uses the actual source-loader intrinsic inventory"
+    },
+    "unadopted_ranking_experiments": [
+      {
+        "change": "Count forall bodies and bound variables in type complexity",
+        "adopted": false,
+        "raw_receipt": {
+          "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\maybe-either\\results.json",
+          "sha256": "1c80cb420914f5566f78a793c0f6706e3aaf3483e8e654007c625886b96cd83f",
+          "bytes": 178005
+        },
+        "status": "failed",
+        "settings": {
+          "exference": {
+            "window": 256,
+            "budget": 100000,
+            "djinn_strategy": "depth-first",
+            "steps": 100000,
+            "process_timeout": 300,
+            "queue": 8192
+          }
+        },
+        "passed_synthesis_cells": 0,
+        "passed_false_controls": 1,
+        "passed_oracle_controls": 2,
+        "source_snapshot": {
+          "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\Exference.before.hs",
+          "sha256": "421c2e73e7956870274908c47140cc61b0da5343f8687a8f1a5ecbb4b5e56b16",
+          "bytes": 149971
+        },
+        "patch_from_restored_baseline": "--- baseline/Exference.hs\n+++ experiment/Exference.hs\n@@ -2031,33 +2031,34 @@\n     rateGoal (TGoal (VarBinding _ t) _ _ _ _) = typeComplexity h t\n \n -- | Heuristic penalty of a goal type: the configured per-node weights summed\n--- over the type's structure, with nested @forall@ types counted as single\n--- atoms.  These weights are historically chosen defaults; none has been\n--- derived from measurement.\n+-- over the type's structure. Bound forall variables have the rigid-constant\n+-- weight they will receive when introduced. Opening a known polymorphic goal\n+-- therefore preserves its estimated work, rather than replacing one cheap\n+-- atom with an unexpectedly expensive arrow body. The configured weights\n+-- remain heuristic and do not remove any search rule.\n typeComplexity :: ExferenceHeuristicsConfig -> HsType -> Penalty\n-typeComplexity h = complexity\n+typeComplexity h = complexity S.empty\n  where\n-  complexity TypeVar{} = heuristics_goalVar h\n+  complexity bound (TypeVar variable)\n+    | SharedType.FlexibleVariable variable `S.member` bound = heuristics_goalCons h\n+    | otherwise = heuristics_goalVar h\n   -- Constants deliberately share the constructor weight.\n-  complexity TypeConstant{} = heuristics_goalCons h\n-  complexity TypeCons{} = heuristics_goalCons h\n-  complexity (TypeArrow parameter result) = sumScores\n-    [heuristics_goalArrow h, complexity parameter, complexity result]\n-  complexity (TypeApp function argument) = sumScores\n-    [heuristics_goalApp h, complexity function, complexity argument]\n+  complexity _ TypeConstant{} = heuristics_goalCons h\n+  complexity _ TypeCons{} = heuristics_goalCons h\n+  complexity bound (TypeArrow parameter result) = sumScores\n+    [heuristics_goalArrow h, complexity bound parameter, complexity bound result]\n+  complexity bound (TypeApp function argument) = sumScores\n+    [heuristics_goalApp h, complexity bound function, complexity bound argument]\n   -- Reproduce the former left-associated tuple-constructor application one\n   -- node at a time. t'Penalty' addition saturates and Double addition is not\n   -- associative, so multiplying/grouping equal weights can alter queue order.\n-  complexity (TypeTuple _ elements) = L.foldl' applyElement\n+  complexity bound (TypeTuple _ elements) = L.foldl' applyElement\n     (heuristics_goalCons h) elements\n    where\n     applyElement functionCost element = sumScores\n-      [heuristics_goalApp h, functionCost, complexity element]\n-  -- Nested quantified values retain one unit of search-heuristic complexity;\n-  -- structural unification may nevertheless inspect their bodies. The root\n-  -- prenex wrapper is scheduled at\n-  -- priority zero and opened separately, so this cost applies to rank-N goals.\n-  complexity TypeForallNative{} = heuristics_goalCons h\n+      [heuristics_goalApp h, functionCost, complexity bound element]\n+  complexity bound (TypeForallNative variables _ body) =\n+    complexity (S.union bound $ S.fromList variables) body\n \n rateUsage :: ExferenceHeuristicsConfig -> SearchNode -> Penalty\n rateUsage h = sumScores . map f . IntMap.elems . nodeVarUses where\n",
+        "build_log": {
+          "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\build.log",
+          "sha256": "940097fdee51307428bf995d9d2c1a19913184b93bcdc66f9b16d558ee8167b0",
+          "bytes": 3278,
+          "text": "Build profile: -w ghc-9.12.4 -O1\r\nIn order, the following will be built (use -v for more details):\r\n - djex-2026.7.17 (lib) (configuration changed)\r\n - djex-2026.7.17 (test:exference-engine-tests) (configuration changed)\r\n - djex-2026.7.17 (exe:djex) (configuration changed)\r\nConfiguring library for djex-2026.7.17...\r\nPreprocessing library for djex-2026.7.17...\r\nBuilding library for djex-2026.7.17...\r\n[132 of 184] Compiling Language.Haskell.Exference.Core.Internal.Exference ( exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\build\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.o ) [Source file changed]\r\n[133 of 184] Compiling Language.Haskell.Exference.Core ( exference\\src-core\\Language\\Haskell\\Exference\\Core.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\build\\Language\\Haskell\\Exference\\Core.o ) [Language.Haskell.Exference.Core.Internal.Exference changed]\r\n[136 of 184] Compiling Language.Haskell.Djex.Exference.Internal.Session ( exference\\src-core\\Language\\Haskell\\Djex\\Exference\\Internal\\Session.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\build\\Language\\Haskell\\Djex\\Exference\\Internal\\Session.o ) [Language.Haskell.Exference.Core.Internal.Exference changed]\r\n[138 of 184] Compiling Language.Haskell.Djex.Exference ( exference\\src-core\\Language\\Haskell\\Djex\\Exference.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\build\\Language\\Haskell\\Djex\\Exference.o ) [Language.Haskell.Exference.Core.Internal.Exference changed]\r\nConfiguring test suite 'exference-engine-tests' for djex-2026.7.17...\r\nPreprocessing test suite 'exference-engine-tests' for djex-2026.7.17...\r\nBuilding test suite 'exference-engine-tests' for djex-2026.7.17...\r\n[30 of 36] Compiling Language.Haskell.Exference.Core.Internal.Exference ( exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-engine-tests\\build\\exference-engine-tests\\exference-engine-tests-tmp\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.o ) [Source file changed]\r\n[31 of 36] Compiling Language.Haskell.Exference.Core.Internal.Testing ( exference\\test-engine\\Language\\Haskell\\Exference\\Core\\Internal\\Testing.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-engine-tests\\build\\exference-engine-tests\\exference-engine-tests-tmp\\Language\\Haskell\\Exference\\Core\\Internal\\Testing.o ) [Language.Haskell.Exference.Core.Internal.Exference changed]\r\n[36 of 36] Compiling Main             ( exference\\test-engine\\EngineSpec.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-engine-tests\\build\\exference-engine-tests\\exference-engine-tests-tmp\\Main.o ) [Source file changed]\r\n[37 of 37] Linking dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-engine-tests\\build\\exference-engine-tests\\exference-engine-tests.exe [Objects changed]\r\nConfiguring executable 'djex' for djex-2026.7.17...\r\nPreprocessing executable 'djex' for djex-2026.7.17...\r\nBuilding executable 'djex' for djex-2026.7.17...\r\n[2 of 2] Linking dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe [Library changed]\r\n"
+        },
+        "synthesis_captures": [
+          {
+            "process": {
+              "label": "exference-maybeEither-synthesis",
+              "command": [
+                "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+                "repl",
+                "--ignore-startup",
+                "--environment",
+                "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\maybe-either\\empty-environment"
+              ],
+              "process_timeout_seconds": 300,
+              "cwd": "C:\\Djex",
+              "status": "completed",
+              "started_utc": "2026-09-08T14:52:13Z",
+              "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+              "input_path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\maybe-either\\exference-maybeEither-synthesis.input.txt",
+              "input_sha256": "620b68a049401af2d33d0457b93ee441f785faf8920805c9f59104edaca58da5",
+              "stdout_path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\maybe-either\\exference-maybeEither-synthesis.stdout.txt",
+              "stderr_path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\maybe-either\\exference-maybeEither-synthesis.stderr.txt",
+              "owned_root_pid": 43316,
+              "exit_code": 0,
+              "timed_out": false,
+              "wall_seconds": 16.135951000032946,
+              "finished_utc": "2026-09-08T14:52:29Z",
+              "stdout_sha256": "82ccd1fb427603bf859a1ab93cd1aedb5627172fcd05df5582bd0378c05c6df8",
+              "stderr_sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae"
+            },
+            "stderr": {
+              "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\maybe-either\\exference-maybeEither-synthesis.stderr.txt",
+              "sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae",
+              "bytes": 435,
+              "text": "info [DJEX_REPL_BEHAVIORAL_OBSERVATIONS]: behavioral predicate observations\r\n  context: checked=256, true=0, false=256, error=0, timeout=0, window=256\r\ninfo [DJEX_REPL_BEHAVIORAL_NO_MATCH]: no candidate passed the behavioral predicate in the observed search\r\nwarning [DJEX_REPL_BEHAVIORAL_WINDOW]: behavioral observation window reached\r\n  context: rejected and failed candidates consumed their original slots; search was not refilled\r\n"
+            }
+          },
+          {
+            "process": {
+              "label": "exference-reject-all-synthesis",
+              "command": [
+                "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+                "repl",
+                "--ignore-startup",
+                "--environment",
+                "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\maybe-either\\empty-environment"
+              ],
+              "process_timeout_seconds": 300,
+              "cwd": "C:\\Djex",
+              "status": "completed",
+              "started_utc": "2026-09-08T14:52:29Z",
+              "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+              "input_path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\maybe-either\\exference-reject-all-synthesis.input.txt",
+              "input_sha256": "1867ee4f1a82c6c35427d3b170c239ae834233ab03fc72f7cbebd75c38554ede",
+              "stdout_path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\maybe-either\\exference-reject-all-synthesis.stdout.txt",
+              "stderr_path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\maybe-either\\exference-reject-all-synthesis.stderr.txt",
+              "owned_root_pid": 24852,
+              "exit_code": 0,
+              "timed_out": false,
+              "wall_seconds": 1.3457153999479488,
+              "finished_utc": "2026-09-08T14:52:30Z",
+              "stdout_sha256": "82ccd1fb427603bf859a1ab93cd1aedb5627172fcd05df5582bd0378c05c6df8",
+              "stderr_sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae"
+            },
+            "stderr": {
+              "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\maybe-either\\exference-reject-all-synthesis.stderr.txt",
+              "sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae",
+              "bytes": 435,
+              "text": "info [DJEX_REPL_BEHAVIORAL_OBSERVATIONS]: behavioral predicate observations\r\n  context: checked=256, true=0, false=256, error=0, timeout=0, window=256\r\ninfo [DJEX_REPL_BEHAVIORAL_NO_MATCH]: no candidate passed the behavioral predicate in the observed search\r\nwarning [DJEX_REPL_BEHAVIORAL_WINDOW]: behavioral observation window reached\r\n  context: rejected and failed candidates consumed their original slots; search was not refilled\r\n"
+            }
+          }
+        ],
+        "focused_tests": {
+          "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\engine-tests.log",
+          "sha256": "99ec4b1b95629597472f3e62feae7de24b0e2b8847192c9dcfc66329a55174bb",
+          "bytes": 7503,
+          "text": "Exference private engine boundaries\r\n  Context-free forall graph authority\r\n    root opening retains the original source forall:                               OK\r\n    direct nested introduction retains both lexical binders:                       OK\r\n    application argument carries its own forall introduction:                      OK\r\n    annotation-only foreign rigid cannot impersonate either scope:                 OK\r\n    sibling introductions cannot share an annotation rigid:                        OK\r\n    maybeEither exact source witness seals and renders without search:             OK\r\n  Implicit constructor root graph ownership\r\n    zero constructor keeps its closed declaration before root instantiation:       OK\r\n    step constructor selects the actual nested spine payload:                      OK\r\n    monomorphic zero constructor has no vacuous source wrapper:                    OK\r\n    monomorphic step constructor remains directly applicable:                      OK\r\n    a same-spelled ordinary binding has no constructor closure authority:          OK\r\n    a mismatched constructor result cannot supply closure authority:               OK\r\n  Independent lexical Given evidence\r\n    unused root given retains the full qualified telescope:                        OK\r\n    nested qualified callback retains its own unused given:                        OK\r\n    opaque forwarding keeps its complete contextual scheme:                        OK\r\n    local application selects its exact root Given slot:                           OK\r\n    global application retains its full source scheme:                             OK\r\n    equal root givens retain distinct ordered slots:                               OK\r\n    adjacent qualified layers retain separate introduction sites:                  OK\r\n    instance discharge does not become Given evidence:                             OK\r\n    superclass closure does not become an exact Given:                             OK\r\n    missing complete global scheme cannot erase its constraint:                    OK\r\n    contextual visible origins remain explicit unsupported graphs:                 OK\r\n    a sibling cannot consume a locally introduced dictionary:                      OK\r\n  rigid scopes reject direct and propagated skolem escapes:                        OK\r\n  scoped givens resolve only their own obligations:                                OK\r\n  scoped substitutions update givens and obligations together:                     OK\r\n  scoped instance prerequisites retain their lexical givens:                       OK\r\n  prepared queries consume one validated options witness:                          OK\r\n  serial ordered step actions\r\n    preserve complete finite traces and typed candidates:                          OK\r\n    preserve every finite identifier-exhaustion route:                             OK\r\n    retain identical candidate-to-graph identities:                                OK\r\n    do not demand the next lazy search step:                                       OK\r\n  term identifier exhaustion truncates instead of colliding:                       OK\r\n  identifier truncation survives a successful sibling:                             OK\r\n  provider forall exhaustion truncates the affected branch:                        OK\r\n  nested forall introduction is checked and rigid-bounded:                         OK\r\n  nested forall skolems cannot escape through older variables:                     OK\r\n  overapplication uses the finite flexible namespace and checked arguments:        OK (0.07s)\r\n  balanced search instantiates Church reverse and scalar folds at an endomorphism: OK (0.10s)\r\n  bare provider foralls cross the checked result boundary:                         OK (0.09s)\r\n  quantified provider subsumption stays shallow with guarded impredicativity:      OK\r\n  provider forall opening preserves nested lexical scopes:                         OK\r\n  ground provider evidence separates free and bound identities:                    OK\r\n  query candidates admit only closed context-free foralls:                         OK\r\n  query candidates retain ambient rigids, not flexibles:                           OK\r\n  exact assignments retain structure, order, and non-vacuous bodies:               OK\r\n  heuristic instantiation stays bounded while exact vectors follow source arity:   OK\r\n  generic deconstructors need no persistent flexible IDs:                          OK\r\n  multi-case deconstructors need no persistent flexible IDs:                       OK\r\n  empty elimination consumes no flexible identifier:                               OK\r\n  empty deconstructors do not suppress provider use:                               OK\r\n  scope identifier collisions are operational truncations:                         OK\r\n  exact progress retains simultaneous step and ID limits:                          OK\r\n  queue representation overflow retains the best priorities:                       OK\r\n  compatibility pruning counts saturate without losing reasons:                    OK\r\n  structural tuple ranking exactly preserves applications:                         OK\r\n  forall goal complexity is invariant under rigid introduction:                    OK\r\n  checker seals exact context-free visible specialization evidence:                OK\r\n  checker retains exact direct-global specialization origins:                      OK\r\n  specialization origins retain activated source constraints:                      OK\r\n  scheme-backed query results retain the associated carrier:                       OK\r\n  source constraints activate before a selected polytype suffix:                   OK\r\n  incomplete and compatibility visible spines stay origin-free:                    OK\r\n  origin eligibility is closed source-arity-directed and post-constraint:          OK\r\n  association row limits fail closed without a plain downgrade:                    OK\r\n  failed preferred inference rolls origin state back:                              OK\r\n  checker retains complete constructor cases with exact field authority:           OK\r\n  certificate association preserves exact case schemas:                            OK\r\n  strict production search retains an exact zero-step case graph:                  OK\r\n  bounded recursive case scheduling\r\n    both lanes share the caller's step and queue allowance:                        OK\r\n    one recursive input retains its original first-result step:                    OK\r\n    scheduling does not become heuristic expression depth:                         OK\r\n    the ordinary lane preserves a whole-value consumer:                            OK\r\n    both case policies retain ordered-action oracle parity:                        OK\r\n  final zonking seals a multi-binder inferred specialization:                      OK\r\n  engine batches retain stable candidate-to-graph keying:                          OK\r\n  engine batches retain impredicative multi-binder graphs:                         OK\r\n  implicit local specialization retains checker-owned type selections:             OK\r\n  implicit local occurrences select independent monotypes and polytypes:           OK\r\n  typed evidence explains the deliberately unsupported subset:                     OK\r\n  typed evidence reports limits and preserves unused binders as wildcards:         OK\r\n  query-result projection preserves its envelope lazily:                           OK\r\n\r\nAll 83 tests passed (0.31s)\r\n"
+        }
+      },
+      {
+        "change": "Combine forall complexity with an extra-arrow application penalty",
+        "adopted": false,
+        "raw_receipt": {
+          "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\maybe-either\\results.json",
+          "sha256": "502dd6cab7e8431078b2666d5a44429c57ae77557fb55c46683937b06d549717",
+          "bytes": 178702
+        },
+        "status": "failed",
+        "settings": {
+          "exference": {
+            "window": 256,
+            "budget": 100000,
+            "djinn_strategy": "depth-first",
+            "steps": 100000,
+            "process_timeout": 300,
+            "queue": 8192
+          }
+        },
+        "passed_synthesis_cells": 0,
+        "passed_false_controls": 1,
+        "passed_oracle_controls": 2,
+        "source_snapshot": {
+          "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\Exference.tested.hs",
+          "sha256": "94514d0f8fbfd92f528551526dffe0a79918c317babd962b183db9fbc547f58f",
+          "bytes": 150434
+        },
+        "patch_from_restored_baseline": "--- baseline/Exference.hs\n+++ experiment/Exference.hs\n@@ -2031,33 +2031,34 @@\n     rateGoal (TGoal (VarBinding _ t) _ _ _ _) = typeComplexity h t\n \n -- | Heuristic penalty of a goal type: the configured per-node weights summed\n--- over the type's structure, with nested @forall@ types counted as single\n--- atoms.  These weights are historically chosen defaults; none has been\n--- derived from measurement.\n+-- over the type's structure. Bound forall variables have the rigid-constant\n+-- weight they will receive when introduced. Opening a known polymorphic goal\n+-- therefore preserves its estimated work, rather than replacing one cheap\n+-- atom with an unexpectedly expensive arrow body. The configured weights\n+-- remain heuristic and do not remove any search rule.\n typeComplexity :: ExferenceHeuristicsConfig -> HsType -> Penalty\n-typeComplexity h = complexity\n+typeComplexity h = complexity S.empty\n  where\n-  complexity TypeVar{} = heuristics_goalVar h\n+  complexity bound (TypeVar variable)\n+    | SharedType.FlexibleVariable variable `S.member` bound = heuristics_goalCons h\n+    | otherwise = heuristics_goalVar h\n   -- Constants deliberately share the constructor weight.\n-  complexity TypeConstant{} = heuristics_goalCons h\n-  complexity TypeCons{} = heuristics_goalCons h\n-  complexity (TypeArrow parameter result) = sumScores\n-    [heuristics_goalArrow h, complexity parameter, complexity result]\n-  complexity (TypeApp function argument) = sumScores\n-    [heuristics_goalApp h, complexity function, complexity argument]\n+  complexity _ TypeConstant{} = heuristics_goalCons h\n+  complexity _ TypeCons{} = heuristics_goalCons h\n+  complexity bound (TypeArrow parameter result) = sumScores\n+    [heuristics_goalArrow h, complexity bound parameter, complexity bound result]\n+  complexity bound (TypeApp function argument) = sumScores\n+    [heuristics_goalApp h, complexity bound function, complexity bound argument]\n   -- Reproduce the former left-associated tuple-constructor application one\n   -- node at a time. t'Penalty' addition saturates and Double addition is not\n   -- associative, so multiplying/grouping equal weights can alter queue order.\n-  complexity (TypeTuple _ elements) = L.foldl' applyElement\n+  complexity bound (TypeTuple _ elements) = L.foldl' applyElement\n     (heuristics_goalCons h) elements\n    where\n     applyElement functionCost element = sumScores\n-      [heuristics_goalApp h, functionCost, complexity element]\n-  -- Nested quantified values retain one unit of search-heuristic complexity;\n-  -- structural unification may nevertheless inspect their bodies. The root\n-  -- prenex wrapper is scheduled at\n-  -- priority zero and opened separately, so this cost applies to rank-N goals.\n-  complexity TypeForallNative{} = heuristics_goalCons h\n+      [heuristics_goalApp h, functionCost, complexity bound element]\n+  complexity bound (TypeForallNative variables _ body) =\n+    complexity (S.union bound $ S.fromList variables) body\n \n rateUsage :: ExferenceHeuristicsConfig -> SearchNode -> Penalty\n rateUsage h = sumScores . map f . IntMap.elems . nodeVarUses where\n@@ -2510,6 +2511,11 @@\n               _ -> mzero\n             modify $ \\node -> node {nodeFlexibleIds = nextSupply}\n             (domain, substitutions) <- overapplicationSubstitution result knownDomain\n+            -- The selected result introduces one additional arrow which is\n+            -- absent from the pending argument goals. Account for that layer\n+            -- with the existing arrow weight, retaining every finite sibling.\n+            modify $ \\node -> node\n+              { nodeDepth = addScore (nodeDepth node) $ heuristics_goalArrow h }\n             let selected = snd $ applySubsts substitutions instantiated\n                 arguments = inferredProviderVisibleArguments scheme selected\n             useProviderWithGoalOrder extraArgumentFirst arguments\n@@ -2710,6 +2716,8 @@\n         overappliedAt knownDomain = case provType of\n           TypeVar{} -> do\n             (domain, substitutions) <- overapplicationSubstitution provType knownDomain\n+            modify $ \\node -> node\n+              { nodeDepth = addScore (nodeDepth node) $ heuristics_goalArrow h }\n             retained <- gets $ M.lookup (functionName binding) . nodeFunctionSchemes\n             let selected = snd $ applySubsts substitutions $\n                   SharedType.functionType parameters provType\n",
+        "build_log": {
+          "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\build.log",
+          "sha256": "5e0af1bd18fb3415917efd031b1c4982fe79917e6caedbc3b8c3d1535bfb83d9",
+          "bytes": 1632,
+          "text": "Build profile: -w ghc-9.12.4 -O1\r\nIn order, the following will be built (use -v for more details):\r\n - djex-2026.7.17 (lib) (file exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.hs changed)\r\n - djex-2026.7.17 (test:exference-engine-tests) (dependency rebuilt)\r\n - djex-2026.7.17 (exe:djex) (dependency rebuilt)\r\nPreprocessing library for djex-2026.7.17...\r\nBuilding library for djex-2026.7.17...\r\n[132 of 184] Compiling Language.Haskell.Exference.Core.Internal.Exference ( exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\build\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.o ) [Source file changed]\r\nPreprocessing test suite 'exference-engine-tests' for djex-2026.7.17...\r\nBuilding test suite 'exference-engine-tests' for djex-2026.7.17...\r\n[30 of 36] Compiling Language.Haskell.Exference.Core.Internal.Exference ( exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-engine-tests\\build\\exference-engine-tests\\exference-engine-tests-tmp\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.o ) [Source file changed]\r\n[37 of 37] Linking dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-engine-tests\\build\\exference-engine-tests\\exference-engine-tests.exe [Objects changed]\r\nPreprocessing executable 'djex' for djex-2026.7.17...\r\nBuilding executable 'djex' for djex-2026.7.17...\r\n[2 of 2] Linking dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe [Library changed]\r\n"
+        },
+        "synthesis_captures": [
+          {
+            "process": {
+              "label": "exference-maybeEither-synthesis",
+              "command": [
+                "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+                "repl",
+                "--ignore-startup",
+                "--environment",
+                "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\maybe-either\\empty-environment"
+              ],
+              "process_timeout_seconds": 300,
+              "cwd": "C:\\Djex",
+              "status": "completed",
+              "started_utc": "2026-09-08T14:55:13Z",
+              "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+              "input_path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\maybe-either\\exference-maybeEither-synthesis.input.txt",
+              "input_sha256": "620b68a049401af2d33d0457b93ee441f785faf8920805c9f59104edaca58da5",
+              "stdout_path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\maybe-either\\exference-maybeEither-synthesis.stdout.txt",
+              "stderr_path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\maybe-either\\exference-maybeEither-synthesis.stderr.txt",
+              "owned_root_pid": 3492,
+              "exit_code": 0,
+              "timed_out": false,
+              "wall_seconds": 15.252964699990116,
+              "finished_utc": "2026-09-08T14:55:28Z",
+              "stdout_sha256": "8ee8ddcbf884506d4535706318bbf9a9e4f22471faec1548f239db0cf3db8470",
+              "stderr_sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae"
+            },
+            "stderr": {
+              "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\maybe-either\\exference-maybeEither-synthesis.stderr.txt",
+              "sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae",
+              "bytes": 435,
+              "text": "info [DJEX_REPL_BEHAVIORAL_OBSERVATIONS]: behavioral predicate observations\r\n  context: checked=256, true=0, false=256, error=0, timeout=0, window=256\r\ninfo [DJEX_REPL_BEHAVIORAL_NO_MATCH]: no candidate passed the behavioral predicate in the observed search\r\nwarning [DJEX_REPL_BEHAVIORAL_WINDOW]: behavioral observation window reached\r\n  context: rejected and failed candidates consumed their original slots; search was not refilled\r\n"
+            }
+          },
+          {
+            "process": {
+              "label": "exference-reject-all-synthesis",
+              "command": [
+                "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+                "repl",
+                "--ignore-startup",
+                "--environment",
+                "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\maybe-either\\empty-environment"
+              ],
+              "process_timeout_seconds": 300,
+              "cwd": "C:\\Djex",
+              "status": "completed",
+              "started_utc": "2026-09-08T14:55:28Z",
+              "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+              "input_path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\maybe-either\\exference-reject-all-synthesis.input.txt",
+              "input_sha256": "1867ee4f1a82c6c35427d3b170c239ae834233ab03fc72f7cbebd75c38554ede",
+              "stdout_path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\maybe-either\\exference-reject-all-synthesis.stdout.txt",
+              "stderr_path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\maybe-either\\exference-reject-all-synthesis.stderr.txt",
+              "owned_root_pid": 25036,
+              "exit_code": 0,
+              "timed_out": false,
+              "wall_seconds": 1.263180400012061,
+              "finished_utc": "2026-09-08T14:55:29Z",
+              "stdout_sha256": "8ee8ddcbf884506d4535706318bbf9a9e4f22471faec1548f239db0cf3db8470",
+              "stderr_sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae"
+            },
+            "stderr": {
+              "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\maybe-either\\exference-reject-all-synthesis.stderr.txt",
+              "sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae",
+              "bytes": 435,
+              "text": "info [DJEX_REPL_BEHAVIORAL_OBSERVATIONS]: behavioral predicate observations\r\n  context: checked=256, true=0, false=256, error=0, timeout=0, window=256\r\ninfo [DJEX_REPL_BEHAVIORAL_NO_MATCH]: no candidate passed the behavioral predicate in the observed search\r\nwarning [DJEX_REPL_BEHAVIORAL_WINDOW]: behavioral observation window reached\r\n  context: rejected and failed candidates consumed their original slots; search was not refilled\r\n"
+            }
+          }
+        ]
+      }
+    ],
+    "restored_source": [
+      {
+        "current": {
+          "path": "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.hs",
+          "sha256": "9d1f67c10129fbe61259edb4f452cfedf3ddaf812c92c40c8c8bd19ff2ef32ae",
+          "bytes": 149845
+        },
+        "backup": {
+          "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\Exference.before.hs",
+          "sha256": "9d1f67c10129fbe61259edb4f452cfedf3ddaf812c92c40c8c8bd19ff2ef32ae",
+          "bytes": 149845
+        },
+        "matches_HEAD": true
+      },
+      {
+        "current": {
+          "path": "C:\\Djex\\exference\\test-engine\\EngineSpec.hs",
+          "sha256": "38028b32eecf140dd86d76d33c285d42e082e5d023479e691ac975782998fb6c",
+          "bytes": 126531
+        },
+        "backup": {
+          "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-v1\\EngineSpec.before.hs",
+          "sha256": "38028b32eecf140dd86d76d33c285d42e082e5d023479e691ac975782998fb6c",
+          "bytes": 126531
+        },
+        "matches_HEAD": true
+      }
+    ],
+    "restored_build": {
+      "path": "C:\\Djex\\dist-newstyle\\rank-n-complexity-overapplication-v1\\restore-build.log",
+      "sha256": "9e99aec0b98bee2bd154d8d13f76c955da279d8238865f4afb28a49efa5e30e3",
+      "bytes": 3169,
+      "text": "Build profile: -w ghc-9.12.4 -O1\r\nIn order, the following will be built (use -v for more details):\r\n - djex-2026.7.17 (lib) (file exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.hs changed)\r\n - djex-2026.7.17 (test:exference-engine-tests) (dependency rebuilt)\r\n - djex-2026.7.17 (exe:djex) (dependency rebuilt)\r\nPreprocessing library for djex-2026.7.17...\r\nBuilding library for djex-2026.7.17...\r\n[132 of 184] Compiling Language.Haskell.Exference.Core.Internal.Exference ( exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\build\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.o ) [Source file changed]\r\n[133 of 184] Compiling Language.Haskell.Exference.Core ( exference\\src-core\\Language\\Haskell\\Exference\\Core.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\build\\Language\\Haskell\\Exference\\Core.o ) [Language.Haskell.Exference.Core.Internal.Exference changed]\r\n[136 of 184] Compiling Language.Haskell.Djex.Exference.Internal.Session ( exference\\src-core\\Language\\Haskell\\Djex\\Exference\\Internal\\Session.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\build\\Language\\Haskell\\Djex\\Exference\\Internal\\Session.o ) [Language.Haskell.Exference.Core.Internal.Exference changed]\r\n[138 of 184] Compiling Language.Haskell.Djex.Exference ( exference\\src-core\\Language\\Haskell\\Djex\\Exference.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\build\\Language\\Haskell\\Djex\\Exference.o ) [Language.Haskell.Exference.Core.Internal.Exference changed]\r\nPreprocessing test suite 'exference-engine-tests' for djex-2026.7.17...\r\nBuilding test suite 'exference-engine-tests' for djex-2026.7.17...\r\n[30 of 36] Compiling Language.Haskell.Exference.Core.Internal.Exference ( exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-engine-tests\\build\\exference-engine-tests\\exference-engine-tests-tmp\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.o ) [Source file changed]\r\n[31 of 36] Compiling Language.Haskell.Exference.Core.Internal.Testing ( exference\\test-engine\\Language\\Haskell\\Exference\\Core\\Internal\\Testing.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-engine-tests\\build\\exference-engine-tests\\exference-engine-tests-tmp\\Language\\Haskell\\Exference\\Core\\Internal\\Testing.o ) [Language.Haskell.Exference.Core.Internal.Exference changed]\r\n[36 of 36] Compiling Main             ( exference\\test-engine\\EngineSpec.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-engine-tests\\build\\exference-engine-tests\\exference-engine-tests-tmp\\Main.o ) [Source file changed]\r\n[37 of 37] Linking dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-engine-tests\\build\\exference-engine-tests\\exference-engine-tests.exe [Objects changed]\r\nPreprocessing executable 'djex' for djex-2026.7.17...\r\nBuilding executable 'djex' for djex-2026.7.17...\r\n[2 of 2] Linking dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe [Library changed]\r\n"
+    }
+  },
+  "foldl1_reference_only": {
+    "raw_receipt": {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\results.json",
+      "sha256": "91b772da77253e30f5cb384767cede59f0fbd7cab92e3db2c6da53575d9ade67",
+      "bytes": 8399
+    },
+    "result": {
+      "status": "passed",
+      "scope": "independent exact witness/full-type/36-observation check; no synthesis or search-reachability claim",
+      "search_executed": false,
+      "synthesis_accepted": false,
+      "finite_observations": 36,
+      "evaluation_timeout_seconds": 2,
+      "compile_outer_guard_seconds": 60,
+      "evaluation_outer_guard_seconds": 10,
+      "inputs": {
+        "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-source-review-v1\\Foldl1Witness.hs": "2fc739afaf237753e177037a91c05d32566c108493347a4593e885a2253fefbc",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-source-review-v1\\replay-input.json": "0fbc9fa7cc41badd2b95a01c21b704773d621225536463dfc1c2cfa55db3f680",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-exference-v1\\results.json": "e3430ac345706f5f8e3589d2ebff9e4719a734fb5f41ff26aace22a1269a3191",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\partial-exference-v1\\exference-foldl1.commands.txt": "8e8bc92bb3ba806e0474f01e5bceebb6036b4939b772fbf5f0b4378b17a04885",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\Foldl1Witness.hs": "2fc739afaf237753e177037a91c05d32566c108493347a4593e885a2253fefbc",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\replay-input.original.json": "0fbc9fa7cc41badd2b95a01c21b704773d621225536463dfc1c2cfa55db3f680",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\command.original.txt": "8e8bc92bb3ba806e0474f01e5bceebb6036b4939b772fbf5f0b4378b17a04885",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\predicate.original.txt": "7431f1c2fb468355059e75d3208c2f62b81561e2c5b5152fc71a170d352eca4c",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\predicate.rebound.txt": "f6a8a5aedc048b795cc029780d8857bdb6c8ce0b861b4a3bd446ce0ba5e871f6",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\type.original.txt": "8a9915952ad0717d782262660bfe82cf41207a68d1b7187525412b417e50f285",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\Main.hs": "df36d1b0b42081b87b3d39747b9682e7c03cda19f132aadc4ca515bcb34a7fe4"
+      },
+      "helpers": {
+        "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-prepared-v2\\run_diagnostic.py": "3acf245c1b95ac5efe105bbe068874f6c2ede42536a2c434efb907d653f51006",
+        "C:\\Djex\\test-church\\behavior_runtime.py": "b5240378e17d3fb25af8ad18fc0ba88f0226dc2116b99efe3300f4b006a88028",
+        "C:\\Djex\\test-church\\behavior_spec.py": "426fb6cf5e8a607608bed4ca52a74776cd38d1c5f7a5c49866fda6b2a98cedf4"
+      },
+      "executables": {
+        "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe": "0560906f7b7a046742d9e8433b95c0db49fc0c2fc28989e67cb23a7b347acc66",
+        "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\Foldl1WitnessReplay.exe": "7b50bcdae7b88690d0604036feb273c087c974d80adaf0895055f13dac7a7c2f"
+      },
+      "processes": [
+        {
+          "label": "ghc-version",
+          "command": [
+            "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe",
+            "--numeric-version"
+          ],
+          "process_timeout_seconds": 10,
+          "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2",
+          "status": "completed",
+          "started_utc": "2026-09-08T14:36:11Z",
+          "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+          "stdout_path": "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\ghc-version.stdout.txt",
+          "stderr_path": "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\ghc-version.stderr.txt",
+          "owned_root_pid": 38588,
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_seconds": 0.1551704999874346,
+          "finished_utc": "2026-09-08T14:36:11Z",
+          "stdout_sha256": "b5b8d2ab7bf07149fd889de37850814c95443b1f95237f9597c2433f52bf3136",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "label": "ghc-exact-witness",
+          "command": [
+            "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe",
+            "--make",
+            "-v0",
+            "-O0",
+            "-threaded",
+            "-fforce-recomp",
+            "-package-env",
+            "-",
+            "-hide-all-packages",
+            "-package",
+            "base",
+            "-i",
+            "-iC:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2",
+            "-outputdir",
+            "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\objects",
+            "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\Main.hs",
+            "-o",
+            "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\Foldl1WitnessReplay.exe"
+          ],
+          "process_timeout_seconds": 60,
+          "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2",
+          "status": "completed",
+          "started_utc": "2026-09-08T14:36:11Z",
+          "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+          "stdout_path": "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\ghc-exact-witness.stdout.txt",
+          "stderr_path": "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\ghc-exact-witness.stderr.txt",
+          "owned_root_pid": 16452,
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_seconds": 1.7613731999881566,
+          "finished_utc": "2026-09-08T14:36:13Z",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "label": "witness-exact-predicate",
+          "command": [
+            "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\Foldl1WitnessReplay.exe"
+          ],
+          "process_timeout_seconds": 10,
+          "cwd": "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2",
+          "status": "completed",
+          "started_utc": "2026-09-08T14:36:13Z",
+          "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+          "stdout_path": "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\witness-exact-predicate.stdout.txt",
+          "stderr_path": "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-witness-replay-v2\\witness-exact-predicate.stderr.txt",
+          "owned_root_pid": 32256,
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_seconds": 0.3302385000279173,
+          "finished_utc": "2026-09-08T14:36:13Z",
+          "stdout_sha256": "1a33d7f3d568d78e8bfb7a784227b285f8b2082f9acd2988249a2ac2c74a5cad",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "original": {
+        "receipt": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-exference-v1\\results.json",
+        "receipt_sha256": "e3430ac345706f5f8e3589d2ebff9e4719a734fb5f41ff26aace22a1269a3191",
+        "command": "C:\\Djex\\dist-newstyle\\priority4-live\\partial-exference-v1\\exference-foldl1.commands.txt",
+        "command_sha256": "8e8bc92bb3ba806e0474f01e5bceebb6036b4939b772fbf5f0b4378b17a04885",
+        "name": "partial_exference_foldl1",
+        "type": "(forall church0. (church0 -> ((church0 -> (church0 -> church0)) -> ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> church0))))",
+        "search_type": "(forall church0. (church0 -> ((church0 -> (church0 -> church0)) -> ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> church0))))",
+        "status": "failed",
+        "failure": "displayed success lacks a successful behavioral observation",
+        "settings": {
+          "window": 256,
+          "budget": 100000,
+          "djinn_strategy": "depth-first",
+          "steps": 100000,
+          "process_timeout": 300.0,
+          "queue": 8192
+        },
+        "provider_inventory": []
+      },
+      "predicate_sha256": "7431f1c2fb468355059e75d3208c2f62b81561e2c5b5152fc71a170d352eca4c",
+      "rebound_predicate_sha256": "f6a8a5aedc048b795cc029780d8857bdb6c8ce0b861b4a3bd446ce0ba5e871f6",
+      "candidate_name_replacements": 36,
+      "alias": "diagnosticFoldl1",
+      "stage": "completed",
+      "ghc_version": "9.12.4",
+      "compile_exit_code": 0,
+      "evaluation_exit_code": 0,
+      "evaluation_markers": [
+        "FOLDL1_WITNESS_PASS_36"
+      ],
+      "witness_predicate_passed": true,
+      "inputs_unchanged": true,
+      "helpers_unchanged": true,
+      "executables_unchanged": true,
+      "captures_unchanged": true
+    },
+    "witness": {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\foldl1-source-review-v1\\Foldl1Witness.hs",
+      "sha256": "2fc739afaf237753e177037a91c05d32566c108493347a4593e885a2253fefbc",
+      "bytes": 460,
+      "text": "{-# LANGUAGE RankNTypes #-}\nmodule Foldl1Witness (generated) where\n\n-- Source-only diagnostic witness, not a search result or validated receipt.\n-- The Church fold's carrier is (a -> (a -> a) -> a) -> a.\ngenerated\n  :: forall a. a -> (a -> a -> a)\n  -> (forall r. (a -> r -> r) -> r -> r)\n  -> a\ngenerated d step xs =\n  xs\n    (\\x rest pair ->\n      rest (\\_ k -> pair (k x) (\\acc -> k (step acc x))))\n    (\\pair -> pair d (\\a -> a))\n    (\\answer _ -> answer)\n"
+    }
+  },
+  "global_context_provider_prototype": {
+    "status": "Unaccepted working-tree prototype; production changes not published in this milestone",
+    "build": "Strict incremental executable/test/helper build completed; not a full unit-suite pass",
+    "build_log": {
+      "path": "C:\\Leant\\dist-newstyle\\context-global-provider-build-v2.log",
+      "sha256": "7d2f7ef18da64a7bb591350d8bc261bbc62aeccb665f0d76a07902677d888edc",
+      "bytes": 920,
+      "text": "Build profile: -w ghc-9.12.4 -O1\r\nIn order, the following will be built (use -v for more details):\r\n - leant-0.1.0 (test:leant-synth-tests) (file test-unit\\Spec.hs changed)\r\nPreprocessing test suite 'leant-synth-tests' for leant-0.1.0...\r\nBuilding test suite 'leant-synth-tests' for leant-0.1.0...\r\n[23 of 56] Compiling GlobalContextProviderSpec ( test-unit\\GlobalContextProviderSpec.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\leant-0.1.0\\t\\leant-synth-tests\\build\\leant-synth-tests\\leant-synth-tests-tmp\\GlobalContextProviderSpec.o )\r\n[56 of 56] Compiling Main             ( test-unit\\Spec.hs, dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\leant-0.1.0\\t\\leant-synth-tests\\build\\leant-synth-tests\\leant-synth-tests-tmp\\Main.o ) [Source file changed]\r\n[57 of 57] Linking dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\leant-0.1.0\\t\\leant-synth-tests\\build\\leant-synth-tests\\leant-synth-tests.exe [Objects changed]\r\n"
+    },
+    "focused_test_command": [
+      "leant-synth-tests.exe",
+      "-j1",
+      "-p",
+      "/Complete global contextual provider source/"
+    ],
+    "positive_tests_passed": 0,
+    "positive_tests_failed": 6,
+    "negative_tests_passed": 7,
+    "focused_test_log": {
+      "path": "C:\\Leant\\dist-newstyle\\global-context-focused-v1.log",
+      "sha256": "91aeeb44efcc240e47f508931d1ceca09892ca2f2156fe2e591ce7c8e4f3fe21",
+      "bytes": 3326,
+      "text": "Leant synthesis boundary\r\n  Complete global contextual provider source\r\n    forced method EngineDjinn behavioral=False:                              FAIL\r\n      Exception: user error (context-source: missing Djinn graph: DjinnTermGraphSourceTypingFailure \"SourceGraphTypingFailure \\\"source constraint has no exact lexical given (instances and superclass evidence are unsupported): LeantContext0 (TypeVariable (FlexibleVariable \\\\\\\"$djinn$source$14\\\\\\\"))\\\"\")\r\n      Use -p '/Complete global contextual provider source/&&/forced method EngineDjinn behavioral=False/' to rerun this test only.\r\n    forced method EngineDjinn behavioral=True:                               FAIL\r\n      Exception: user error (context-source: missing Djinn graph: DjinnTermGraphSourceTypingFailure \"SourceGraphTypingFailure \\\"source constraint has no exact lexical given (instances and superclass evidence are unsupported): LeantContext0 (TypeVariable (FlexibleVariable \\\\\\\"$djinn$source$14\\\\\\\"))\\\"\")\r\n      Use -p '/Complete global contextual provider source/&&/forced method EngineDjinn behavioral=True/' to rerun this test only.\r\n    forced method EngineExference behavioral=False:                          FAIL\r\n      Exception: user error (forced method produced no checked group)\r\n      Use -p '/Complete global contextual provider source/&&/forced method EngineExference behavioral=False/' to rerun this test only.\r\n    forced method EngineExference behavioral=True:                           FAIL\r\n      Exception: user error (forced method produced no checked group)\r\n      Use -p '/Complete global contextual provider source/&&/forced method EngineExference behavioral=True/' to rerun this test only.\r\n    forced method EngineBoth behavioral=False:                               FAIL\r\n      Exception: user error (context-source: missing Djinn graph: DjinnTermGraphSourceTypingFailure \"SourceGraphTypingFailure \\\"source constraint has no exact lexical given (instances and superclass evidence are unsupported): LeantContext0 (TypeVariable (FlexibleVariable \\\\\\\"$djinn$source$14\\\\\\\"))\\\"\")\r\n      Use -p '/Complete global contextual provider source/&&/forced method EngineBoth behavioral=False/' to rerun this test only.\r\n    forced method EngineBoth behavioral=True:                                FAIL\r\n      Exception: user error (context-source: missing Djinn graph: DjinnTermGraphSourceTypingFailure \"SourceGraphTypingFailure \\\"source constraint has no exact lexical given (instances and superclass evidence are unsupported): LeantContext0 (TypeVariable (FlexibleVariable \\\\\\\"$djinn$source$14\\\\\\\"))\\\"\")\r\n      Use -p '/Complete global contextual provider source/&&/forced method EngineBoth behavioral=True/' to rerun this test only.\r\n    a legacy provider cannot acquire complete source authority:              OK\r\n    an unsupported universe packet is not silently dropped for identity:     OK\r\n    structured provider owner cannot be changed independently:               OK\r\n    a repeated foreign provider owner is rejected during actual preparation: OK\r\n    a provider packet cannot substitute a namespace sibling owner:           OK\r\n    the packet preserves independent explicit and implicit source binders:   OK\r\n    a provider source cannot authorize a changed private scheme:             OK\r\n\r\n6 out of 13 tests failed (0.01s)\r\n"
+    },
+    "fixture": {
+      "path": "C:\\Leant\\test-unit\\GlobalContextProviderSpec.hs",
+      "sha256": "300d42a9ca2f7c5c7f0e1821ab9351e43f415f5525ab474fa4ce6787106c7319",
+      "bytes": 8945,
+      "text": "-- Full source schemes and exact provider ownership through contextual search.\nmodule GlobalContextProviderSpec (tests) where\n\nimport Control.Monad (forM_)\nimport Data.List (isInfixOf)\nimport qualified Data.Set as Set\nimport qualified Language.Haskell.Djex as D\nimport Leant.Synth.ContextSource\nimport Leant.Synth.Engine\nimport Leant.Synth.Fragment\nimport Leant.Synth.Observability (CandidateRenderingRoute (RouteTypedCandidate))\nimport Test.Tasty (TestTree, testGroup)\nimport Test.Tasty.HUnit ((@?=), assertBool, assertFailure, testCase)\n\ntests :: TestTree\ntests = testGroup \"Complete global contextual provider source\"\n  ([ testCase (\"forced method \" ++ show engine ++ \" behavioral=\" ++ show behavioral) $ do\n       source <- goalSource methodGoal\n       providers <- right $ parseProviderSexp methodProvider\n       outcome <- right $ synthesizeContextualWithProvidersSkippingDetailedWith\n         behavioral limits engine 20000 Set.empty providers source $ contextSourceFragment source\n       step <- right $ advanceDetailedSynthCursorWith 32 32 $ startDetailedSynthCursor $ Right outcome\n       group <- case step of\n         DetailedSynthCursorCandidateBatch batch _ -> case detailedCandidateBatchGroups batch of\n           [owned] -> pure owned\n           _ -> fail \"contextual provider cursor changed one-group admission\"\n         DetailedSynthCursorEngineFailed failure -> fail failure\n         _ -> fail \"forced method produced no checked group\"\n       detailedCandidateGroupRoute group @?= RouteTypedCandidate\n       owner <- maybe (fail \"missing exact provider source owner\") pure $ detailedCandidateGroupSourceAuthority group\n       assertBool \"wrong backend donated provider authority\" $\n         engine == EngineBoth || candidateSourceAuthorityEngine owner == engine\n       foldCandidateSourceAuthority\n         (inspect . djinnSourceCandidate)\n         (inspect . typedCandidateSemanticCandidate) owner\n       forM_ (detailedCandidateGroupVerificationVariants group) $ \\variant -> do\n         assertBool \"method global was replaced by a bare name or another provider\" $\n           \"@_root_.\u00abCtx\u00bb.\u00abC\u00bb.\u00about\u00bb\" `isInfixOf` detailedVerificationVariantText variant\n         origin <- maybe (fail \"missing exact renderer owner\") pure $ detailedVerificationVariantExactTypedOrigin variant\n         renderExactTypedVariantOrigin origin @?= Right (detailedCandidateGroupVariants group)\n   | engine <- [EngineDjinn, EngineExference, EngineBoth]\n   , behavioral <- [False, True]\n   ] ++\n   [ testCase \"a legacy provider cannot acquire complete source authority\" $ do\n       source <- goalSource identityGoal\n       reject source [ProviderFrag \"Ctx.C.out\" (contextSourceFragment source)]\n   , testCase \"an unsupported universe packet is not silently dropped for identity\" $ do\n       source <- goalSource identityGoal\n       providers <- right $ parseProviderSexp\n         \"(providers (context-provider \\\"Ctx.C.out\\\" (name \\\"Ctx\\\" \\\"C\\\" \\\"out\\\") unsupported \\\"provider constant has unretained universe parameters\\\"))\"\n       reject source providers\n   , testCase \"structured provider owner cannot be changed independently\" $ do\n       source <- goalSource identityGoal\n       providers <- right $ parseProviderSexp methodProvider\n       case providers of\n         [ProviderFragWithContextSource name fragment _ metadata] ->\n           reject source [ProviderFragWithContextSource name fragment [\"Other\", \"out\"] metadata]\n         _ -> fail \"expected one exact source provider\"\n   , testCase \"a repeated foreign provider owner is rejected during actual preparation\" $ do\n       source <- goalSource identityGoal\n       providers <- right $ parseProviderSexp methodProvider\n       rejectDeferred source (providers ++ providers)\n   , testCase \"a provider packet cannot substitute a namespace sibling owner\" $ do\n       source <- goalSource identityGoal\n       providers <- right $ parseProviderSexp methodProvider\n       case providers of\n         [ProviderFragWithContextSource _ fragment parts metadata] ->\n           reject source [ProviderFragWithContextSource \"Ctx.C.other\" fragment parts metadata]\n         _ -> fail \"expected one exact source provider\"\n   , testCase \"the packet preserves independent explicit and implicit source binders\" $ do\n       providers <- right $ parseProviderSexp methodProvider\n       case providers of\n         [ProviderFragWithContextSource _ _ _ (Right metadata)] ->\n           case contextSourceType metadata of\n             ContextForall ContextImplicit \"a\" (ContextGiven [\"Ctx\", \"C\"] 1 [ContextVariable \"a\"] _) -> pure ()\n             _ -> assertFailure \"complete method scheme lost binder visibility or its correlated Given variable\"\n         _ -> fail \"expected one exact source provider\"\n   , testCase \"a provider source cannot authorize a changed private scheme\" $ do\n       source <- goalSource identityGoal\n       providers <- right $ parseProviderSexp methodProvider\n       case providers of\n         [ProviderFragWithContextSource name _ parts metadata] ->\n           reject source [ProviderFragWithContextSource name (contextSourceFragment source) parts metadata]\n         _ -> fail \"expected one exact source provider\"\n   ])\n where\n  limits = defaultSynthLimits\n    { synthLimitWindow = 32, synthLimitTried = 32, synthLimitShown = 1\n    , synthLimitBudget = Just 20000 }\n  reject source providers = case synthesizeContextualWithProvidersSkippingDetailedWith\n      False limits EngineBoth 20000 Set.empty providers source (contextSourceFragment source) of\n    Left failure -> assertBool \"missing explicit metadata refusal\" $ \"context-source:\" `isInfixOf` failure\n    Right _ -> assertFailure \"unsupported provider acquired the identity goal's authority\"\n\n  rejectDeferred source providers = do\n    let outcome = synthesizeContextualWithProvidersSkippingDetailedWith\n          False limits EngineBoth 20000 Set.empty providers source (contextSourceFragment source)\n        rejected failure = assertBool \"duplicate owner did not fail at the source boundary\" $\n          \"context-source:\" `isInfixOf` failure\n    case advanceDetailedSynthCursorWith 32 32 $ startDetailedSynthCursor outcome of\n      Left failure -> assertFailure $ \"cursor protocol failed before provider validation: \" ++ show failure\n      Right (DetailedSynthCursorEngineFailed failure) -> rejected failure\n      _ -> assertFailure \"duplicate foreign provider acquired a checked candidate or ordinary no-term result\"\n\nmethodGoal, identityGoal, methodProvider :: String\nmethodGoal = \"(all explicit \\\"a\\\" (given (name \\\"Ctx\\\" \\\"C\\\") 1 (args (var \\\"a\\\")) (nominal (name \\\"Nat\\\") 0 (args))))\"\nidentityGoal = \"(all explicit \\\"a\\\" (given (name \\\"Ctx\\\" \\\"C\\\") 1 (args (var \\\"a\\\")) (arrow (var \\\"a\\\") (var \\\"a\\\"))))\"\nmethodProvider = \"(providers (context-provider \\\"Ctx.C.out\\\" (name \\\"Ctx\\\" \\\"C\\\" \\\"out\\\") 1 (all implicit \\\"a\\\" (given (name \\\"Ctx\\\" \\\"C\\\") 1 (args (var \\\"a\\\")) (nominal (name \\\"Nat\\\") 0 (args))))))\"\n\ngoalSource :: String -> IO ContextSource\ngoalSource source = do\n  parsed <- right $ parseGoalSexp $\n    \"(goal type (query (roots \\\"Ctx\\\") (head \\\"Nat\\\")) (atom unsafe \\\"legacy\\\") (context-source 1 \" ++ source ++ \"))\"\n  case parsedGoalContextSource parsed of\n    Just (Right metadata) -> pure metadata\n    other -> fail $ \"unsupported fixture source: \" ++ show other\n\ninspect\n  :: (Ord variable, Eq local, Show local, Show absence)\n  => D.TypedCandidate absence (D.Type variable) local\n       (D.Candidate sourceType details (D.FunctionClause local))\n  -> IO ()\ninspect candidate = do\n  graph <- right $ D.typedCandidateTermGraph candidate\n  let clause = D.candidateOutput $ D.typedCandidateCompatibility candidate\n      forms = map (D.termNodeForm . snd) $ D.termGraphNodes graph\n      globals = [D.nameSpelling name | D.TypedGlobal _ name <- forms]\n      applications = [witness | D.TypedContextApplication _ _ witness <- forms]\n      introductions =\n        [D.contextEvidenceBinder $ D.givenContextEvidence occurrence slot\n        | D.TypedContextIntroduction occurrence _ witness <- forms\n        , (slot, _) <- zip [0 ..] $ D.contextIntroductionConstraints witness]\n  D.eraseTermGraphToFunctionClause (D.clauseName clause) graph @?= clause\n  root <- maybe (fail \"missing exact graph root\") pure $ D.lookupTermNode (D.termGraphRoot graph) graph\n  assertBool \"global candidate root is open\" $ Set.null $ D.freeVariables $ D.termNodeType root\n  assertBool \"no actual source provider used\" $ not (null globals)\n  assertBool \"another provider or constructor entered the proof\" $ all (== Just \"leantProvider0\") globals\n  assertBool \"method did not consume a lexical dictionary\" $ not (null applications)\n  forM_ applications $ \\witness -> forM_ (D.contextApplicationEvidence witness) $ \\evidence ->\n    assertBool \"method dictionary was donated from another scope\" $\n      D.contextEvidenceBinder evidence `elem` introductions\n\nright :: Show error => Either error value -> IO value\nright = either (fail . show) pure\n"
+    },
+    "production_and_registration_sources": [
+      {
+        "path": "C:\\Leant\\src\\Leant\\Synth\\ContextSource.hs",
+        "sha256": "ace5febe3d37f0fad9e85b35dd51ac7bc4256de0b16efa1b2658015ceae11d7a",
+        "bytes": 24824
+      },
+      {
+        "path": "C:\\Leant\\src\\Leant\\Synth\\Fragment.hs",
+        "sha256": "668d296df78986b788a2a19bf66bdd381e47d6b1bf25abc72c17128cd10b0a29",
+        "bytes": 131728
+      },
+      {
+        "path": "C:\\Leant\\src\\Leant\\Synth\\Engine.hs",
+        "sha256": "aa772cd052de8f43767f308b0cf07caae5ad8260a3f4356cf5fe778a42e1fc3e",
+        "bytes": 251180
+      },
+      {
+        "path": "C:\\Leant\\src\\Main.hs",
+        "sha256": "5a384ac092a038e596522a29066d1a9f1bc5a4e3e90c1593d9902aa3bce4b6d6",
+        "bytes": 269724
+      },
+      {
+        "path": "C:\\Leant\\leant.cabal",
+        "sha256": "222530bd1fb4fe81051be6aff72d1a0757879df34a815bfc197d11d3412277a3",
+        "bytes": 7894
+      },
+      {
+        "path": "C:\\Leant\\test-unit\\Spec.hs",
+        "sha256": "f41a1c2213e2afcab3c13665874868aad6df18a323e254235baa0e0258bd17ce",
+        "bytes": 1420659
+      }
+    ],
+    "full_suite_run": false,
+    "native_method_matrix_run": false,
+    "diagnosis": {
+      "djinn_observed": "Fresh provider type meta remains unresolved when exact lexical Given lookup runs",
+      "exference_observed": "No checked candidate group; the fixture does not distinguish terminal cursor cases",
+      "exference_hypothesis": "Constraint-only fresh provider parameters need Given-directed instantiation; mechanism not yet isolated by a production trace"
+    }
+  }
+}

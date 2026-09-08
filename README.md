@@ -105,8 +105,10 @@ search result: all 256 candidates now compile, but none matches the predicate.
 The matching [Leant integration](https://github.com/VladimirReshetnikov/Leant/blob/e1ed6f7eb308b9a431db1ec8c956f9eb7a30d05f/docs/reports/2026-09-08-nested-forall-graphs.md)
 passes nine native ordinary/behavioral/False cells across all three engine
 modes: six exact full-type replays, 24 observations and 16 empty axiom
-inventories. Its strict build and all 686 unfiltered tests pass. Search work
-on the missing Church behaviors remains the next priority.
+inventories. Its strict build and all 686 unfiltered tests pass. The
+[updated re-triage](docs/reports/2026-09-07-synthesis-retriage.md) promotes
+a concrete global-method inference failure, followed by missing Church
+construction paths; neither is covered by that accepted integration.
 The ordinary-data matrix now passes eight
 scenarios in each Haskell engine, including tuple fields and independently typed
 recursive inputs. Exference's complete-case graphs and protected queues preserve
@@ -120,10 +122,15 @@ erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
 marks priority 1's supported-fragment Haskell elaboration complete: all 101
 CLI tests pass, including first/best/all repair selection, exact GHC replay,
 and retention of the original failed-candidate sample when its elaboration
-retry times out under the same deadline. Priorities 2–4 remain open. Next are
-the concrete broader Church failures and remaining defaulted cells, then
-supplied folds and trees after the native Lean verification repair, and one fully
-described global contextual provider under the existing `Type 0` non-overlap guard.
+retry times out under the same deadline. Priorities 2–4 remain open. Next is
+inferring a global method's fresh type parameters from lexical class assumptions
+when its result type cannot determine them, within the existing `Type 0`
+non-overlap guard. The Leant prototype builds but
+fails all six focused positive cases; it is not accepted support. Then address
+the missing Church construction paths and remaining defaulted cells, with
+supplied tree folds as an independent delivery. Two tested Exference ranking
+changes still produced 256 false `maybeEither` candidates and were restored.
+The detailed re-triage retains their diagnostic evidence and acceptance gates.
 Bounded Lean contexts now pass their complete 39-cell matrix and 680-test suite. Exact
 proof-selected dictionary transport remains required before that guard is
 relaxed, with payload-sensitive Haskell and Lean replay. Both partial oracle preflights now pass: all 20 Lean files with 491

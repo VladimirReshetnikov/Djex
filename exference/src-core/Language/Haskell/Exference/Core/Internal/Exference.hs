@@ -2083,11 +2083,14 @@ getUnusedVarCount = IntMap.foldl' countUnused 0 . nodeVarUses
 -- Finish an already determined local obligation before interleaving another
 -- sibling's construction. Flexible variables in either the goal or its local
 -- context can still receive information from siblings, so those groups keep
--- the established deferred order. This changes only the worklist order: all
+-- the established deferred order. Keep monomorphic work in that order too:
+-- eagerly completing it can crowd out supplied structural instantiations.
+-- Focus a group only when its goal or a visible local type contains a forall.
+-- This changes only the worklist order: all
 -- obligations and ordinary search-step charges remain present.
 scheduleKnownGoals :: Scopes -> [TGoal] -> Seq.Seq TGoal -> Seq.Seq TGoal
 scheduleKnownGoals scopes goals pending
-  | all determined goals = Seq.fromList goals <> pending
+  | all determined goals && any polymorphic goals = Seq.fromList goals <> pending
   | otherwise = pending <> Seq.fromList goals
  where
   determined goal = case goalBinding goal of
@@ -2095,7 +2098,11 @@ scheduleKnownGoals scopes goals pending
       && all (all closed . constraint_params) (goalGivenConstraints goal)
       && all closedBinding (scopeGetAllBindings (goalScope goal) scopes)
   closed = S.null . freeVars
-  closedBinding binding = all closed $ varPResult binding : varPParameters binding
+  closedBinding = all closed . bindingTypes
+  bindingTypes binding = varPResult binding : varPParameters binding
+  polymorphic goal = case goalBinding goal of
+    VarBinding _ source -> any SharedType.containsForall $
+      source : concatMap bindingTypes (scopeGetAllBindings (goalScope goal) scopes)
 
 -- One suspended branch-local transformation of the popped search node.  Every
 -- sibling action is interpreted against the same immutable input node.

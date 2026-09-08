@@ -107,16 +107,16 @@ passes nine native ordinary/behavioral/False cells across all three engine
 modes: six exact full-type replays, 24 observations and 16 empty axiom
 inventories. Its strict build and all 686 unfiltered tests pass. The
 [updated re-triage](docs/reports/2026-09-07-synthesis-retriage.md) promotes
-closure of the newer global-method integration, followed by missing Church
-construction paths; neither is covered by that earlier accepted Leant integration.
+missing Church construction paths after the accepted global-method and loaded-
+provider increments described below.
 The new [constraint-only provider increment](docs/reports/2026-09-08-constraint-only-provider-inference.md)
 infers a unique coherent selection from lexical class assumptions in both
 engines. Four public Haskell API cases synthesize global/local constrained
 providers and replay their exact full signatures with distinct dictionary
 payloads. Explicit-signature rendering preserves the chosen type arguments;
-ambiguity, scope, and dictionary-ownership guards remain. Loaded Haskell
-provider metadata, implicit-root behavioral scoping, and native Lean method
-integration are still separate acceptance gates.
+ambiguity, scope, and dictionary-ownership guards remain. The later loaded
+Haskell provider and native Lean method acceptance below extends this engine
+milestone; implicit-root behavioral scoping remains open.
 The ordinary-data matrix now passes eight
 scenarios in each Haskell engine, including tuple fields and independently typed
 recursive inputs. Exference's complete-case graphs and protected queues preserve
@@ -145,11 +145,14 @@ now survive source extraction and checked admission in both engines. Explicit-
 independent replay of the displayed definitions and actual False controls;
 the strict build and all 2,306 tests in 15 complete suites pass. Implicit-root
 scoping, ordinary contextual presentation and derived class-method schemes
-remain frontend work. Lean mixed dictionary inventories and missing Church
-constructions also remain open. Supplied tree folds remain
-an independent delivery. Two failed `maybeEither` ranking experiments favor
-diagnosing actual construction and queue decisions before more tuning. The
-[current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) retains the full scope.
+remain frontend work. The
+[current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) puts missing
+Church constructions first, then bounded Haskell frontend usability, supplied
+tree folds, and broader contextual source/evidence support. Two failed
+`maybeEither` ranking experiments favor diagnosing actual construction and
+queue decisions before more tuning. Mixed Lean dictionary inventories and
+derived method schemes remain required, but do not block the earlier
+provider-free Church fixtures. The full coverage obligation is unchanged.
 Exact
 proof-selected dictionary transport remains required before that guard is
 relaxed, with payload-sensitive Haskell and Lean replay. Both partial oracle preflights now pass: all 20 Lean files with 491

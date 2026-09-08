@@ -8,15 +8,28 @@ completion checklist. None of those four priorities is complete.
 
 ## Current implementation evidence
 
-The ordinary-data Haskell matrix now passes all **16 cells**: eight operations
+Published Djex `922c55580eadec156ba9ef447b300f43e0953ed7` establishes the
+Haskell case, supplied-fold, and lexical-Given baselines below. Leant's current
+integration now also passes **24 ordinary-data positive cells** across Djinn,
+Exference, and Both, three false controls, and 24 independent replays of the
+exact displayed source at its full type. All **48 axiom inventories are empty**.
+The [Leant receipt](https://github.com/VladimirReshetnikov/Leant/blob/main/test-recursive/receipts/all-engines.json)
+records 180.78 seconds for the live phase and unchanged source/executable hashes.
+Its strict build and eighteen focused streaming tests pass. The
+[full configured Leant integration run](https://github.com/VladimirReshetnikov/Leant/blob/main/test-recursive/receipts/unit.json)
+passes **all 647 tests in 343.79 seconds**, with matching unfiltered inventory
+and summary counts and unchanged source, test-executable, and fake-Z3 helper
+hashes. The aggregate integration gate is complete.
+
+The ordinary-data Haskell matrix passes all **16 cells**: eight operations
 in each of Djinn and Exference. Every observed candidate must retain its exact
 source graph, and the accepted implementations compile and execute under their
 full original signatures. Exference now retains complete constructor-case
 evidence and uses two bounded queues when multiple independent recursive inputs
 require both whole-value forwarding and inspection. Both queues share the
-caller's total step and queue allowances. This closes the Haskell failures
-described in the historical baseline below; fresh three-engine Lean replay and
-the full Leant boundary gate remain open.
+caller's total step and queue allowances. The Haskell and live Lean matrices
+close the case failures described in the historical baseline below. The full
+Leant boundary suite also passes, with its own separate receipt.
 
 The [lexical-evidence increment](2026-09-07-contextual-evidence-design.md) now
 passes the complete shared and private checker suites and four Haskell renderer
@@ -26,8 +39,14 @@ reachability, method/instance/superclass evidence, or production Lean rendering.
 The subsequent native Given matrix establishes five live Exference roles and
 three Djinn roles, plus three leakage controls. The report retains its exact
 inventory, constraint-pruning policy, original signatures, and GHC replay.
-Djinn's constrained local/global search remains separate from those accepted
-roles.
+Djinn's constrained local/global search remains outside that published matrix.
+The **unpublished conditional-Given pilot** now passes strict library/private/
+integration builds and all 81 private tests, including 26 new conditional-kind
+and proof controls. Its unchanged 14-case Given target also passes in 26.09
+seconds, including forced Djinn local/global use and sibling-scope rejection.
+Broader regressions, budget controls, and direct-erasure controls remain pending.
+These are bounded pilot results; the pilot is not released and is absent from
+Leant's `922c5558` dependency.
 
 The final strict build passes, and the
 [complete affected-suite receipt](../../test-integration/receipts/recursive-context-checkpoint.json)
@@ -42,61 +61,69 @@ retry remain under `dist-newstyle/priority-baseline-suites-v1/` and
 The [generic fold composition increment](2026-09-07-supplied-recursor-composition.md)
 now passes `map`, order-sensitive `append`, generalized `length`, and the
 empty-input control in both Haskell engines within the original bounds. The
-next immediate gate is vendoring this checkpoint for cross-engine Lean
-acceptance. Expanded Church acceptance must cover additional total operations
+next capability gate is cross-engine Lean acceptance of these fold compositions,
+including generic provider termination and actual provider inventories.
+Leant now includes the prepared recursor runner with an initial failed settings
+receipt. A native Djinn `map` candidate and actual false rejection were observed,
+but the validator's wrong provider-cap label prevented independent replay. Its
+correction passes eighteen Python tests; fresh Lean fold acceptance is pending.
+Expanded Church acceptance must cover additional total operations
 and all nineteen partial cases with explicit supplied defaults. New source and
 oracle controls must compile and run before those cells count as accepted
 behavior.
 
 ## Earlier published baseline and resolved experiments
 
+The implementation-progress wording in this historical section describes the
+experiments that led to the published checkpoint above. Its Haskell and live
+Lean case failures are resolved, and the full Leant boundary suite now passes.
+The historical next-step language below records the earlier plan, not the
+current implementation status.
+
 Djinn's [case-search checkpoint](2026-09-07-recursive-data-cases.md), committed
-in `5fcc4a8b` and corrected in `3ce26cfd`, now passes eight Haskell execution
-scenarios. Leant's working integration of the latter revision also passes all
+in `5fcc4a8b` and corrected in `3ce26cfd`, passed eight Haskell execution
+scenarios. Leant's working integration of the latter revision also passed all
 eight public behavioral queries and independent Lean replay: sixteen empty
 axiom inventories, plus an actually falsified control. This closes the earlier
 `null`/`tailOr` experiment for Djinn. It does not establish cross-engine or
 complete integration acceptance.
 
-The next gate is **Exference parity and isolation between engine modes**.
-At that same dependency revision, Exference misses `tailOr` within 100,000
-steps and times out on the unary tuple-payload case. `both` also times out on
+The next gate at that point was **Exference parity and isolation between engine modes**.
+At that dependency revision, Exference missed `tailOr` within 100,000
+steps and timed out on the unary tuple-payload case. `both` also timed out on
 that payload case despite the accepted Djinn-only implementation. Search
 latency can therefore hide an implementation already reachable in another
-engine. This is now a concrete delivery issue, not a speculative performance
-project. Fix the exposed search cases first; if `both` still delays an accepted
-lane, measure and fix its scheduling separately.
+engine. This made scheduling a concrete delivery issue. The plan was to fix
+the exposed search cases, then measure and correct any remaining Both delay.
 
-The current Exference experiment makes recursive input splitting optional and
-allows finite nonrecursive fields to be inspected while keeping recursive
+The ensuing Exference experiment made recursive input splitting optional and
+allowed finite nonrecursive fields to be inspected while keeping recursive
 descendants opaque. Its focused fixture exposed two evidence gaps: unused
 binders were not represented as compatibility wildcards, and the checker only
-retains a narrow recursive zero/step case returning the scrutinee's own type.
-That latter restriction prevents a checked list-to-Bool graph even when the
-search term is otherwise valid. Extend complete constructor-case evidence
-from the actual declaration inventory, including finite tuple payloads; retain
-exhaustiveness, lexical field scope, and exact graph/compatibility association.
-A compatibility term alone is not acceptance.
-Neither the search experiment nor the failed mixed-engine run is an accepted
-capability. The failed run performed no independent kernel replays.
+retained a narrow recursive zero/step case returning the scrutinee's own type.
+That restriction prevented a checked list-to-Bool graph even when the search
+term was otherwise valid. Declaration-backed complete-case evidence later
+closed the gap while retaining exhaustiveness, lexical field scope, and exact
+graph/compatibility association. The experiment and failed mixed-engine run did
+not themselves establish acceptance; the failed run performed no independent
+kernel replays.
 
 The unused-binder correction is committed separately in `02bfde77`; its strict
 build and all 53 Exference engine tests pass. It emits checked wildcard patterns
 for unused lambda and let binders without relaxing exact erasure equality.
-The broader complete-case graph extension now has passing direct engine tests,
-but remains uncommitted and has no complete cross-engine acceptance. The current
-ordinary-data matrix still fails on two independently typed recursive inputs.
-Search must retain both whole-value forwarding and complete input inspection;
-simply changing their order does not overcome the score charged for all case
-branches. A protected scheduling experiment is in progress. Its work must share
-the existing step, queue, and depth limits. The earlier experimental forwarding
-penalty changed depth accounting and is being replaced, not adopted as a default.
+The broader complete-case graph extension first passed direct engine tests
+while the ordinary-data matrix still failed on two independently typed recursive
+inputs. Search needed both whole-value forwarding and complete input inspection;
+changing their order did not overcome the score charged for all case branches.
+The accepted protected scheduling shares the existing step, queue, and depth
+limits. An earlier experimental forwarding penalty changed depth accounting
+and was discarded.
 
-Leant's full post-integration suite also needs a clean rerun. The first run
+Leant's full post-integration suite also needed a clean rerun. The first run
 had missing fake-Z3 setup and two genuine positive-constructor-bound failures;
 `3ce26cfd` corrects the latter by activating case plans only for recursive
 types in negative positions. A passing focused replay does not replace that
-full-suite gate. Detailed receipts and settings are recorded in Leant's
+full-suite gate. Detailed historical receipts and settings are recorded in Leant's
 companion re-triage and recursive-data acceptance directory.
 
 Djex `6890bb5a8a56902c2baf137581e23c25a376fad0` includes source-graph
@@ -135,10 +162,9 @@ current blocking fixtures.
 
 | Order | Existing goal item | Deliverable | Acceptance and reason for its position |
 | --- | --- | --- | --- |
-| 1 | Priority 2, case stage; priority 4 acceptance | Complete cross-engine Leant integration | Retain the passing sixteen-cell Haskell matrix. Replay all eight operations in Djinn, Exference, and Both with false controls, then pass the full configured Leant suite. Preserve exact complete-case graphs, shared queue/step bounds, and positive-only construction bounds. |
-| 2 | Priority 2, recursor stage; extend priority 4 corpus | Complete Lean acceptance and broaden supplied recursor composition | Retain the accepted Haskell `map`, `append`, and generalized `length` fixture in both engines. Replay supplied folds and tree operations in Lean, including actual termination checks; extend accumulator shapes where concrete programs expose a gap. |
-| 3 | Priority 3 | Contextual providers with explicit dictionary evidence | First exact constrained forwarding and dictionary-independent bodies under lexical givens; then methods, conditional providers, and superclasses. This crosses search, graph, and host-projection boundaries and deserves its own staged acceptance. |
-| 4 | Priority 4, corpus completion | Close the remaining Church behavioral coverage | Cover naturals, options/eithers, folds, conversions, and all 19 supplied-default cases. Start adding these tests during earlier steps; this row is the final coverage gate, not permission to postpone all behavioral work. |
+| 1 | Priority 2, recursor stage; extend priority 4 corpus | Complete Lean acceptance and broaden supplied recursor composition | Retain the accepted Haskell `map`, `append`, and generalized `length` fixture in both engines. Replay supplied folds and tree operations in Lean, including provider-inventory and termination checks; extend accumulator shapes where concrete programs expose a gap. |
+| 2 | Priority 3 | Complete lexical-Given production synthesis, then evidence derivation | Finish, regression-test, and publish the Djinn Given increment, including budget/direct-erasure controls, then integrate it with Lean source metadata/preparation/routing. Cover methods, conditional instances, superclasses, and contextual certificate association. The isolated renderer and bounded pilot tests do not establish production Lean synthesis. |
+| 3 | Priority 4, corpus completion | Close the remaining Church behavioral coverage | Execute the prepared extended total and all-19 supplied-default fixtures: oracle preflight, fresh processes, controlled providers, false controls, exact full-signature replay, hashes, and actual axioms. Add this coverage during the earlier deliveries; fixture preparation alone is not acceptance. |
 
 Leant's bounded simplification milestone is now published in `990b7f3`. Its
 [acceptance report](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-07-bounded-behavioral-simplification.md)
@@ -149,25 +175,37 @@ axiom inventory; quantified simplification proofs use exactly `propext` and
 existing provider-stage timeout; an unchanged focused retry passed. These
 separate receipts do not claim an unfiltered 620-test pass.
 
-The first/best CLI fixture is now accepted and should be retained at subsequent
-integration checkpoints. The first row remains the principal cross-engine
-integration gate. Bounded simplification's live acceptance is complete; retain
+The first/best CLI fixture is accepted and should be retained at subsequent
+integration checkpoints. The full configured Leant suite now passes. The
+ordinary-data matrix and bounded simplification's live
+acceptance are complete at their recorded boundaries; retain
 it as a regression gate while proceeding to recursors. The schedule separates
 delivery size from importance. Dictionary support
 remains a required capability; bounded simplification does not replace it.
 Nor does accepting a recursor milestone complete recursive-data work without
 the documented source-evidence and Lean checking gates.
 
+The earlier full Leant run passed 645/647 tests in 297.72 seconds; its two stale
+expectations concerned typed wildcard authority and the first spelling of a
+Nat-case candidate. The refreshed assertions preserve the semantic case in the
+original 1,024-step/default-12 bounds, while the wildcard fixture keeps its
+128-step bound. Both focused tests pass in 0.41 seconds without increasing
+budgets. Strict build v6, the isolated renderer replay, and the full 647-test
+rerun now pass. The
+[historical failed aggregate](https://github.com/VladimirReshetnikov/Leant/blob/main/test-recursive/receipts/unit-before-fixture-refresh.json)
+remains separate evidence.
+
 ## Implementation choices to make explicit
 
 **Preserve the accepted recursive-data boundary.** Djinn now uses coherent
 opaque datatype views for goals and providers, exact constructor premises,
 and checked one-layer elimination. Keep that source authority and the
-negative-occurrence activation gate. Exference's next acceptance must show that
-a supplied default can remain whole while another recursive argument is
-inspected, and that a finite tuple field is accessible without opening another
-recursive layer. Include aliases, mutual recursion, multiple inputs, tuple
-results, and unchanged positive-only bounds. A bounded case view must retain
+negative-occurrence activation gate. The accepted matrices now show that a
+supplied default can remain whole while another recursive argument is inspected,
+and that a finite tuple field is accessible without opening another recursive
+layer. Retain aliases, multiple inputs, tuple results, and unchanged
+positive-only bounds; broader mutual-recursion coverage still needs its own
+fixtures. A bounded case view must retain
 its incomplete-search status and cannot authorize a non-inhabitation claim.
 
 **Use existing evidence infrastructure for contexts.** The new
@@ -176,6 +214,23 @@ and Exference checker reconstruct direct lexical evidence. Extend search and
 production projection around these checked identities. Carry provider identities
 and lexical givens through the graph and the Lean projection. Test sibling-scope
 leakage, escaped skolems, wrong providers, and unavailable dictionary authority.
+
+Leant's isolated direct renderer has now passed 21 focused tests and independent
+Lean replay of seven exact generated implementations, seven payload observations,
+and two wrong-result controls, with sixteen empty axiom inventories. Its
+[companion report](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-07-synthesis-retriage.md)
+distinguishes this component evidence from production routing. Complete that
+route with versioned full source metadata, exact binder visibility and
+`Prop`/`Type u`/`Sort u` domains, separate class/nominal authority, and rooted
+propagation through the actual graph openings and substitutions. An initial
+`Type 0` subset must reject richer domains explicitly; selected polytypes must
+retain their own source metadata. Preserve rank-N callback structure, but
+initially reject impredicative selections until their resulting Lean universes
+can be checked: `Type 0` binder domains do not put the whole polymorphic type
+in `Type 0`. Missing metadata must not fall back to context erasure or
+replacement instance search. Complete the unpublished Djinn pilot's regression
+and resource controls alongside this work, then methods, instances, superclasses, and contextual
+certificate association.
 
 **Behavior is a continuing acceptance requirement.** Add host execution and
 false controls with each new program family. Keep total and supplied-default
@@ -188,7 +243,7 @@ An unsuccessful proof attempt remains inconclusive.
 | Idea | Disposition | Concrete trigger for promotion |
 | --- | --- | --- |
 | Native Windows Length acquisition | Separate platform milestone after the capability deliveries, or sooner for a concrete Windows Length user task | Implement the complete bounded acquisition, solver execution, and independent replay route; configuration parsing alone is insufficient. |
-| Cross-engine progress and cancellation | Promote the observed Both delay into the case-stage acceptance | Compare the same tuple-payload query in Djinn, Exference, and Both. An expensive lane must not hide an accepted result past the command deadline. First close the Exference search regression; introduce broader scheduling changes only if the delay persists. |
+| Cross-engine progress and cancellation | Retain the accepted request-policy and raw-slot alternation fixes as regressions | Leant now passes the tuple/default cases in all three modes without increasing the recorded bounds. These fixes do not preempt a single engine step. Promote broader scheduling only for a measured remaining latency or cancellation failure. |
 | Other search and checker performance | Instrument now; optimize a demonstrated cost | The Exference supplied-fold `[a] -> a` rejection fixture takes about 147 seconds at 100,000 steps; this is a concrete exhaustion-cost benchmark. Separate cold startup, first accepted result, search work, rendering/checking, and memory before changing defaults. The interpreted/default-deferral contextual failures and native/immediate-pruning successes changed two variables, so they are not a controlled performance comparison. |
 | Failure diagnostics and capability receipts | Include in current deliveries | Keep graph absence, compiler rejection, behavioral falsehood, inconclusive checking, and exhausted search distinct. Retain per-engine results, actual replay status, source revision, settings, exact emitted source, and negative controls; a failed matrix must not obscure the accepted subset or imply unperformed kernel checks. |
 | Semantic provider retrieval | Retain as the next scaling investigation | Show a useful provider excluded by inventory selection in a realistic project; measure retrieval recall as well as latency. Larger inventories alone are not an acceptance criterion. |

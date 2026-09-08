@@ -99,10 +99,15 @@ records live repair under `first`, `best`, and `all` selection, with exact
 displayed-source compiler replay. The ordinary-data matrix now passes eight
 scenarios in each Haskell engine, including tuple fields and independently typed
 recursive inputs. Exference's complete-case graphs and protected queues preserve
-the caller's total step and queue bounds. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
-keeps complete Leant integration, broader recursion, complete contextual-provider support,
-and broader Church behavior explicitly open. Unused lambda and let binders now retain source graphs as
-checked wildcards, preserving exact compatibility erasure.
+the caller's total step and queue bounds. Leant now passes these eight scenarios
+in Djinn, Exference, and Both: 24 exact displayed terms pass independent kernel
+replay, with 48 empty axiom inventories and three actual false controls.
+Its full configured 647-test integration run passes in 343.79 seconds, with
+unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
+retain source graphs as checked wildcards, preserving exact compatibility
+erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
+places Lean supplied-fold acceptance, production contextual evidence, and the
+broader Church behavioral corpus next.
 
 The [supplied-fold composition report](docs/reports/2026-09-07-supplied-recursor-composition.md)
 describes synthesis of `map`, order-sensitive `append`, and generalized `length`
@@ -118,8 +123,17 @@ qualified Haskell rendering. Dictionary identities retain their introduction
 and ordered source slot through nested rank-N scopes. The shared/private suites
 and full-signature Haskell renderer replays pass. Live synthesis also covers five
 Exference roles and three Djinn roles, with scoped leakage controls and GHC
-execution. Methods, instance/superclass derivations, complete Djinn constrained
-search, and production Lean projection remain separate integration requirements.
+execution. Leant's isolated direct dictionary renderer passes 21 focused tests,
+seven full-signature Lean replays, and sixteen empty implementation/proof axiom
+inventories, including distinct equal-predicate dictionaries. Ordinary `:synth`
+still needs exact source metadata and production routing. Methods,
+instance/superclass derivations, and complete Djinn constrained search remain
+open. An unpublished conditional-Given pilot now passes strict library/private/
+integration builds, 81 private tests including 26 new kind/proof controls, and
+the unchanged 14-case Given target in 26.09 seconds. This adds bounded evidence
+for forced Djinn local/global uses and sibling-scope rejection; broader
+regressions, budget controls, and direct-erasure controls remain pending. The
+pilot is not part of published `922c5558` or Leant's pinned integration.
 
 Leant also adds [bounded simplification of behavioral assertions](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-07-bounded-behavioral-simplification.md)
 after decision checks of the assertion and its negation. The three-engine live
@@ -544,10 +558,12 @@ and worked `:djinn`/`:exference`/`:compare` examples. The
 signatures and compiler-checks the generated terms under its documented
 environment and partiality assumptions.
 
-The [next-priorities review](docs/reports/2026-09-06-synthesis-next-priorities.md)
-separates the accepted streaming milestone from proposed Haskell
-elaboration, recursive-data, contextual-provider, and behavioral-specification
-improvements.
+The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) records
+accepted elaboration, case-analysis, and Haskell fold milestones, then orders
+Lean fold acceptance, production dictionary evidence, and broader behavior.
+The [original roadmap](docs/reports/2026-09-06-synthesis-next-priorities.md)
+retains the full completion requirements; prepared runners and isolated
+renderers do not establish production synthesis coverage.
 
 `:type EXPRESSION` (or `:t EXPRESSION`) is a separate, non-evaluating
 inspection command. It infers against term signatures in the current loaded

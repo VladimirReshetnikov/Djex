@@ -6,9 +6,19 @@ priorities is declared complete by this checkpoint. The earlier streaming
 acceptance receipt belongs to its recorded source revisions.
 
 The [current re-triage](2026-09-07-synthesis-retriage.md) schedules the remaining
-deliveries. It preserves every completion requirement below while moving the
-bounded Lean simplification stage ahead of the larger contextual-evidence work
-and making corpus expansion part of each capability's acceptance.
+deliveries. It preserves every completion requirement below. Bounded Lean
+simplification and the eight-case ordinary-data matrix now have live acceptance;
+the next gates are Lean supplied-fold composition, production contextual
+evidence, and broader Church behavior. Corpus expansion remains part of each
+capability's acceptance.
+
+Leant's [ordinary-data receipt](https://github.com/VladimirReshetnikov/Leant/blob/main/test-recursive/receipts/all-engines.json)
+records all eight cases under Djinn, Exference, and Both: 24 exact displayed
+implementations pass independent Lean replay at their complete signatures,
+with 48 empty implementation/proof axiom inventories and three actual false
+controls. This closes the earlier cross-engine case failures described in the
+historical checkpoints below. It does not establish recursive-call synthesis
+or production use of the separate lexical-Given renderer.
 
 ## Completion requirements
 
@@ -217,9 +227,10 @@ full boundary receipt separately from its passing unchanged focused retry.
 
 ## Remaining work
 
-- Close priority 2's cross-engine kernel and full Leant boundary acceptance,
-  retaining the accepted sixteen-cell Haskell matrix; then
-  implement the separate recursor/decreasing-call stage.
+- Retain priority 2's accepted sixteen-cell Haskell matrix, 24-cell Lean
+  replay, and complete 647-test Leant integration. Replay the accepted
+  supplied-fold map/append/generalized-length baseline in Lean, then broaden
+  tree folds, accumulator shapes, and structurally decreasing programs.
 - Finish priority 1's remaining selection and negative evidence acceptance;
   integrate and validate any further shared changes in Leant.
 - Complete priority 3's live direct-Given uses and Lean projection, then methods,

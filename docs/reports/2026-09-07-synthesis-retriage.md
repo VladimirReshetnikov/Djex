@@ -16,7 +16,7 @@ is complete. Priorities 2–4 retain their original requirements.
 
 | Order | Delivery | Required acceptance |
 | --- | --- | --- |
-| 1 | Reuse the exact empty user environment for native verification | Apply the request-correlated diagnosis without borrowing synthesis helpers or changing the real user state. Require the original append/length positive and False workloads at unchanged bounds, exact full-type kernel replay, empty-session reuse and namespace isolation, reset invalidation, and backend retirement/reconstruction. Initial setup and active-query recovery must retain their distinct deadline boundaries. |
+| 1 | Broaden supplied-fold acceptance after the native verification repair | Exact empty-user-root reuse now passes native Djinn append/length, lifecycle isolation/reset/recovery and the complete 686-test suite. Continue the remaining engine and supplied tree-fold/accumulator cases with exact provider inventories, full-signature behavior and termination-checked replay. Keep existing bounds and failure classifications. |
 | 2 | Execute broader Church behavior independently | Run additional totals and all 19 explicit-default counterparts in both Haskell engines and all three Lean modes. Require controlled providers, actual False controls and independent exact full-signature replay. Record success, timeout and inconclusive outcomes per cell. These cells need not wait for native fold repair. |
 | 3 | Admit one described global contextual provider | Extend the existing `Type 0` route with one fully described global provider while retaining the current non-overlap guard. Preserve complete source metadata, exact owned graph/renderer evidence and payload-sensitive replay; do not broaden instances or universes as part of this increment. |
 | 4 | Preserve selected dictionary identity before relaxing overlap guards | Carry the selected introduction occurrence and ordered slot through lowering and reconstruction. Require a forced equal-predicate outer/inner fixture whose faithful scoped capture preserves distinct payload behavior in Haskell and Lean replay. Graph IDs or successful compilation alone are insufficient. Methods, superclass evidence and further provider schemes remain separate extensions. |
@@ -80,9 +80,20 @@ times out after 5.008023501 seconds, while control request 15 completes in
 passes in 24.85 seconds with exact independent kernel replay; its actual False
 control passes in 10.19 seconds. The latter trace retains 128 requests and
 explicitly omits 187, so its diagnostic capture is incomplete even though the
-behavioral control passes. Production root reuse and its lifecycle checks are
-the next acceptance gate. Physical file rereads and a transport defect are not
-established by this evidence.
+behavioral control passes. Physical file rereads and a transport defect are
+not established by this diagnostic evidence.
+
+The subsequent [production reuse repair](https://github.com/VladimirReshetnikov/Leant/blob/f35c243a9a2cf26d6c5ffe8c5e16ba4fba523b2e/docs/reports/2026-09-07-empty-environment-reuse.md) now passes native Djinn append
+and length at their original bounds, exact kernel replay, and actual False
+controls. Append's command files are byte-identical to the failed baseline.
+Four lifecycle sessions cover 11 queries, four accepted replays and ten empty
+axiom inventories, including actual empty-session backend retirement. The
+strict build and complete 686-test suite pass in 335.32 seconds. Both native
+positive traces are complete with no timeout. Each native False control passes
+with 87 falsifications and zero inconclusive checks while its diagnostic trace
+explicitly omits 184 records at the unchanged cap. The [acceptance receipt](https://github.com/VladimirReshetnikov/Leant/blob/f35c243a9a2cf26d6c5ffe8c5e16ba4fba523b2e/test-recursive/receipts/empty-user-environment.json)
+keeps these boundaries separate; remaining engine, tree-fold and accumulator
+acceptance follows this specific reliability repair.
 
 Both partial Church oracle preflights pass: 20 Lean files with 491 exact
 inventories (487 empty and four named observer/proof allowances), and 63 Haskell
@@ -399,7 +410,7 @@ An unsuccessful proof attempt remains inconclusive.
 
 | Idea | Disposition | Concrete trigger for promotion |
 | --- | --- | --- |
-| Exact accepted-candidate provenance and reproducible replay | Complete 39-cell matrix and 680-test suite accepted | Retain own-Variant graph/renderer/engine observations, non-forcing diagnostics and direct kernel pinning. Retain the accepted bounded request capture and its whole-record omission accounting. Use the matched empty-environment diagnosis for the next fix; defer a general tracing framework. |
+| Exact accepted-candidate provenance and reproducible replay | Complete 39-cell matrix and 680-test suite accepted | Retain own-Variant graph/renderer/engine observations, non-forcing diagnostics and direct kernel pinning. Retain the accepted bounded request capture and its whole-record omission accounting. Keep the accepted empty-environment repair and lifecycle controls as regressions; defer a general tracing framework. |
 | Routing-test maintenance | Incremental when a boundary is touched | Replace brittle source-text counts with executable routing or boundary controls where practical, preserving coverage. Do not turn this into a broad cleanup milestone. |
 | Selected dictionary occurrence and complete context metadata | Next narrow global-provider increment under the accepted guard; exact selection before relaxing overlap guards | Admit one fully described global contextual provider under the existing `Type 0` non-overlap guard; the current provider map is empty and rejects every typed global. Separately demonstrate differing outer/inner payload behavior under faithful scoped capture in Haskell and Lean. Graph identities or successful GHC compilation alone do not establish selected dictionary ownership. Extend further schemes or evidence derivations individually. |
 | Tree folds and accumulator programs | Next recursion extension after live verification is reliable | Select concrete missing corpus programs, retaining exact recursor inventories, full-signature behavior and termination checking. |

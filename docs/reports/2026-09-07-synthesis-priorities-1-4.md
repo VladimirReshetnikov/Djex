@@ -24,20 +24,22 @@ not that priority's broader contextual-evidence scope. Methods, superclass
 search, selected equal-predicate dictionaries and global contextual providers
 remain open. Priority 1's supported-fragment Haskell elaboration, including
 same-deadline failure-sample retention, is complete. Priorities 2–4 continue.
-Next are exact empty-user-environment reuse for native verification,
+Next are broader supplied-fold and tree acceptance after the native verification repair,
 broader Church behavior including all 19 explicit defaults, and one fully
 described global `Type 0` provider under the current guard. Exact dictionary
 selection remains required before overlap restrictions are relaxed.
 
-The [new Leant diagnosis](https://github.com/VladimirReshetnikov/Leant/blob/72d967e57b7d044320b574151f912e88a6ff5a3e/docs/reports/2026-09-07-empty-environment-diagnosis.md) supplies an exact request comparison:
-the same candidate command times out after 5.008 seconds with absent `env` and
-completes in 22.336 ms with the materialized empty root. The matched append
-control passes full-type replay and actual False rejection, while production
-root reuse still requires its own acceptance. The [diagnostic receipt](https://github.com/VladimirReshetnikov/Leant/blob/72d967e57b7d044320b574151f912e88a6ff5a3e/test-recursive/receipts/request-correlation.json)
-records the strict build, 14 focused controls and all 686 unit tests passing,
-the complete failed baseline capture, and the passing False control's explicit
-trace omissions. This advances diagnosis within priority 2; its original
-recursor, tree and accumulator requirements remain unchanged.
+The [accepted Leant environment repair](https://github.com/VladimirReshetnikov/Leant/blob/f35c243a9a2cf26d6c5ffe8c5e16ba4fba523b2e/docs/reports/2026-09-07-empty-environment-reuse.md) now reuses the exact empty user
+world for temporary behavioral checks. Original native Djinn append and length
+queries pass unchanged bounds, actual False controls and independent full-type
+replay. Four lifecycle sessions cover 11 queries, four accepted replays and ten
+empty axiom inventories, including namespace isolation, real user state, reset
+and backend retirement. The [receipt](https://github.com/VladimirReshetnikov/Leant/blob/f35c243a9a2cf26d6c5ffe8c5e16ba4fba523b2e/test-recursive/receipts/empty-user-environment.json) records a strict build and
+all 686 unit tests passing in 335.32 seconds. Native positive traces are complete;
+the two long False traces each explicitly omit 184 payload records at the
+unchanged row cap while their behavioral controls pass. This closes the specific
+verification repair within priority 2; remaining engine coverage, supplied
+recursors, trees and accumulators retain their original requirements.
 
 Leant's [ordinary-data receipt](https://github.com/VladimirReshetnikov/Leant/blob/main/test-recursive/receipts/all-engines.json)
 records all eight cases under Djinn, Exference, and Both: 24 exact displayed

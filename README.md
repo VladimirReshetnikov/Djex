@@ -110,7 +110,7 @@ marks priority 1's supported-fragment Haskell elaboration complete: all 101
 CLI tests pass, including first/best/all repair selection, exact GHC replay,
 and retention of the original failed-candidate sample when its elaboration
 retry times out under the same deadline. Priorities 2–4 remain open. Next are
-reuse of the exact empty user environment for native Lean verification,
+broader supplied-fold and tree acceptance after the native Lean verification repair,
 broader Church behavior including all 19 explicit-default cases, and one fully
 described global contextual provider under the existing `Type 0` non-overlap guard.
 Bounded Lean contexts now pass their complete 39-cell matrix and 680-test suite. Exact
@@ -183,16 +183,16 @@ Bounded incremental collection resolves the four ordinary-query timeouts;
 earlier failures and fixture corrections remain in the linked receipts.
 This does not close original priority 3's broader contextual-evidence scope.
 
-Leant's [request-correlated diagnosis](https://github.com/VladimirReshetnikov/Leant/blob/72d967e57b7d044320b574151f912e88a6ff5a3e/docs/reports/2026-09-07-empty-environment-diagnosis.md) identifies repeated
-initialization of an empty user environment as the first native-verification
-fix to validate. An identical positive-decision command timed out after 5.008
-seconds without an environment id and completed in 22.336 ms with a materialized
-empty root; the decoded payload differed only by that id. The matched append
-control passes exact kernel replay and its actual False control. Production
-root reuse remains pending. The [diagnostic receipt](https://github.com/VladimirReshetnikov/Leant/blob/72d967e57b7d044320b574151f912e88a6ff5a3e/test-recursive/receipts/request-correlation.json) records a strict
-build, all 14 focused controls and the complete 686-test suite passing, while
-preserving the failed baseline and the False-control trace's 128-record cap.
-This evidence does not establish complete recursive synthesis.
+Leant's [exact empty-user-environment reuse](https://github.com/VladimirReshetnikov/Leant/blob/f35c243a9a2cf26d6c5ffe8c5e16ba4fba523b2e/docs/reports/2026-09-07-empty-environment-reuse.md) now makes native append
+and generalized length pass their original public queries, bounds, actual False
+controls and independent full-type Lean replay. Four lifecycle sessions establish
+reuse, namespace isolation, real user-state precedence, reset and backend death:
+11 queries, four accepted replays and ten empty axiom inventories. The strict
+build and complete 686-test suite pass in 335.32 seconds. The [production receipt](https://github.com/VladimirReshetnikov/Leant/blob/f35c243a9a2cf26d6c5ffe8c5e16ba4fba523b2e/test-recursive/receipts/empty-user-environment.json)
+retains complete lifecycle and native positive traces, while recording the
+long native False traces' 184 omitted payload records at the unchanged row cap.
+Broader supplied recursors, engine coverage and tree/accumulator programs remain
+in progress.
 
 Leant also adds [bounded simplification of behavioral assertions](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-07-bounded-behavioral-simplification.md)
 after decision checks of the assertion and its negation. The three-engine live

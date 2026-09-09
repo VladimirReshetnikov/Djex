@@ -37,8 +37,11 @@ This closes a bounded integration milestone within original priority 3.
 The later [global-method integration](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-global-contextual-providers.md)
 accepts described global `Type 0` methods at Djex `4a4ed0fc`, with 701 native
 unit tests and fresh context/method replay. [Loaded Haskell schemes](2026-09-08-loaded-contextual-providers.md)
-also pass explicit-forall behavioral queries in both engines. Implicit-root
-scoping, ordinary contextual presentation, derived method schemes, mixed Lean
+also pass explicit-forall behavioral queries in both engines. The
+[ordinary contextual REPL delivery](2026-09-08-ordinary-contextual-output.md) now
+passes 36 public queries and 330 tests across four complete affected suites at
+its documented bounds. Implicit-root scoping, one-shot contextual commands,
+typed list rendering, derived method schemes, mixed Lean
 inventories, selected equal-predicate dictionaries and richer evidence remain
 open. Priority 1's original supported-fragment elaboration scope is complete.
 

@@ -38,6 +38,9 @@ module Language.Haskell.Djex.Command
   , executeExferenceCommandInScope
   , prepareDjinnPresentation
   , prepareExferencePresentation
+  , prepareTypedDjinnPresentation
+  , prepareTypedExferencePresentation
+  , presentTypedExference
   , prepareDiagnosticFailure
   , presentDjinn
   , presentAssessedDjinn
@@ -438,8 +441,32 @@ prepareDjinnPresentation
   -> FieldSelectors
   -> DjinnResult
   -> CommandOutput
-prepareDjinnPresentation options fieldSelectors result = case
-    traverse (renderDjinn options) candidates of
+prepareDjinnPresentation options fieldSelectors = prepareDjinnPresentationWith
+  options fieldSelectors id
+  (renderDjinn options . fmap (projectFieldSelectorsWithoutEta fieldSelectors))
+
+-- | Keep each candidate's typed evidence through the ordinary selection policy.
+-- The renderer receives the original selected handle, not a projected clause
+-- with an unrelated graph attached. Selector rewriting affects ranking only.
+prepareTypedDjinnPresentation
+  :: PresentationOptions
+  -> FieldSelectors
+  -> (DjinnTypedCandidate -> Either String String)
+  -> DjinnTypedResult
+  -> CommandOutput
+prepareTypedDjinnPresentation options fieldSelectors =
+  prepareDjinnPresentationWith options fieldSelectors typedCandidateCompatibility
+
+prepareDjinnPresentationWith
+  :: Show failure
+  => PresentationOptions
+  -> FieldSelectors
+  -> (candidate -> DjinnCandidate)
+  -> (candidate -> Either failure String)
+  -> QueryResult metadata candidate
+  -> CommandOutput
+prepareDjinnPresentationWith options fieldSelectors compatibility render result = case
+    traverse render candidates of
   Left failure -> prepareRenderFailure "DJEX_DJINN_RENDER" failure
   Right rendered -> successfulPresentation
     (candidateOutputEvents rendered)
@@ -450,16 +477,14 @@ prepareDjinnPresentation options fieldSelectors result = case
   evidence = resultEvidence result
   selection = selectQueryResults
     (presentationSelection options)
-    (\candidate ->
+    (\owned -> let candidate = compatibility owned in
       ( if presentationRanking options == LegacyCandidateRanking
           then Just $ candidateDetails candidate else Nothing
       , presentationQualityCost options
           $ projectFieldSelectorsWithoutEta fieldSelectors $ candidateOutput candidate ))
     (const True)
     [result]
-  candidates = map
-    (fmap $ projectFieldSelectorsWithoutEta fieldSelectors)
-    $ selectionCandidates selection
+  candidates = selectionCandidates selection
   progress = selectionProgress selection
 
 -- | Select, render, and report Exference's lazy result sequence.
@@ -534,8 +559,58 @@ prepareExferencePresentation
   -> FieldSelectors
   -> [ExferenceResult]
   -> CommandOutput
-prepareExferencePresentation options fieldSelectors results =
-  prepareExferenceSelection options fieldSelectors selection
+prepareExferencePresentation options fieldSelectors =
+  prepareExferenceSelection options fieldSelectors
+    . selectExferencePresentation options fieldSelectors id
+
+-- | Ordinary presentation with the same candidate pool and selection policy,
+-- retaining the selected candidate's own graph for the supplied renderer.
+prepareTypedExferencePresentation
+  :: PresentationOptions
+  -> FieldSelectors
+  -> (ExferenceTypedCandidate -> Either String String)
+  -> [ExferenceTypedResult]
+  -> CommandOutput
+prepareTypedExferencePresentation options fieldSelectors render =
+  prepareExferenceSelectionWith options render
+    . selectExferencePresentation options fieldSelectors typedCandidateCompatibility
+
+-- | Legacy all-selection still emits one candidate at a time. A rendering
+-- failure ends this stream; it cannot refill the search or borrow evidence.
+presentTypedExference
+  :: PresentationOptions
+  -> FieldSelectors
+  -> (ExferenceTypedCandidate -> Either String String)
+  -> [ExferenceTypedResult]
+  -> IO ExitCode
+presentTypedExference options _ render results
+  | presentationRanking options == LegacyCandidateRanking
+  , presentationSelection options == SelectAll = do
+      outcome <- runExceptT $ foldAllQueryResultsM (const True) printOne False results
+      case outcome of
+        Left failure -> renderFailure "DJEX_EXF_RENDER" failure
+        Right (progress, foundAny) -> do
+          unless foundAny $ reportNoExferenceResult progress
+          reportTruncation progress
+          pure ExitSuccess
+ where
+  printOne printed candidate = do
+    rendered <- ExceptT $ pure $ render candidate
+    liftIO $ do
+      when printed $ putStrLn "\n-- or\n"
+      putStrLn rendered
+      hFlush stdout
+    pure True
+presentTypedExference options fieldSelectors render results = replayCommandOutput
+  $ prepareTypedExferencePresentation options fieldSelectors render results
+
+selectExferencePresentation
+  :: PresentationOptions
+  -> FieldSelectors
+  -> (candidate -> ExferenceCandidate)
+  -> [QueryResult metadata candidate]
+  -> Selection candidate
+selectExferencePresentation options fieldSelectors compatibility results = selection
  where
   -- When record selectors are in scope, a first-candidate request looks a
   -- few results ahead and shows the one whose selector-normalized spelling
@@ -547,17 +622,18 @@ prepareExferencePresentation options fieldSelectors results =
       , mode == SelectAll -> selectQualityQueryResults
           (presentationQualityWindow options) (presentationRanking options)
           (presentationProviderCost options)
-          (functionClauseExpression . projectFieldSelectors fieldSelectors . candidateOutput)
+          (functionClauseExpression . projectFieldSelectors fieldSelectors
+            . candidateOutput . compatibility)
           (const True) results
     SelectFirst
       | not $ Map.null fieldSelectors -> selectQueryResults
           (SelectBestLookahead simplificationLookahead)
           (presentationSelectorCost options
-            . projectFieldSelectors fieldSelectors . candidateOutput)
+            . projectFieldSelectors fieldSelectors . candidateOutput . compatibility)
           (const True)
           results
     mode -> selectQueryResults mode
-      (presentationExferenceRank options fieldSelectors)
+      (presentationExferenceRank options fieldSelectors . compatibility)
       (const True)
       results
 
@@ -590,8 +666,16 @@ prepareExferenceSelection
   -> FieldSelectors
   -> Selection ExferenceCandidate
   -> CommandOutput
-prepareExferenceSelection options fieldSelectors selection = case traverse
-    (renderExferenceBlock options) candidates of
+prepareExferenceSelection options fieldSelectors = prepareExferenceSelectionWith options
+  (renderExferenceBlock options . fmap (projectFieldSelectors fieldSelectors))
+
+prepareExferenceSelectionWith
+  :: Show failure
+  => PresentationOptions
+  -> (candidate -> Either failure String)
+  -> Selection candidate
+  -> CommandOutput
+prepareExferenceSelectionWith options render selection = case traverse render candidates of
   Left failure -> prepareRenderFailure "DJEX_EXF_RENDER" failure
   Right rendered -> successfulPresentation
     (candidateOutputEvents rendered)
@@ -602,7 +686,7 @@ prepareExferenceSelection options fieldSelectors selection = case traverse
   picked = case presentationSelection options of
     SelectFirst -> take 1 $ selectionCandidates selection
     _ -> selectionCandidates selection
-  candidates = map (fmap $ projectFieldSelectors fieldSelectors) picked
+  candidates = picked
   progress = selectionProgress selection
 
 simplificationLookahead :: Int

@@ -32,13 +32,14 @@ import System.Info (os)
 import System.Exit (ExitCode (..))
 import System.IO (hClose, openTempFile)
 import System.Process
-  ( CreateProcess (cwd, env)
+  ( CreateProcess (cwd, env, use_process_jobs)
   , callProcess
   , proc
   , readCreateProcessWithExitCode
   , readProcessWithExitCode
   )
 import System.Timeout (timeout)
+import Text.Read (readMaybe)
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit
   ( Assertion
@@ -206,6 +207,12 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplBehavioralScope
   , testCase "REPL synthesizes loaded constraint-only providers with exact replay"
       testReplLoadedConstraintOnlyProvider
+  , testGroup "ordinary contextual presentation retains typed choices"
+      [ testCase (backend ++ " " ++ selection) $
+          testReplOrdinaryConstraintOnlyProvider backend selection
+      | backend <- ["djinn", "exference", "both"]
+      , selection <- ["first", "best", "all"]
+      ]
   , testCase "REPL checks parenthesized forall signatures with exact replay"
       testReplParenthesizedForallBehavior
   , testCase "Exference composes both Church branches within the original window"
@@ -704,8 +711,8 @@ testReplTimedParallelSource = do
         , "      (evaluate $ checkParsedDjinn parsed)"
         , "      (evaluate $ checkParsedExference parsed)"
         , "      (monotonicParallelDeadlineAfterSeconds seconds)"
-        , "      (pure . prepareCheckedDjinn)"
-        , "      (pure . prepareCheckedExference session)"
+        , "      (pure . prepareCheckedDjinn parsed)"
+        , "      (pure . prepareCheckedExference session parsed)"
         , "      (replayTimedBackend DjinnBackend seconds)"
         , "      (replayTimedBackend ExferenceBackend seconds)"
         , ""
@@ -3897,9 +3904,8 @@ testReplBehavioralScope = withTemporaryEnvironment
 
 -- Loaded contextual providers must retain their complete source scheme and
 -- synthesize the original ambiguous signature using its lexical dictionary.
-testReplLoadedConstraintOnlyProvider :: Assertion
-testReplLoadedConstraintOnlyProvider = withTemporaryEnvironment
-  [("Methods.hs", unlines
+constraintOnlyMethodSource :: String
+constraintOnlyMethodSource = unlines
     [ "{-# LANGUAGE RankNTypes, ScopedTypeVariables, TypeApplications, AllowAmbiguousTypes, NoPolyKinds #-}"
     , "module Methods (Token, C, method, observe) where"
     , "data Token = Token Int"
@@ -3910,7 +3916,12 @@ testReplLoadedConstraintOnlyProvider = withTemporaryEnvironment
     , "method = Token (payload @a)"
     , "observe :: Token -> Int"
     , "observe (Token n) = n"
-    ])] $ \directory -> forM_ ["djinn", "exference"] $ \backend -> do
+    ]
+
+testReplLoadedConstraintOnlyProvider :: Assertion
+testReplLoadedConstraintOnlyProvider = withTemporaryEnvironment
+  [("Methods.hs", constraintOnlyMethodSource)] $ \directory ->
+    forM_ ["djinn", "exference"] $ \backend -> do
       (exitCode, output, errors) <- runRepl directory
         [ ":backend " ++ backend, ":module Methods", ":set select first"
         , ":set djinn-axioms on"
@@ -3952,6 +3963,67 @@ testReplLoadedConstraintOnlyProvider = withTemporaryEnvironment
         case replay of
           Just (ExitSuccess, "(37,91)\n", _) -> pure ()
           _ -> fail $ "exact loaded method failed independent full-type replay: " ++ show replay
+
+-- These are ordinary queries: no predicate worker can repair or filter their
+-- output. Replay every displayed candidate verbatim under its full source
+-- signature, distinguishing the Int and Bool dictionary payloads. Both
+-- includes the prepared parallel route; legacy all retains serial streaming.
+testReplOrdinaryConstraintOnlyProvider :: String -> String -> Assertion
+testReplOrdinaryConstraintOnlyProvider backend selection = withTemporaryEnvironment
+  [("Methods.hs", constraintOnlyMethodSource)] $ \directory ->
+    forM_ [False, True] $ \nested ->
+      forM_ ["definition", "expression"] $ \mode -> do
+        let signature = "forall a. C a => " ++
+              (if nested then "(forall b. b -> b) -> " else "") ++ "Token"
+            apply ty = "observe (ordinaryMethod @" ++ ty ++
+              (if nested then " (\\x -> x)" else "") ++ ")"
+        (exitCode, output, errors) <- runRepl directory
+          [ ":backend " ++ backend, ":module Methods", ":set select " ++ selection
+          , ":set ranking " ++ if selection == "all" then "legacy" else "balanced"
+          , ":set jobs 2", ":set target ordinaryMethod"
+          , ":set djinn-axioms on", ":set render " ++ mode, ":set allow-unused on"
+          , ":set quality-window 4", ":set candidate-limit 4"
+          -- Best retains every tied candidate. Keep this presentation fixture
+          -- bounded while replaying every displayed alternative; a large
+          -- recursive search prefix is covered by the construction fixtures.
+          , ":set choice-budget 20000", ":set max-steps 256"
+          , ":synth " ++ signature
+          ]
+        assertEqual (backend ++ " ordinary contextual REPL exit") ExitSuccess exitCode
+        assertBool ("ordinary query entered the behavioral worker: " ++ errors) $
+          not $ "DJEX_REPL_BEHAVIORAL" `isInfixOf` errors
+        let candidateLines = filter
+              ((if mode == "definition" then "ordinaryMethod =" else "(") `isPrefixOf`)
+            displayed = candidateLines $ lines output
+        assertBool ("no ordinary contextual output: " ++ output ++ errors) $ not $ null displayed
+        when (backend == "both") $ forM_ ["-- Djinn", "-- Exference"] $ \label -> do
+          let section = takeWhile (`notElem` ["-- Djinn", "-- Exference"])
+                $ drop 1 $ dropWhile (/= label) $ lines output
+          assertBool ("combined query lost " ++ label ++ " output: " ++ output ++ errors) $
+            not $ null $ candidateLines section
+        let checks = zip [0 :: Int ..] displayed
+            checkName index = "check" ++ show index
+            checkDefinition (index, source) =
+              [ checkName index ++ " :: (Int, Int)"
+              , checkName index ++ " = let { ordinaryMethod :: " ++ signature
+                  ++ "; " ++ (if mode == "definition" then source else "ordinaryMethod = " ++ source)
+                  ++ " } in (" ++ apply "Int" ++ ", " ++ apply "Bool" ++ ")"
+              ]
+        withTemporaryEnvironment [("Main.hs", unlines $
+            [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications, AllowAmbiguousTypes #-}"
+            , "module Main where", "import Methods"
+            ] ++ concatMap checkDefinition checks ++
+            [ "main :: IO ()"
+            , "main = print [" ++ intercalate ", " (map (checkName . fst) checks) ++ "]"
+            ])] $ \replayDirectory -> do
+          replay <- timeout 30000000 $ readCreateProcessWithExitCode
+            ((proc "runghc" ["-i" ++ directory, replayDirectory </> "Main.hs"])
+              {use_process_jobs = True}) ""
+          case replay of
+            Just (ExitSuccess, observed, _) -> assertEqual
+              ("exact ordinary contextual replay changed a payload: " ++ output)
+              (Just $ replicate (length displayed) (37 :: Int, 91 :: Int)) (readMaybe observed)
+            _ -> fail $ "ordinary contextual output failed original-signature replay: " ++ show replay
 
 testReplParenthesizedForallBehavior :: Assertion
 testReplParenthesizedForallBehavior = withTemporaryEnvironment [] $ \directory ->

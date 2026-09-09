@@ -1,0 +1,420 @@
+{
+  "status": "accepted_bounded_ordinary_contextual_repl_output",
+  "base_commit": "418e0cb360520f24d1b4d8bf44ce7155d1b8f41d",
+  "source_hashes": {
+    "src/Language/Haskell/Djex/Command.hs": "438d1f964fddcf7430c5f2df94f00c23e8914eceefae16c52f0acdd90a47b5ac",
+    "src/Language/Haskell/Djex/REPL.hs": "978f660942e0b5eea0ca8edbd8ed36a79da7b349943704467407d2c1a82751e3",
+    "test-cli/Spec.hs": "135c0ef78decb799b2a1bab074bc675775917cf814ab17cb27d8fd133ed759a7"
+  },
+  "focused": {
+    "cases": 9,
+    "public_queries": 36,
+    "max_steps": 256,
+    "choice_budget": 20000,
+    "engines": [
+      "djinn",
+      "exference",
+      "both"
+    ],
+    "selection": [
+      "first",
+      "best",
+      "all"
+    ],
+    "render": [
+      "definition",
+      "expression"
+    ],
+    "signatures": [
+      "forall a. C a => Token",
+      "forall a. C a => (forall b. b -> b) -> Token"
+    ],
+    "payloads": {
+      "Int": 37,
+      "Bool": 91
+    },
+    "status": "passed",
+    "seconds": 50.86
+  },
+  "regressions": {
+    "suites": [
+      {
+        "suite": "djex-tests",
+        "passed_count": 152,
+        "seconds": 231.08
+      },
+      {
+        "suite": "djex-api-tests",
+        "passed_count": 38,
+        "seconds": 0.08
+      },
+      {
+        "suite": "djex-parallel-tests",
+        "passed_count": 27,
+        "seconds": 0.01
+      },
+      {
+        "suite": "djex-cli-tests",
+        "passed_count": 113,
+        "seconds": 198.87
+      }
+    ],
+    "tests": 330,
+    "qualification": "Three complete suites passed in the original run; the complete 113-test CLI suite passed after correcting two stale source-assertion callback lines. Production source is identical across those runs."
+  },
+  "prior_attempts": {
+    "baseline_20000": "Four confirmed GHC failures followed by a compiler replay stall and the 1200-second outer deadline.",
+    "rebuilt_20000": "Seven of nine cases passed; Exference best and Both best reached their 180-second case deadlines.",
+    "baseline_256": "All nine test cases failed. Some legacy all-output failures are fixture line-extraction parse errors; they do not establish compiler rejection of the complete legacy output.",
+    "duplicate_diagnostic": "The preserved baseline best compiler input contains 7475 identical compatibility expressions. This does not establish equal typed evidence."
+  },
+  "boundaries": [
+    "The test-only search bound was reduced from 20000 to 256; production limits, candidate ordering and tie retention are unchanged.",
+    "This milestone establishes ordinary explicit-forall contextual REPL output; implicit roots, one-shot contextual commands and typed list rendering remain separate work.",
+    "No native dependency update or native integration acceptance is claimed.",
+    "The full 13 extended and 19 explicit-default operations across all five language/engine combinations remain required."
+  ],
+  "archive": {
+    "path": "ordinary-contextual-output.zip",
+    "sha256": "87e590fa13751842168f9bb7b142f88499f74bec1f792a0b7a5447d7091686fc",
+    "bytes": 338153,
+    "artifacts": 67
+  },
+  "artifacts": [
+    {
+      "path": "ordinary-context-cli-final-v1/driver.json",
+      "sha256": "2b4d7171578e279df1ae7fd5e11d6d8cbcee31cfce2e95821afc2b803a34b67f",
+      "bytes": 324
+    },
+    {
+      "path": "ordinary-context-cli-final-v1/regression/djex-cli-tests-inventory.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-cli-final-v1/regression/djex-cli-tests-inventory.stdout.txt",
+      "sha256": "37510081939e0a53f547d2c0418aac40776625cac32979e2f62ad541ba599b38",
+      "bytes": 8707
+    },
+    {
+      "path": "ordinary-context-cli-final-v1/regression/djex-cli-tests.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-cli-final-v1/regression/djex-cli-tests.stdout.txt",
+      "sha256": "0d1e6ebf749f8526e4c81c0532c6fbe57f8b16779a9422d8a5c19bfb0b9ae685",
+      "bytes": 10281
+    },
+    {
+      "path": "ordinary-context-cli-final-v1/regression/processes.json",
+      "sha256": "da3b8dfde47447a39ed1c75c2cf817ab4781fff534530aba3922fe2741e67aea",
+      "bytes": 2159
+    },
+    {
+      "path": "ordinary-context-cli-final-v1/regression/results.json",
+      "sha256": "b23c12e493a2ccbe5efc6b50d004fed98682a434d2af88a6094ea351a9708701",
+      "bytes": 102084
+    },
+    {
+      "path": "ordinary-context-cli-final-v1/strict-build.log",
+      "sha256": "8b2f30e35400aaab63807d71103bd03d0712eb9d70c34ceb2c3c40b46e38197a",
+      "bytes": 658
+    },
+    {
+      "path": "ordinary-context-focused-v1/before-inventory.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-focused-v1/before-inventory.stdout.txt",
+      "sha256": "ccc7aa78939df833238cc248115d1fc427bf033e20b34a5a3c893bcad032544b",
+      "bytes": 801
+    },
+    {
+      "path": "ordinary-context-focused-v1/before.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-focused-v1/before.stdout.txt",
+      "sha256": "2a0152e6b9630715f00dacff7c57065193a828afe6738a6131352aef8bd76837",
+      "bytes": 6026
+    },
+    {
+      "path": "ordinary-context-focused-v1/processes.json",
+      "sha256": "6688cbdeabdfcf86b5c57698838bb6d77913e67f568bc25ef8eed9047db02367",
+      "bytes": 2250
+    },
+    {
+      "path": "ordinary-context-focused-v1/results.json",
+      "sha256": "4552faef7b5d83dbdac954930e9f66fb9cbb0352816af45304b9bd8ae58bfae8",
+      "bytes": 4712
+    },
+    {
+      "path": "ordinary-context-focused-v2/after-inventory.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-focused-v2/after-inventory.stdout.txt",
+      "sha256": "ccc7aa78939df833238cc248115d1fc427bf033e20b34a5a3c893bcad032544b",
+      "bytes": 801
+    },
+    {
+      "path": "ordinary-context-focused-v2/after.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-focused-v2/after.stdout.txt",
+      "sha256": "34e7efab98fbebc309075cad183250090067b27c089b7bf7c61732c5292164e4",
+      "bytes": 715
+    },
+    {
+      "path": "ordinary-context-focused-v2/processes.json",
+      "sha256": "1045a7cc4932b6dd399b9c87e36a4617c0a560ba0154987564afe5d4aff7d118",
+      "bytes": 2204
+    },
+    {
+      "path": "ordinary-context-focused-v2/results.json",
+      "sha256": "aea78b7602a236376e2b35744b3be2761b72b599e78db358e519d8295c8b925f",
+      "bytes": 6211
+    },
+    {
+      "path": "ordinary-context-focused-v3/after-inventory.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-focused-v3/after-inventory.stdout.txt",
+      "sha256": "ccc7aa78939df833238cc248115d1fc427bf033e20b34a5a3c893bcad032544b",
+      "bytes": 801
+    },
+    {
+      "path": "ordinary-context-focused-v3/after.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-focused-v3/after.stdout.txt",
+      "sha256": "0b09839810f6bf8253eaa1275fd3cfc3fe857b60d7e0ecea4da13ad81128bd2a",
+      "bytes": 408
+    },
+    {
+      "path": "ordinary-context-focused-v3/before-inventory.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-focused-v3/before-inventory.stdout.txt",
+      "sha256": "ccc7aa78939df833238cc248115d1fc427bf033e20b34a5a3c893bcad032544b",
+      "bytes": 801
+    },
+    {
+      "path": "ordinary-context-focused-v3/before.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-focused-v3/before.stdout.txt",
+      "sha256": "42146e008828be5874838ee0551a10443d0b14d22f124658c3ef3b825969642d",
+      "bytes": 385959
+    },
+    {
+      "path": "ordinary-context-focused-v3/processes.json",
+      "sha256": "9376e00a55e15da025f495219f5dbe94f34746abb212707d83f40d4265438dfc",
+      "bytes": 4413
+    },
+    {
+      "path": "ordinary-context-focused-v3/results.json",
+      "sha256": "6c54c8e330cde3087ac6d49e23919f4f519930469e018825a053b0b633035adf",
+      "bytes": 9354
+    },
+    {
+      "path": "ordinary-context-output-diagnostics-v1/baseline-best-replay.hs",
+      "sha256": "90c29ab6d44a5dff570e6466552e587b21869cd0328a96fd7093d97c1b9679e8",
+      "bytes": 1476894
+    },
+    {
+      "path": "ordinary-context-output-diagnostics-v1/results.json",
+      "sha256": "01fbcc7e2f3ed0793180e062631b061410af2b29feb10720d532e436cdf8e5b1",
+      "bytes": 520
+    },
+    {
+      "path": "ordinary-context-regression-v1/driver.json",
+      "sha256": "e2442993bf9a6362491e399986730e5de8a00df1164a98c74df9d2cc892c6e60",
+      "bytes": 409
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-api-tests-inventory.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-api-tests-inventory.stdout.txt",
+      "sha256": "3cf9036eeb793f90a037e79d54b600d34658dce01b3446dc4d0988e5d9f0d9ce",
+      "bytes": 3220
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-api-tests.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-api-tests.stdout.txt",
+      "sha256": "97d6e1b0ab8ce9e81c6bbb3cdb37aca0ed6bf615df08c4c1b9e61e826be43a5f",
+      "bytes": 2894
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-cli-tests-inventory.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-cli-tests-inventory.stdout.txt",
+      "sha256": "37510081939e0a53f547d2c0418aac40776625cac32979e2f62ad541ba599b38",
+      "bytes": 8707
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-cli-tests.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-cli-tests.stdout.txt",
+      "sha256": "a89e14b49155a1a54e2119113228fbfe1c3a40800a0b24ddafc727ef2837b807",
+      "bytes": 10511
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-parallel-tests-inventory.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-parallel-tests-inventory.stdout.txt",
+      "sha256": "9b41a9caa5867ebe5a326f15fe25485d09d0b0564494231d70ef12610a089edc",
+      "bytes": 2388
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-parallel-tests.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-parallel-tests.stdout.txt",
+      "sha256": "c9d0ca0f0a79e1552148fe4e3524ec55bdd075fc6d923ebb8c2e9f062f7159ce",
+      "bytes": 1928
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-tests-inventory.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-tests-inventory.stdout.txt",
+      "sha256": "3d9b4af6f88562b2dae8f3b7e5672d0ae0f3ac24537f954cc89143d97de3e61d",
+      "bytes": 12497
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-tests.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/djex-tests.stdout.txt",
+      "sha256": "059eddead2b9b03e1c8687141c669bd79d6101ad71a00b6e92ecf51010e13ce9",
+      "bytes": 16577
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/processes.json",
+      "sha256": "2cd7e8f912aa36d72cfe8c4581edf3ced55f030eaeb19415b47845103a5b2b11",
+      "bytes": 8647
+    },
+    {
+      "path": "ordinary-context-regression-v1/regression/results.json",
+      "sha256": "a2b42df7d983ca5ad8c2b7cf161170cfc5da439c56e791e061f50547b8d7e887",
+      "bytes": 130378
+    },
+    {
+      "path": "ordinary-context-regression-v1/strict-build.log",
+      "sha256": "7b5f77fd782440c519e19a5952c5b7bf26a6cc0017bcc61ff596f20667305f94",
+      "bytes": 1703
+    },
+    {
+      "path": "source/change.patch",
+      "sha256": "655371bb649d262afde26d8c8641d3cf50060c1f1fb97d37a9c0fc8ceb284118",
+      "bytes": 23187
+    },
+    {
+      "path": "source/src/Language/Haskell/Djex/Command.hs",
+      "sha256": "438d1f964fddcf7430c5f2df94f00c23e8914eceefae16c52f0acdd90a47b5ac",
+      "bytes": 39169
+    },
+    {
+      "path": "source/src/Language/Haskell/Djex/REPL.hs",
+      "sha256": "978f660942e0b5eea0ca8edbd8ed36a79da7b349943704467407d2c1a82751e3",
+      "bytes": 110734
+    },
+    {
+      "path": "source/test-cli/Spec.hs",
+      "sha256": "135c0ef78decb799b2a1bab074bc675775917cf814ab17cb27d8fd133ed759a7",
+      "bytes": 231341
+    },
+    {
+      "path": "support/check-ordinary-context-after.py",
+      "sha256": "a36a8474932e2cd8dda5c80f529953b9f157e38e7871e202c64a9320b2ec38b4",
+      "bytes": 2956
+    },
+    {
+      "path": "support/check-ordinary-context-bounded.py",
+      "sha256": "6c7e39b8f7854254803ea9c5301bc3951812ed4091580187b7ab031f36fa26f4",
+      "bytes": 2815
+    },
+    {
+      "path": "support/check-ordinary-context-output.py",
+      "sha256": "e507dad3af1f18058a9a84b3526dc9c28489d8f3f637ff72726af599b2bd2125",
+      "bytes": 2662
+    },
+    {
+      "path": "support/ordinary-context-before-scheduler-assertion.hs",
+      "sha256": "f75840e23552d66d171abbdb282890df40f366f64bac41ef40f12d0bcb12799e",
+      "bytes": 231329
+    },
+    {
+      "path": "support/ordinary-context-build-v1.log",
+      "sha256": "6706ddcc5527fca408a0ed755d5c0b22aa29482bd818acf817f6494db11c0329",
+      "bytes": 3220
+    },
+    {
+      "path": "support/ordinary-context-build-v2.log",
+      "sha256": "8b2f30e35400aaab63807d71103bd03d0712eb9d70c34ceb2c3c40b46e38197a",
+      "bytes": 658
+    },
+    {
+      "path": "support/ordinary-context-build-v3.log",
+      "sha256": "8285dbc1c3bdb389046b174deb39b42cf925f9575d61465d745100541b023c26",
+      "bytes": 1441
+    },
+    {
+      "path": "support/publish-ordinary-context-artifacts.py",
+      "sha256": "851392c8cf2d62fbb90eb1547e7fc2fe301ccb2a20a92f71fd4a04bc1684d5bb",
+      "bytes": 15136
+    },
+    {
+      "path": "support/run-loaded-provider-regression.py",
+      "sha256": "925dabbac12b5119e9dea325a46a40ca29c929da10aff3758c9fcf56ce388919",
+      "bytes": 4921
+    },
+    {
+      "path": "support/validate-ordinary-context-cli-final.py",
+      "sha256": "fb041566427e8d8a3f722c6c99465ce02514e91887be510858dc3a68d7deb65e",
+      "bytes": 1759
+    },
+    {
+      "path": "support/validate-ordinary-context-regression.py",
+      "sha256": "264863cf41b1500286c6d99209e4ddcba0fe09fc074939f2bb03a0a766f22f2d",
+      "bytes": 1761
+    }
+  ]
+}

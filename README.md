@@ -172,11 +172,14 @@ now fixes generated-eliminator admission while retaining ordinary user `elim`
 functions. Its public tree inventories pass; positive Lean synthesis remains open.
 The report also corrects earlier tree False-control pass labels: the Exference
 and Both commands timed out and fail the fixture's deadline contract. The
-[current delivery order](docs/reports/2026-09-07-synthesis-retriage.md) prioritizes
-exact ordinary Haskell contextual output, whose prototype builds but still needs
-replay acceptance, followed by a focused native timeout diagnosis and the Lean
-tree check at unchanged bounds. Native integration remains a dependency-release
-gate. The earlier layered-provider failure now passes in the complete unit suite.
+[ordinary contextual REPL output](docs/reports/2026-09-08-ordinary-contextual-output.md)
+now retains selected type and dictionary choices through first/best/all rendering:
+all 36 explicit-forall public queries and 330 tests across four complete affected
+suites pass at the documented fixture bounds. Implicit-root scope, one-shot
+contextual commands and typed list rendering remain open. The
+[current delivery order](docs/reports/2026-09-07-synthesis-retriage.md) returns to
+native timeout diagnosis and the Lean tree check at unchanged bounds; native
+integration remains a dependency-release gate.
 A broader scheduling experiment failed and was reverted. The full **13 extended
 operations and all 19 explicit defaults**, across both Haskell engines and
 Lean Djinn/Exference/Both, remain required; newer canonical Haskell results

@@ -120,6 +120,7 @@ import qualified Language.Haskell.Synthesis.TypedGenerated.Haskell as TypedHaske
 import qualified Language.Haskell.Djex.Exference.Internal.Session
   as ExferenceSession
 import qualified Language.Haskell.Exference.Core.Types as ExferenceType
+import qualified Language.Haskell.Synthesis.Type as SharedType
 import Paths_djex (version)
 
 -- | Startup configuration for the shared interactive frontend.
@@ -786,8 +787,7 @@ runQuery sourceName query state = do
     selectors = maybe noFieldSelectors djinnProjectionFieldSelectors
       $ djinnProjection $ djinnRuntime state
     projected = fmap (projectFieldSelectorsWithoutEta selectors) . typedCandidateCompatibility
-    projectSignature = mapTypeNames $ \name -> Map.findWithDefault name name $
-      maybe Map.empty djinnProjectionPromptNames $ djinnProjection $ djinnRuntime state
+    projectSignature = projectSignatureToDjinn
 
   runBehavioralExference context behavioral target session parsed = case
       mkExferenceRequestWithCheckedTargetFromParsed
@@ -824,6 +824,37 @@ runQuery sourceName query state = do
     sourceNames = Map.fromList
       [(FlexibleVariable identifier, spelling)
       | (spelling, identifier) <- Map.toList $ parsedSourceTypeVariableNames parsed]
+
+  projectSignatureToDjinn = mapTypeNames $ \name -> Map.findWithDefault name name $
+    maybe Map.empty djinnProjectionPromptNames $ djinnProjection $ djinnRuntime state
+
+  -- Ordinary contextual output needs the type and dictionary choices erased
+  -- by the compatibility clause. Keep this candidate's graph through selection
+  -- and render it in its own checked vocabulary. Failure is explicit; there is
+  -- no fallback to an unannotated expression that lost the selected evidence.
+  needsContextualRendering = not . null . SharedType.typeConstraints . parsedSourceType
+
+  renderContextual options parsed projectSignature renderOptions candidate = do
+    term <- snd $ elaborateBehavioral parsed projectSignature
+      renderOptions {renderQualification = presentationQualification options} candidate
+    pure $ case presentationRenderMode options of
+      RenderExpression -> term
+      RenderDefinition -> renderNamePrefix Unqualified
+        (definitionName $ clauseName $ candidateOutput $ typedCandidateCompatibility candidate)
+        ++ " = " ++ term
+
+  renderContextualDjinn parsed = renderContextual (djinnPresentationOptions state)
+    parsed projectSignatureToDjinn (defaultRenderOptions id)
+
+  renderContextualExference parsed candidate = do
+    rendered <- renderContextual (presentation state) parsed id
+      (defaultRenderOptions $ const "x") candidate
+    constraints <- either (Left . show) Right $
+      renderExferenceResidualConstraintsWithQualification
+        (presentationQualification $ presentation state) $ typedCandidateCompatibility candidate
+    pure $ case constraints of
+      [] -> rendered
+      _ -> "-- requires: " ++ intercalate ", " constraints ++ "\n" ++ rendered
 
   providerPrice options name = Map.findWithDefault
     (defaultCandidateProviderCost name) name $ presentationProviderCosts options
@@ -968,8 +999,8 @@ runQuery sourceName query state = do
       (evaluate $ checkParsedDjinn parsed)
       (evaluate $ checkParsedExference parsed)
       (monotonicParallelDeadlineAfterSeconds seconds)
-      (pure . prepareCheckedDjinn)
-      (pure . prepareCheckedExference session)
+      (pure . prepareCheckedDjinn parsed)
+      (pure . prepareCheckedExference session parsed)
       (replayTimedBackend DjinnBackend seconds)
       (replayTimedBackend ExferenceBackend seconds)
 
@@ -1040,10 +1071,18 @@ runQuery sourceName query state = do
           (djinnPresentationOptions state) (djinnSearchOptions state)
       }
 
-  prepareParsedDjinn = prepareCheckedDjinn . checkParsedDjinn
+  prepareParsedDjinn parsed = prepareCheckedDjinn parsed $ checkParsedDjinn parsed
 
-  prepareCheckedDjinn checked = case checked of
+  prepareCheckedDjinn parsed checked = case checked of
     Left failure -> prepareDiagnosticFailure failure
+    Right request | needsContextualRendering parsed ->
+      case runDjinnTypedQuery (currentDjinnSession state) request of
+        Left failure -> prepareDiagnosticFailure failure
+        Right result -> prepareTypedDjinnPresentation
+          (djinnPresentationOptions state)
+          (maybe noFieldSelectors djinnProjectionFieldSelectors
+            $ djinnProjection $ djinnRuntime state)
+          (renderContextualDjinn parsed) result
     Right request -> case runDjinnQuery (currentDjinnSession state) request of
       Left failure -> prepareDiagnosticFailure failure
       Right result -> prepareDjinnPresentation
@@ -1056,11 +1095,17 @@ runQuery sourceName query state = do
     mkExferenceRequestWithCheckedTargetFromParsed
       (exferenceSearchOptions state) (resultTarget state) parsed
 
-  prepareParsedExference session =
-    prepareCheckedExference session . checkParsedExference
+  prepareParsedExference session parsed =
+    prepareCheckedExference session parsed $ checkParsedExference parsed
 
-  prepareCheckedExference session checked = case checked of
+  prepareCheckedExference session parsed checked = case checked of
     Left failure -> prepareDiagnosticFailure failure
+    Right request | needsContextualRendering parsed ->
+      case runExferenceTypedQuery session request of
+        Left failure -> prepareDiagnosticFailure failure
+        Right results -> prepareTypedExferencePresentation
+          (presentation state) (scopeFieldSelectors state)
+          (renderContextualExference parsed) results
     Right request -> case runExferenceQuery session request of
       Left failure -> prepareDiagnosticFailure failure
       Right results -> prepareExferencePresentation
@@ -1075,7 +1120,15 @@ runQuery sourceName query state = do
       } of
     Left failure -> emitDiagnostic failure
     Right request -> ignoreExit $ withinQueryTimeout (queryTimeout state)
-      $ case runDjinnQuery (currentDjinnSession state) request of
+      $ if needsContextualRendering parsed then case
+          runDjinnTypedQuery (currentDjinnSession state) request of
+        Left failure -> diagnosticFailure failure
+        Right result -> replayCommandOutput $ prepareTypedDjinnPresentation
+          (djinnPresentationOptions state)
+          (maybe noFieldSelectors djinnProjectionFieldSelectors
+            $ djinnProjection $ djinnRuntime state)
+          (renderContextualDjinn parsed) result
+      else case runDjinnQuery (currentDjinnSession state) request of
         Left failure -> diagnosticFailure failure
         Right result -> presentDjinn
           (djinnPresentationOptions state)
@@ -1088,7 +1141,12 @@ runQuery sourceName query state = do
         (exferenceSearchOptions state) (resultTarget state) parsed of
     Left failure -> emitDiagnostic failure
     Right request -> ignoreExit $ withinQueryTimeout (queryTimeout state)
-      $ case runExferenceQuery session request of
+      $ if needsContextualRendering parsed then case runExferenceTypedQuery session request of
+        Left failure -> diagnosticFailure failure
+        Right results -> presentTypedExference
+          (presentation state) (scopeFieldSelectors state)
+          (renderContextualExference parsed) results
+      else case runExferenceQuery session request of
         Left failure -> diagnosticFailure failure
         Right results -> presentExference
           (presentation state) (scopeFieldSelectors state) results

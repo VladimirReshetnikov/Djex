@@ -109,9 +109,9 @@ passes nine native ordinary/behavioral/False cells across all three engine
 modes: six exact full-type replays, 24 observations and 16 empty axiom
 inventories. Its strict build and all 686 unfiltered tests pass. The
 [updated re-triage](docs/reports/2026-09-09-synthesis-after-one-shot-acceptance.md) orders
-native dependency integration after deadline acceptance, remaining public frontend
-forms and Church behavior work, with a bounded tree investigation, after
-the accepted global-method and loaded-provider increments described below.
+remaining public frontend forms and Church behavior after completed native
+dependency integration, with a bounded tree investigation. The accepted
+global-method and loaded-provider increments are described below.
 The new [constraint-only provider increment](docs/reports/2026-09-08-constraint-only-provider-inference.md)
 infers a unique coherent selection from lexical class assumptions in both
 engines. Four public Haskell API cases synthesize global/local constrained
@@ -197,8 +197,8 @@ suites** and **350 Church signatures per Haskell engine** pass. The later
 dictionaries alongside specialization certificates and preserves scope for internal flexible
 types. Typed list output, applicable named-`where` one-shot
 commands and broader binder/provider forms remain open. The [current re-triage](docs/reports/2026-09-09-synthesis-after-one-shot-acceptance.md)
-puts native dependency integration next after deadline acceptance, followed by
-remaining frontend forms and Church behavior, with a bounded tree investigation.
+puts remaining frontend forms and Church behavior next after native integration,
+with a bounded tree investigation.
 Tree and Haskell `foldl1` transfer checks
 still miss at their original limits. One native tree debug expression passes
 the full type and all 16 observations independently; live acceptance remains
@@ -722,8 +722,10 @@ engine/selection profiles and 64 public queries, including exact displayed-outpu
 replay. Contextual certificates and internal flexible-variable scope are covered
 by 2,371 passing tests across 16 complete suites. The [Leant deadline repair](docs/reports/2026-09-09-request-deadline-integration.md) now passes
 all ten native integration gates, including 705 unit tests and both 350-signature
-corpora with independent kernel replay. That acceptance retains Djex `bfc3692e`;
-native integration of the newer canonical milestone remains separate.
+corpora with independent kernel replay. The later [fresh native integration](docs/reports/2026-09-09-one-shot-native-integration.md)
+promotes Leant to **Djex `3adfac5c`**, with a strict build, **705 unit tests**
+and **all ten fresh native gates** passing. Remaining public forms, native tree
+synthesis and the full Church behavior target remain open.
 The [original roadmap](docs/reports/2026-09-06-synthesis-next-priorities.md)
 retains the full completion requirements; prepared runners and isolated
 renderers do not establish production synthesis coverage.

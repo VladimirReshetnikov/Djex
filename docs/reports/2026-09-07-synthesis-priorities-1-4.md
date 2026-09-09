@@ -6,12 +6,13 @@ implements the first four items in the
 within its original supported-fragment scope. The earlier streaming acceptance
 receipt belongs to its recorded source revisions.
 
-The latest [delivery re-triage](2026-09-08-post-integration-priorities.md)
-records a 700/701 native unit run and executed supplied-tree accumulator
-failures. It prioritizes the recurring layered-provider deadline, semantic
-provider filtering, function-carrier folds and bounded frontend usability.
-Those diagnoses add no accepted behavioral cells and preserve all requirements
-in this register, including all 19 explicit defaults.
+The [function-carrier delivery](2026-09-08-function-carrier-search.md) now accepts the supplied tree
+accumulator in canonical Haskell Exference at its original limits, retaining
+13/13 extended behavior, 350 signatures per Haskell engine and all 2,309
+tests across 15 complete suites (with the documented Length fixture rerun).
+This advances priority 2; native integration, the recurring layered-provider
+deadline and the remaining cross-engine constructions stay open. All
+requirements below, including all 19 explicit defaults, remain in force.
 
 The [current retriage](2026-09-07-synthesis-retriage.md) preserves every
 completion requirement below. **Bounded local Lean context integration is now

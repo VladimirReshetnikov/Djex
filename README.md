@@ -153,18 +153,20 @@ refined scheduler at `63a23f58` that preserves monomorphic goal ordering.
 The refinement passes all 2,308 Haskell tests and retains the Haskell behavior
 and signature results; its complete native integration remains open. The latest
 native unit run passes **700/701**, with one recurring layered-provider deadline.
-The published baseline misses the supplied tree accumulator in both Haskell engines.
-A [new fold-carrier experiment](docs/reports/2026-09-08-tree-carrier-retriage.md) makes the useful
-Exference branch reachable: two candidates pass all 16 observations and all
-1,024 contradictory controls reject, at the original limits. The 92 private
-engine tests pass, but the permanent recursor suite has three typed-rendering
-failures and a GHC bytecode replay panic. The change remains under validation.
+Canonical Haskell Exference now [synthesizes the supplied tree accumulator](docs/reports/2026-09-08-function-carrier-search.md)
+with a function carrier at the original bounds: two exact candidates pass all
+16 observations and all 1,024 contradictory controls reject. The scoped
+introduction estimate retains 13/13 extended Church behavior and all 350
+signatures per Haskell engine. All 2,309 tests in 15 suites pass across the
+recorded complete runs, including the complete Length suite after its
+documented fixture repair. Broader cost estimates were rejected after losing
+Church composition. Native Lean integration of this change remains open.
 Leant's [semantic provider filter](docs/reports/2026-09-08-semantic-auxiliary-providers.md)
 now fixes generated-eliminator admission while retaining ordinary user `elim`
-functions. Its public tree inventories pass; positive synthesis remains open.
+functions. Its public tree inventories pass; positive Lean synthesis remains open.
 The report also corrects earlier tree False-control pass labels: the Exference
 and Both commands timed out and fail the fixture's deadline contract. The next delivery
-finishes the measured fold-carrier experiment; the recurring native layered-provider
+integrates the accepted canonical source in Lean; the recurring layered-provider
 deadline remains the release gate. Exact Haskell output is an independent delivery.
 A broader scheduling experiment failed and was reverted. The full **13 extended
 operations and all 19 explicit defaults**, across both Haskell engines and

@@ -3563,48 +3563,76 @@ testReplBehavioralElaboration = withTemporaryEnvironment [] $ \directory ->
           ]
     (exitCode, output, errors) <- runRepl directory $ commands "null (repaired id)"
     assertEqual "live elaboration REPL exit" ExitSuccess exitCode
-    revised <- case
-        [ term
-        | line <- lines errors
-        , Just term <- [stripPrefix "elaborated expression: " line]
-        ] of
-      [term] -> pure term
-      terms -> fail $ "expected one actual compilation repair: " ++ show terms ++ errors
-    assertContains "repair must use the failing candidate's own graph"
-      "candidate evidence: graph present;" errors
-    assertContains "control expression must really fail GHC elaboration"
-      "original check: BehavioralCompilationError" errors
-    assertContains "revised term must pass the real worker predicate"
-      "final check: BehavioralPassed" errors
-    assertContains "retry must retain the original observation budget"
-      "checked=8, true=6, false=2, error=0, timeout=0, window=8" errors
-    assertContains "exactly one additional compiler check"
-      "checks=1; retries retain the same candidate" errors
-    let displayed = case renderMode of
-          "definition" -> "repaired = " ++ revised
-          _ -> revised
-    assertContains "all selection lost or rerendered the accepted source"
-      displayed output
-    let fixture = directory ++ "/Repaired.hs"
-    writeFile fixture $ unlines
-      [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications #-}"
-      , "module Main where"
-      , "repaired :: " ++ signature
-      , "repaired = " ++ revised
-      , "main :: IO ()"
-      , "main = if null (repaired id) then putStrLn \"replayed\" else error \"wrong behavior\""
-      ]
-    replay <- timeout 30000000 $ readProcessWithExitCode "runghc" [fixture] ""
-    case replay of
-      Just (ExitSuccess, "replayed\n", _) -> pure ()
-      _ -> fail $ "exact displayed repair failed independent GHC execution: " ++ show replay
+    let revised =
+          [ term
+          | line <- lines errors
+          , Just term <- [stripPrefix "elaborated expression: " line]
+          ]
+        observationIds =
+          [ index
+          | line <- lines errors, suffix <- tails line
+          , Just remaining <- [stripPrefix "candidate observation: " suffix]
+          , (index, rest) <- reads remaining :: [(Int, String)]
+          , all isSpace rest
+          ]
+        counts =
+          [ (passed, rejected)
+          | line <- lines errors, suffix <- tails line
+          , Just remaining <- [stripPrefix "checked=8, true=" suffix]
+          , (passed, afterPassed) <- reads remaining :: [(Int, String)]
+          , Just afterFalse <- [stripPrefix ", false=" afterPassed]
+          , (rejected, rest) <- reads afterFalse :: [(Int, String)]
+          , rest == ", error=0, timeout=0, window=8"
+          ]
+    assertBool ("expected an actual compilation repair: " ++ errors) $ not $ null revised
+    -- Search ranking may change which original slots need elaboration.
+    -- Check every repair and its accounting without fixing that incidental count.
+    assertEqual "each repair retains its own original observation slot"
+      (length revised) $ length observationIds
+    assertBool "repair slots must be distinct, ordered and inside the original window" $
+      all (\index -> index >= 1 && index <= 8) observationIds &&
+        and (zipWith (<) observationIds $ drop 1 observationIds)
+    forM_
+      [ "candidate evidence: graph present;"
+      , "original check: BehavioralCompilationError"
+      , "final check: BehavioralPassed"
+      ] $ \marker -> assertEqual ("every repair must retain " ++ marker)
+        (length revised) $ countOccurrences marker errors
+    case counts of
+      [(passed, rejected)] -> do
+        assertEqual "retries must not refill or extend the observation window" 8 $ passed + rejected
+        assertBool "every repair passes and the window retains actual rejections" $
+          passed >= length revised && rejected > 0
+      _ -> fail $ "missing exact eight-candidate accounting: " ++ errors
+    assertContains "each repair incurs one additional compiler check"
+      ("checks=" ++ show (length revised) ++ "; retries retain the same candidate") errors
+    forM_ (zip [0 :: Int ..] revised) $ \(index, term) -> do
+      let displayed = case renderMode of
+            "definition" -> "repaired = " ++ term
+            _ -> term
+      assertContains "all selection lost or rerendered the accepted source"
+        displayed output
+      let fixture = directory ++ "/Repaired" ++ show index ++ ".hs"
+      writeFile fixture $ unlines
+        [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications #-}"
+        , "module Main where"
+        , "repaired :: " ++ signature
+        , "repaired = " ++ term
+        , "main :: IO ()"
+        , "main = if null (repaired id) then putStrLn \"replayed\" else error \"wrong behavior\""
+        ]
+      replay <- timeout 30000000 $ readProcessWithExitCode "runghc" [fixture] ""
+      case replay of
+        Just (ExitSuccess, "replayed\n", _) -> pure ()
+        _ -> fail $ "exact displayed repair failed independent GHC execution: " ++ show replay
     (falseExit, falseOutput, falseErrors) <- runRepl directory $
       commands "not (null (repaired id))"
     assertEqual "false-control REPL exit" ExitSuccess falseExit
-    assertContains "a compiling repair is still subject to the predicate"
-      "final check: BehavioralFalse" falseErrors
-    assertBool "the false repaired implementation leaked into displayed results" $
-      not $ revised `isInfixOf` falseOutput
+    assertEqual "every compiling repair remains subject to the predicate"
+      (length revised) $ countOccurrences "final check: BehavioralFalse" falseErrors
+    forM_ revised $ \term ->
+      assertBool "the false repaired implementation leaked into displayed results" $
+        not $ term `isInfixOf` falseOutput
 
 testReplBehavioralElaborationSelection :: Assertion
 testReplBehavioralElaborationSelection = withTemporaryEnvironment

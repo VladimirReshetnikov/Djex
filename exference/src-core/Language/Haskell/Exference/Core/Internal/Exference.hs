@@ -2019,14 +2019,14 @@ rateNode ranking providerCost h s = priorityFromPenalty $
     addScore historical $ negateScore structural
  where
   historical = addScore
-    (negateScore $ addScore (rateGoals h $ nodeGoals s) $ nodeDepth s)
+    (negateScore $ addScore (rateGoals h (nodeProvidedScopes s) $ nodeGoals s) $ nodeDepth s)
     (rateUsage h s)
   -- Quality is a heuristic, never a reason to discard a proof or refund work.
   structural = fromInteger $ toInteger $ expressionQualityCost
     ranking providerCost $ nodeExpression s
 
-rateGoals :: ExferenceHeuristicsConfig -> Seq.Seq TGoal -> Penalty
-rateGoals h = sumScores . fmap rateGoal
+rateGoals :: ExferenceHeuristicsConfig -> Scopes -> Seq.Seq TGoal -> Penalty
+rateGoals h scopes = sumScores . fmap rateGoal
   where
     -- Opening a quantified function exposes the types of its supplied
     -- parameters before arrow introduction has installed them in the scope.
@@ -2034,7 +2034,20 @@ rateGoals h = sumScores . fmap rateGoal
     -- phase; after introduction, the actual body and local usage are rated.
     rateGoal (TGoal (VarBinding _ TypeArrow{}) _ ContinueForallIntroduction _ _) =
       heuristics_goalCons h
+    -- Monomorphic arrow introduction binds its parameters; it does not
+    -- synthesize values of their types. Charging those as constructions can
+    -- discard a function-valued fold carrier before any argument is entered.
+    -- Preserve the existing estimate when either the goal or its lexical
+    -- context is polymorphic: using those parameters can require additional
+    -- instantiation search, even when the current result is monomorphic.
+    rateGoal (TGoal (VarBinding _ t@TypeArrow{}) scope _ _ givens)
+      | not (SharedType.containsForall t)
+      , all (all (not . SharedType.containsForall) . constraint_params) givens
+      , all monomorphicBinding (scopeGetAllBindings scope scopes) = addScore
+          (heuristics_functionGoalTransform h) (typeComplexity h $ fst $ splitArrowChain t)
     rateGoal (TGoal (VarBinding _ t) _ _ _ _) = typeComplexity h t
+    monomorphicBinding binding = not $ any SharedType.containsForall $
+      varPResult binding : varPParameters binding
 
 -- | Heuristic penalty of a goal type: the configured per-node weights summed
 -- over the type's structure, with nested @forall@ types counted as single

@@ -509,9 +509,14 @@ assertLiveUsableWorkPublicQueryExpiry = do
   problem <- adversarialConstantZeroProblem identityLengthContract
   query <- expectRight $ SMTLib.sealLengthSMTLibQuery
     SMTLib.defaultLengthSMTLibLimits problem
-  SMTLibLiveSpec.withFakeZ3Mode "query-hang-status" $ \executable _ -> do
-    execution <- mkBudgetLiveExecution executable 1000
-    budget <- mkLiveUsableWorkBudget 400
+  -- Keep the short-budget safety case even when worker startup consumes its
+  -- allowance. A separate case must actually reach the blocked query before
+  -- the shared deadline, so startup variance cannot masquerade as query expiry.
+  forM_ [(400, 1000, False), (3000, 5000, True)] $
+   \(sharedMilliseconds, queryMilliseconds, requireQuery) ->
+    SMTLibLiveSpec.withFakeZ3Mode "query-hang-status" $ \executable _ -> do
+    execution <- mkBudgetLiveExecution executable queryMilliseconds
+    budget <- mkLiveUsableWorkBudget sharedMilliseconds
     scoped <- SMTLibLive.withLengthSMTLibLiveSessionWithUsableWorkBudget
       budget execution $ \session -> do
         rejected <- SMTLibLive.runLengthSMTLibLiveQuery
@@ -525,20 +530,33 @@ assertLiveUsableWorkPublicQueryExpiry = do
     assertPublicLiveSessionFailure
       SMTLibLive.LengthSMTLibLiveSessionDeadlineExceeded scoped
     events <- SMTLibLiveSpec.readFakeZ3Events executable
-    assertFakeZ3EventOrdinals "query-check" [0] events
+    let reachedQuery = not $ null $ fakeZ3Events "query-check" events
+    when (requireQuery || reachedQuery) $
+      assertFakeZ3EventOrdinals "query-check" [0] events
+    when requireQuery $ assertFakeZ3EventOrdinals "query-hang" [0] events
+    when (not reachedQuery) $ assertFakeZ3EventCount "query-hang" 0 events
     assertFakeWorkerWorkspaceRemoved "shared query deadline" executable
 
 assertLiveUsableWorkSessionCallbackReturnExpiry :: IO ()
 assertLiveUsableWorkSessionCallbackReturnExpiry =
-  SMTLibLiveSpec.withFakeZ3Mode "healthy" $ \executable _ -> do
-    execution <- mkBudgetLiveExecution executable 1000
-    budget <- mkLiveUsableWorkBudget 500
+  -- The callback-return contract applies after the callback has started.
+  -- Retain the original short-budget case and require entry separately with
+  -- startup allowance; either entered callback must finish before cleanup.
+  forM_ [(500, 1000, 700000, False), (3000, 5000, 3200000, True)] $
+   \(sharedMilliseconds, queryMilliseconds, delayMicroseconds, requireCallback) ->
+    SMTLibLiveSpec.withFakeZ3Mode "healthy" $ \executable _ -> do
+    execution <- mkBudgetLiveExecution executable queryMilliseconds
+    budget <- mkLiveUsableWorkBudget sharedMilliseconds
+    callbackEntered <- newIORef False
     callbackReturned <- newIORef False
     scoped <- SMTLibLive.withLengthSMTLibLiveSessionWithUsableWorkBudget
       budget execution $ \_ -> do
-        threadDelay 700000
+        writeIORef callbackEntered True
+        threadDelay delayMicroseconds
         writeIORef callbackReturned True
-    readIORef callbackReturned >>= (@?= True)
+    entered <- readIORef callbackEntered
+    when requireCallback $ entered @?= True
+    readIORef callbackReturned >>= (@?= entered)
     assertPublicLiveSessionFailure
       SMTLibLive.LengthSMTLibLiveSessionDeadlineExceeded scoped
     assertFakeWorkerWorkspaceRemoved "session callback return" executable

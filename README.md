@@ -39,7 +39,7 @@ version, and dependency contract.
 - For better first results and useful alternatives under bounded search, see
   [candidate quality, checked normalization, and ranking policies](docs/candidate-quality.md).
 - For the next improvements and their acceptance requirements, see the
-  [current synthesis re-triage](docs/reports/2026-09-07-synthesis-retriage.md).
+  [current synthesis re-triage](docs/reports/2026-09-09-synthesis-after-deadline-trace.md).
 
 New library code should start with `Language.Haskell.Djex`, a narrower checked
 backend adapter, or a focused `Language.Haskell.Synthesis.*` import. The package
@@ -108,9 +108,9 @@ The matching [Leant integration](https://github.com/VladimirReshetnikov/Leant/bl
 passes nine native ordinary/behavioral/False cells across all three engine
 modes: six exact full-type replays, 24 observations and 16 empty axiom
 inventories. Its strict build and all 686 unfiltered tests pass. The
-[updated re-triage](docs/reports/2026-09-07-synthesis-retriage.md) promotes
-missing Church construction paths after the accepted global-method and loaded-
-provider increments described below.
+[updated re-triage](docs/reports/2026-09-09-synthesis-after-deadline-trace.md) orders
+the remaining deadline, public frontend, tree and Church behavior work after
+the accepted global-method and loaded-provider increments described below.
 The new [constraint-only provider increment](docs/reports/2026-09-08-constraint-only-provider-inference.md)
 infers a unique coherent selection from lexical class assumptions in both
 engines. Four public Haskell API cases synthesize global/local constrained
@@ -129,7 +129,7 @@ replay, with 48 empty axiom inventories and three actual false controls.
 Its earlier full configured 647-test integration run passes in 343.79 seconds, with
 unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
 retain source graphs as checked wildcards, preserving exact compatibility
-erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) records
+erasure. The [current re-triage](docs/reports/2026-09-09-synthesis-after-deadline-trace.md) records
 the now-passing native recursor matrix after the accepted
 [combined verification increment](docs/reports/2026-09-08-combined-behavioral-verification.md).
 All ten native integration gates now pass and Leant pins the tested dependency;
@@ -192,9 +192,10 @@ replays**, **20 actual False controls**, four explicit-forall guards and the
 strengthened synonym-identity regression pass. All **361 tests in six complete
 suites** and **350 Church signatures per Haskell engine** pass. One-shot
 contextual commands, typed list output and broader binder/provider forms remain
-open. The [current re-triage](docs/reports/2026-09-08-synthesis-frontier-retriage.md)
-puts native tree candidate tracing next, followed by those frontend gaps and
-the full Church behavioral matrix. Tree and Haskell `foldl1` transfer checks
+open. The [current re-triage](docs/reports/2026-09-09-synthesis-after-deadline-trace.md)
+puts deadline integration closure first, followed by those frontend gaps,
+a bounded tree-search investigation and the full Church behavioral matrix.
+Tree and Haskell `foldl1` transfer checks
 still miss at their original limits. One native tree debug expression passes
 the full type and all 16 observations independently; live acceptance remains
 open. Duplicate suppression and further verifier optimization require evidence
@@ -704,7 +705,7 @@ and worked `:djinn`/`:exference`/`:compare` examples. The
 signatures and compiler-checks the generated terms under its documented
 environment and partiality assumptions.
 
-The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) records
+The [current re-triage](docs/reports/2026-09-09-synthesis-after-deadline-trace.md) records
 accepted elaboration, contextual inference and the Exference tree carrier,
 with the later combined verification increment passing 702 native unit tests
 and the original Exference append/False queries. Remaining exact-output and

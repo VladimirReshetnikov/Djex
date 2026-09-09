@@ -139,3 +139,5 @@ Reports are listed oldest first.
 - 2026-09-08 — [Combined behavioral certificates](2026-09-08-combined-behavioral-verification.md) — original-bound native Exference append and False completion, 702 unit tests, exact method/cache replay, and the remaining integration boundary.
 
 - 2026-09-08 — [Further improvements after the native recursor gates pass](2026-09-08-synthesis-next-deliveries.md) — nine terminal integration gates, the original-bound 12/12 recursor matrix, bounded transfer checks, frontend gaps and the full Church behavioral target.
+
+- 2026-09-08 — [Completed native integration](2026-09-08-combined-native-integration.md) — all ten gates pass, both 350-signature native corpora replay, final inputs match, and Leant promotes the tested Djex dependency.

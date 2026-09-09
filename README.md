@@ -131,8 +131,8 @@ retain source graphs as checked wildcards, preserving exact compatibility
 erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) records
 the now-passing native recursor matrix after the accepted
 [combined verification increment](docs/reports/2026-09-08-combined-behavioral-verification.md).
-The last native signature gate precedes dependency promotion; native tree
-transfer checks and Haskell frontend/Church work follow. Provider filtering and
+All ten native integration gates now pass and Leant pins the tested dependency;
+native tree transfer checks and Haskell frontend/Church work follow. Provider filtering and
 the Haskell Exference tree carrier are delivered; broader contextual source and
 selected-dictionary evidence stay in scope.
 The [focused introduction change](docs/reports/2026-09-08-focused-forall-search.md)
@@ -160,10 +160,11 @@ method cells, nine method-control sessions, 39 local-context cells and 15
 simplification queries passing. Native recursors pass **12/12 at the original
 limits**, including nine exact full-type replays and three completed False
 controls. Extended Lean Exference behavior passes **13/13**, nested foralls
-pass nine cells and native Djinn signatures pass **350/350**. The Exference
-signature gate was still running at this checkpoint; aggregate integration and
-Leant dependency promotion remain pending. Earlier deadline failures remain
-in the [historical report](docs/reports/2026-09-08-native-carrier-integration.md).
+pass nine cells and **both native signature corpora pass 350/350 each**.
+The [terminal integration](docs/reports/2026-09-08-combined-native-integration.md)
+passes all ten gates and its final input-integrity check; Leant now pins the
+tested `bfc3692e` dependency. Earlier deadline failures remain in the
+[historical report](docs/reports/2026-09-08-native-carrier-integration.md).
 Canonical Haskell Exference now [synthesizes the supplied tree accumulator](docs/reports/2026-09-08-function-carrier-search.md)
 with a function carrier at the original bounds: two exact candidates pass all
 16 observations and all 1,024 contradictory controls reject. The scoped
@@ -171,8 +172,8 @@ introduction estimate retains 13/13 extended Church behavior and all 350
 signatures per Haskell engine. All 2,309 tests in 15 suites pass across the
 recorded complete runs, including the complete Length suite after its
 documented fixture repair. Broader cost estimates were rejected after losing
-Church composition. Its final native signature integration gate remains open;
-native tree behavior requires separate acceptance.
+Church composition. Native integration of this revision is complete; native
+tree behavior requires separate acceptance.
 Leant's [semantic provider filter](docs/reports/2026-09-08-semantic-auxiliary-providers.md)
 now fixes generated-eliminator admission while retaining ordinary user `elim`
 functions. Its public tree inventories pass; positive Lean synthesis remains open.
@@ -183,12 +184,12 @@ now retains selected type and dictionary choices through first/best/all renderin
 all 36 explicit-forall public queries and 330 tests across four complete affected
 suites pass at the documented fixture bounds. Implicit-root scope, one-shot
 contextual commands and typed list rendering remain open. The
-[current delivery order](docs/reports/2026-09-07-synthesis-retriage.md) finishes the
-remaining signature gate, then checks the native tree transfer, completes
+[current delivery order](docs/reports/2026-09-07-synthesis-retriage.md) checks the
+native tree transfer, completes
 implicit-root/one-shot/list frontend gaps and continues the full Church matrix.
 Broader contextual evidence follows. Further verification-request reduction
 leaves the immediate queue now that the full native recursor matrix passes.
-Native integration remains a dependency-release gate.
+The tested native integration release gate is complete.
 A broader scheduling experiment failed and was reverted. The full **13 extended
 operations and all 19 explicit defaults**, across both Haskell engines and
 Lean Djinn/Exference/Both, remain required; newer canonical Haskell results
@@ -697,8 +698,8 @@ The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) records
 accepted elaboration, contextual inference and the Exference tree carrier,
 with the later combined verification increment passing 702 native unit tests
 and the original Exference append/False queries. Remaining exact-output and
-Church deliveries can proceed independently of the remaining native signature
-gate. Broader contextual evidence follows, with exact duplicate-output suppression a separate performance gate.
+Church deliveries follow the completed native integration. Broader contextual
+evidence follows, with exact duplicate-output suppression a separate performance gate.
 The [original roadmap](docs/reports/2026-09-06-synthesis-next-priorities.md)
 retains the full completion requirements; prepared runners and isolated
 renderers do not establish production synthesis coverage.

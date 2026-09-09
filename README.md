@@ -118,7 +118,8 @@ providers and replay their exact full signatures with distinct dictionary
 payloads. Explicit-signature rendering preserves the chosen type arguments;
 ambiguity, scope, and dictionary-ownership guards remain. The later loaded
 Haskell provider and native Lean method acceptance below extends this engine
-milestone; implicit-root behavioral scoping remains open.
+milestone. The [implicit-root scope increment](docs/reports/2026-09-08-implicit-root-scope.md)
+now extends contextual REPL output to the documented implicit signatures.
 The ordinary-data matrix now passes eight
 scenarios in each Haskell engine, including tuple fields and independently typed
 recursive inputs. Exference's complete-case graphs and protected queues preserve
@@ -182,18 +183,22 @@ and Both commands timed out and fail the fixture's deadline contract. The
 [ordinary contextual REPL output](docs/reports/2026-09-08-ordinary-contextual-output.md)
 now retains selected type and dictionary choices through first/best/all rendering:
 all 36 explicit-forall public queries and 330 tests across four complete affected
-suites pass at the documented fixture bounds. Implicit-root scope, one-shot
-contextual commands and typed list rendering remain open. The
-[current re-triage](docs/reports/2026-09-08-synthesis-frontier-retriage.md)
-prioritizes the implicit-signature regression, native tree candidate tracing,
-then one-shot/list frontend coverage and the full Church behavioral matrix.
-The implicit-signature implementation passes **360/361 tests**, including the
-complete **115-test CLI suite**, but remains unaccepted because of a synonym
-source-hint regression. The tree and Haskell `foldl1` transfer checks still
-miss at their original limits. One native tree debug expression independently
-passes the full type and all 16 observations; live typed-candidate acceptance
-is still open. Broader contextual evidence follows. Duplicate suppression and
-further verifier optimization now require evidence from a remaining failure.
+suites pass at the documented fixture bounds. The
+[implicit-signature REPL increment](docs/reports/2026-09-08-implicit-root-scope.md)
+now closes free root variables before graph construction and scopes generated
+contextual definitions with GHC `TypeAbstractions`. Ordinary and named-`where`
+queries retain binder order and dictionary payloads: **40 exact positive
+replays**, **20 actual False controls**, four explicit-forall guards and the
+strengthened synonym-identity regression pass. All **361 tests in six complete
+suites** and **350 Church signatures per Haskell engine** pass. One-shot
+contextual commands, typed list output and broader binder/provider forms remain
+open. The [current re-triage](docs/reports/2026-09-08-synthesis-frontier-retriage.md)
+puts native tree candidate tracing next, followed by those frontend gaps and
+the full Church behavioral matrix. Tree and Haskell `foldl1` transfer checks
+still miss at their original limits. One native tree debug expression passes
+the full type and all 16 observations independently; live acceptance remains
+open. Duplicate suppression and further verifier optimization require evidence
+from a remaining failure.
 The tested native integration release gate remains complete.
 A broader scheduling experiment failed and was reverted. The full **13 extended
 operations and all 19 explicit defaults**, across both Haskell engines and

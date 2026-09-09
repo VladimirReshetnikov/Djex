@@ -1,0 +1,114 @@
+{
+  "status": "accepted_documented_implicit_root_REPL_fragment",
+  "base_commit": "a36a27297fab0907cc9e239781c4aa328c9adf58",
+  "strict_build": "passed -Werror",
+  "suites": [
+    {
+      "suite": "djex-tests",
+      "status": "passed",
+      "executable_sha256": "acda3d3cf444e8ea919ad93fbf4df7a5e15cc476fa90a7189cb9e3a324d37d17",
+      "inventory_count": 152,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 152,
+      "seconds": 176.41
+    },
+    {
+      "suite": "djex-api-tests",
+      "status": "passed",
+      "executable_sha256": "52d7c37d278e37b48f87debfb94209de6071799a513af5a8a3c9d3c1f3101b39",
+      "inventory_count": 38,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 38,
+      "seconds": 0.04
+    },
+    {
+      "suite": "djex-parallel-tests",
+      "status": "passed",
+      "executable_sha256": "15f85d63a6a1dd3c142e29c086e9422a4aaf11ca1d46de5a5e6bba54b197adf9",
+      "inventory_count": 27,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 27,
+      "seconds": 0.0
+    },
+    {
+      "suite": "exference-frontend-api-tests",
+      "status": "passed",
+      "executable_sha256": "0990b4a45c1b3db2fb5ed5933d517de3c84b1923d4a47aed8020e79b29020c2b",
+      "inventory_count": 4,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 4,
+      "seconds": 0.0
+    },
+    {
+      "suite": "exference-cli-tests",
+      "status": "passed",
+      "executable_sha256": "135617abe884c5b8e00b5a166f01a5aaff9a9660006d964abf8ae39d05fca47a",
+      "inventory_count": 25,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 25,
+      "seconds": 3.26
+    },
+    {
+      "suite": "djex-cli-tests",
+      "status": "passed",
+      "executable_sha256": "dcbe2f34dc721593f9adf219d1716fd82799aa96b2eb5cc8b8f9a4a0c53efb03",
+      "inventory_count": 115,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 115,
+      "seconds": 309.22
+    }
+  ],
+  "test_count": 361,
+  "public_fixture": {
+    "positive_exact_GHC_replays": 40,
+    "actual_false_controls": 20,
+    "explicit_forall_rejection_guards": 4,
+    "engines": [
+      "djinn",
+      "exference"
+    ],
+    "signatures": 5,
+    "selection": "first",
+    "candidate_window": 4,
+    "djinn_choices": 20000,
+    "exference_steps": 256
+  },
+  "synonym_fixture": {
+    "cases": 3,
+    "same_candidate_graph_identity_checks": true,
+    "exact_original_signature_GHC_replays": 3,
+    "preserved_erased_hint_guard": true
+  },
+  "signature_corpus": {
+    "djinn": 350,
+    "exference": 350,
+    "compiler": "ExitSuccess for each engine",
+    "query_timeout_seconds": 2,
+    "search_steps": 10000,
+    "evidence": "type inhabitation, not full Church behavior"
+  },
+  "source_and_helper_inputs_unchanged": true,
+  "archive": {
+    "path": "implicit-root-scope.zip",
+    "artifacts": 362,
+    "bytes": 2070842,
+    "sha256": "4849f2f4fe4945ac621a0271e0813a08380a0a9db3ef9666ef7b06f226ccd6ad",
+    "all_members_rehashed": true
+  },
+  "history": {
+    "prior_failed_receipt": "implicit-root-retriage.json",
+    "resolution": "GHC retains vacuous outer binders; strengthened test distinguishes them from truly erased local binders without weakening production hint ownership."
+  },
+  "boundaries": [
+    "Only the documented implicit-root contextual REPL fragment is accepted.",
+    "One-shot contextual commands, typed list rendering and broader binder/provider evidence remain open.",
+    "New implicit queries use first selection; existing explicit-forall selection matrices are separate retained regressions.",
+    "Leant dependency remains bfc3692e until native integration of this frontend revision."
+  ]
+}

@@ -47,6 +47,8 @@ import Language.Haskell.Synthesis.Name
   , renderModuleName
   )
 import Language.Haskell.Synthesis.Type (Type, Variable)
+import qualified Language.Haskell.Synthesis.Type as SharedType
+import Language.Haskell.Djex.HaskellSrc.Scope (hasExplicitOuterForall)
 
 -- | GHCi-style name-resolution state for one interactive query.
 -- Exact visible names control bare lookup; the complete sealed inventory
@@ -60,6 +62,9 @@ data ExferenceQueryScope = ExferenceQueryScope
   deriving (Eq, Show)
 
 -- | One parsed, resolved, kind-checked shared source type.
+--
+-- Implicit root variables are universally quantified in first-occurrence
+-- order. An explicit outer forall cannot leave unbound type variables.
 --
 -- Variable spellings and source location are detached presentation and
 -- diagnostic metadata. The type itself is the sole semantic query value.
@@ -123,8 +128,23 @@ parseSourceTypeWithScope inventory maybeScope sourceName source = do
       "DJEX_TYPE_PARSE" "parsed source type failed shared validation")
     Right
     $ toSynthesisType backendType
+  -- Haskell implicitly quantifies a signature's free variables in written
+  -- first-occurrence order. Close that source scheme before either backend
+  -- constructs its candidate graph; renderer-only closure cannot repair an
+  -- open graph or recover an erased contextual parameter later.
+  let free = SharedType.freeVariablesInFirstOccurrenceOrder sharedType
+      explicit = hasExplicitOuterForall source
+  if explicit && not (null free)
+    then Left $ withSourceLocation location $ shownErrorDiagnostic
+      "DJEX_TYPE_PARSE" "explicit forall leaves unbound type variables" free
+    else pure ()
+  closedType <- either
+    (Left . withSourceLocation location . shownErrorDiagnostic
+      "DJEX_TYPE_PARSE" "implicit source quantification failed shared validation")
+    Right $ toSynthesisType $ if null free then sharedType
+      else SharedType.ForallType free [] sharedType
   pure ParsedSourceType
-    { parsedSourceType = sharedType
+    { parsedSourceType = closedType
     , parsedSourceTypeVariableNames = sourceVariables
     , parsedSourceTypeLocation = location
     }

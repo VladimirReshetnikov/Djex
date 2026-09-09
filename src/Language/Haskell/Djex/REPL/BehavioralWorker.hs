@@ -39,6 +39,8 @@ import Text.Read (readMaybe)
 import Language.Haskell.Djex.REPL.Eval (renderInterpreterError)
 import Language.Haskell.Djex.REPL.Scope
   ( ReplScope, ScopeEntry (..), scopeEntries, parseScopeImport )
+import Language.Haskell.Djex.HaskellSrc.Scope
+  ( scopedTypeBinderNames, scopedTypePatterns )
 import qualified Language.Haskell.Exts.Pretty as HSE
 import qualified Language.Haskell.Exts.Parser as HSE
 import qualified Language.Haskell.Exts.Syntax as HSE
@@ -171,12 +173,16 @@ withBehavioralEvaluator context action = do
 -- pins the result to its private, package-qualified runtime Boolean type.
 candidateCheckExpression :: BehavioralQuery -> String -> String
 candidateCheckExpression query term =
-  "let { " ++ fresh ++ " :: " ++ ty ++ "\n; " ++ fresh ++ " = (" ++ term
-  ++ "\n) } in let { " ++ name ++ " :: " ++ ty ++ "\n; " ++ name ++ " = "
-  ++ fresh ++ concatMap (\binder -> " @" ++ binder) explicitBinders
+  "let { " ++ fresh ++ " :: " ++ ty ++ "\n; " ++ fresh ++ patterns ++ " = (" ++ term
+  ++ "\n) } in let { " ++ name ++ " :: " ++ ty ++ "\n; " ++ name ++ patterns ++ " = "
+  ++ fresh ++ concatMap (\binder -> " @" ++ binder) forwardedBinders
   ++ " } in (" ++ behavioralPredicate query ++ "\n)"
  where
   name = behavioralName query
+  patterns = scopedTypePatterns $ behavioralType query
+  forwardedBinders = case scopedTypeBinderNames $ behavioralType query of
+    [] -> explicitBinders
+    implicit -> implicit
   -- GHC's lexical ScopedTypeVariables rule requires the explicit forall at
   -- the syntactic outside of the signature. Parentheses preserve the type
   -- but prevent its variables from scoping over the binding's RHS. Remove
@@ -247,7 +253,10 @@ runBehavioralWorker = do
            , "type HostBool = Runtime.Bool"
            ]
      withSnapshot (sources ++ [(runtimeModule, runtimeSource)]) $ \paths -> do
-      result <- Hint.runInterpreter $ do
+      -- Hint's Extension enumeration predates this GHC extension. Pass the
+      -- fixed flag through its supported interpreter-arguments entry point;
+      -- visible type patterns scope implicit signature variables on the LHS.
+      result <- HintUnsafe.unsafeRunInterpreterWithArgs ["-XTypeAbstractions"] $ do
         Hint.set [Hint.languageExtensions Hint.:=
           [ Hint.RankNTypes, Hint.ImpredicativeTypes, Hint.ScopedTypeVariables
           , Hint.TypeApplications, Hint.AllowAmbiguousTypes

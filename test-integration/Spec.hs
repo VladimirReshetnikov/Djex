@@ -4646,15 +4646,58 @@ tests = testGroup "Djex facade"
         (mkEnvironment declarations :: Either
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
       session <- expectRight $ mkExferenceSession environment
-      request <- expectRight $ parseExferenceRequest session
-        defaultExferenceOptions
-          { exferenceMaximumSteps = 64 }
-        target "phantom-source-hints"
-        "Fixture.Phantom erased"
-      candidate <- firstExferenceCandidate =<< expectRight
-        (runExferenceQuery session request)
-      exferenceCandidateTypeVariableNames
-          (candidateDetails candidate) @?= Map.empty
+      -- GHC quantifies a free source variable even when a synonym erases its
+      -- occurrence. Its vacuous outer binder survives and owns its spelling.
+      -- A binder inside an erased argument, however, must lose its hint.
+      forM_
+          [ ("Fixture.Phantom erased", "Phantom erased", True)
+          , ("forall erased. Fixture.Phantom erased",
+              "forall erased. Phantom erased", True)
+          , ("Fixture.Phantom (forall erased. erased -> erased)",
+              "Phantom (forall erased. erased -> erased)", False)
+          ] $ \(signature, replaySignature, retainsOuter) -> do
+        request <- expectRight $ parseExferenceRequest session
+          defaultExferenceOptions { exferenceMaximumSteps = 64 }
+          target "phantom-source-hints" signature
+        results <- expectRight $ runExferenceTypedQuery session request
+        typed <- case concatMap (batchCandidates . resultSearch) results of
+          firstCandidate : _ -> pure firstCandidate
+          [] -> fail $ "no phantom identity for " ++ signature
+        graph <- expectRight $ typedCandidateTermGraph typed
+        root <- maybe (fail "phantom graph lost its root") pure
+          $ lookupTermNode (termGraphRoot graph) graph
+        let candidate = typedCandidateCompatibility typed
+            hints = exferenceCandidateTypeVariableNames $ candidateDetails candidate
+            identityVariable (ForallType _ [] body) = identityVariable body
+            identityVariable (FunctionType (TypeVariable a) (TypeVariable b))
+              | a == b = Just a
+            identityVariable _ = Nothing
+        usedVariable <- maybe
+          (fail $ "unexpected phantom identity type: " ++ show (termNodeType root))
+          pure $ identityVariable $ termNodeType root
+        assertEqual ("synonym-introduced identity borrowed a source name: " ++ signature)
+          Nothing $ Map.lookup usedVariable hints
+        hints @?= if retainsOuter then Map.fromList
+          [ (FlexibleVariable 0, "erased"), (RigidVariable 0, "erased") ]
+          else Map.empty
+        definition <- expectRight $ renderExferenceCandidateDefinition Unqualified candidate
+        let applied = if retainsOuter then "phantomIdentity @Bool @Int 37"
+              else "phantomIdentity @Int 37"
+            fixture = unlines
+              [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, LiberalTypeSynonyms, ScopedTypeVariables, TypeApplications, NoPolyKinds #-}"
+              , "type Inner = forall b. b -> b"
+              , "type Phantom a = Inner"
+              , "phantomIdentity :: " ++ replaySignature
+              , definition
+              , "main = print (" ++ applied ++ ")"
+              ]
+        withTemporaryHaskellModule fixture $ \sourcePath -> do
+          replay <- timeout 30000000 $ readProcessWithExitCode "runghc" [sourcePath] ""
+          case replay of
+            Nothing -> fail "phantom source-scope replay exceeded 30 seconds"
+            Just (exitCode, output, errors) -> do
+              assertEqual (errors ++ "\n" ++ fixture) ExitSuccess exitCode
+              output @?= "37\n"
   , testCase "canonicalize Exference source names for every failure phase" $ do
       aliasName <- expectRight $ parseName "Fixture.Alias"
       higherName <- expectRight $ parseName "Fixture.Higher"

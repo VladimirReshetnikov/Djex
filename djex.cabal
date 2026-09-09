@@ -272,6 +272,7 @@ Library
     Language.Haskell.Djex.REPL.Parallel
     Language.Haskell.Djex.REPL.Scope
     Language.Haskell.Djex.REPL.Type
+    Language.Haskell.Djex.HaskellSrc.Scope
     Language.Haskell.Djex.REPL.Workspace
     Language.Haskell.Djex.Djinn.Internal.Request
     Language.Haskell.Djex.Djinn.Internal.Session

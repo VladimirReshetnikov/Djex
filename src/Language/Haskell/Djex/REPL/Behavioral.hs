@@ -15,6 +15,8 @@ import System.Timeout (timeout)
 import Language.Haskell.Djex
 import Language.Haskell.Djex.Command
 import Language.Haskell.Djex.REPL.BehavioralWorker
+import Language.Haskell.Djex.HaskellSrc.Scope
+  ( scopedSourceDefinition, scopedSourceExpression )
 import Language.Haskell.Synthesis.Behavioral (BehavioralQuery (..))
 
 -- A reserved row owns one observed compilation failure. Optional graph fields
@@ -178,8 +180,8 @@ presentBehavioralCandidates options context query expression elaborate render ra
   mode = presentationSelection options
   renderAccepted (candidate, Nothing) = render candidate
   renderAccepted (_, Just term) = Right $ case presentationRenderMode options of
-    RenderExpression -> term
-    RenderDefinition -> behavioralName query ++ " = " ++ term
+    RenderExpression -> scopedSourceExpression (behavioralType query) term
+    RenderDefinition -> scopedSourceDefinition (behavioralType query) (behavioralName query) term
   window = max 0 $ presentationQualityWindow options
   initialLookahead = case mode of SelectBestLookahead n -> max 0 n; _ -> maxBound
   count predicate = length . filter predicate

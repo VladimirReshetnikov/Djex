@@ -16,8 +16,9 @@ now passes all ten gates, including 702 unit tests, 12/12 native List recursor
 cells, 13/13 extended Lean Exference operations and 350 signatures per native
 engine. Leant pins the tested Djex `bfc3692e` dependency. The
 [latest re-triage](2026-09-08-synthesis-frontier-retriage.md) records subsequent
-native tree and Haskell `foldl1` transfer misses and an unaccepted implicit-root
-frontend increment (360/361 tests). Cross-engine constructions and all
+native tree and Haskell `foldl1` transfer misses. The subsequent
+[implicit-root REPL increment](2026-09-08-implicit-root-scope.md) passes all
+361 tests and 350 signatures per Haskell engine. Cross-engine constructions and all
 requirements below, including all 19 explicit defaults, remain in force.
 
 The [current retriage](2026-09-07-synthesis-retriage.md) preserves every
@@ -40,8 +41,9 @@ unit tests and fresh context/method replay. [Loaded Haskell schemes](2026-09-08-
 also pass explicit-forall behavioral queries in both engines. The
 [ordinary contextual REPL delivery](2026-09-08-ordinary-contextual-output.md) now
 passes 36 public queries and 330 tests across four complete affected suites at
-its documented bounds. Implicit-root scoping, one-shot contextual commands,
-typed list rendering, derived method schemes, mixed Lean
+its documented bounds. The documented implicit-root REPL fragment now
+passes the acceptance above. One-shot contextual commands, typed list rendering,
+broader binder forms and implicit selection matrices, derived method schemes, mixed Lean
 inventories, selected equal-predicate dictionaries and richer evidence remain
 open. Priority 1's original supported-fragment elaboration scope is complete.
 

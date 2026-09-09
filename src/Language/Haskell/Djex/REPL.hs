@@ -113,6 +113,8 @@ import Language.Haskell.Djex.REPL.Parallel
   )
 import Language.Haskell.Djex.REPL.Scope
 import Language.Haskell.Djex.REPL.Type
+import Language.Haskell.Djex.HaskellSrc.Scope
+  ( scopedSourceDefinition, scopedSourceExpression )
 import Language.Haskell.Djex.REPL.Workspace
 import Language.Haskell.Djex.Text (normalize, trim)
 import Language.Haskell.Synthesis.Behavioral (BehavioralQuery (..))
@@ -838,10 +840,10 @@ runQuery sourceName query state = do
     term <- snd $ elaborateBehavioral parsed projectSignature
       renderOptions {renderQualification = presentationQualification options} candidate
     pure $ case presentationRenderMode options of
-      RenderExpression -> term
-      RenderDefinition -> renderNamePrefix Unqualified
-        (definitionName $ clauseName $ candidateOutput $ typedCandidateCompatibility candidate)
-        ++ " = " ++ term
+      RenderExpression -> scopedSourceExpression typeSource term
+      RenderDefinition -> scopedSourceDefinition typeSource
+        (renderNamePrefix Unqualified
+          (definitionName $ clauseName $ candidateOutput $ typedCandidateCompatibility candidate)) term
 
   renderContextualDjinn parsed = renderContextual (djinnPresentationOptions state)
     parsed projectSignatureToDjinn (defaultRenderOptions id)

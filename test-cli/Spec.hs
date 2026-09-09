@@ -207,6 +207,10 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplBehavioralScope
   , testCase "REPL synthesizes loaded constraint-only providers with exact replay"
       testReplLoadedConstraintOnlyProvider
+  , testGroup "implicit contextual signatures preserve binding scope"
+      [ testCase backend $ testReplImplicitConstraintOnlyProvider backend
+      | backend <- ["djinn", "exference"]
+      ]
   , testGroup "ordinary contextual presentation retains typed choices"
       [ testCase (backend ++ " " ++ selection) $
           testReplOrdinaryConstraintOnlyProvider backend selection
@@ -4024,6 +4028,71 @@ testReplOrdinaryConstraintOnlyProvider backend selection = withTemporaryEnvironm
               ("exact ordinary contextual replay changed a payload: " ++ output)
               (Just $ replicate (length displayed) (37 :: Int, 91 :: Int)) (readMaybe observed)
             _ -> fail $ "ordinary contextual output failed original-signature replay: " ++ show replay
+
+-- Implicit root variables are scoped by visible type patterns in a named
+-- equation. Standalone expression output supplies its own polymorphic
+-- annotation and is applied directly; assigning it to an ambiguous RHS
+-- without type patterns would lose the caller's dictionary again.
+testReplImplicitConstraintOnlyProvider :: String -> Assertion
+testReplImplicitConstraintOnlyProvider backend = withTemporaryEnvironment
+  [("Methods.hs", constraintOnlyMethodSource)] $ \directory -> do
+    (guardExit, _, guardErrors) <- runRepl directory
+      [ ":backend " ++ backend, ":module Methods"
+      , ":synth forall a. C b => Token"
+      , ":synth (forall a. C b => Token)"
+      ]
+    assertEqual "explicit forall guard query exit" ExitSuccess guardExit
+    assertEqual ("free variables escaped explicit forall: " ++ guardErrors) 2 $
+      length $ filter ("[DJEX_TYPE_PARSE]" `isInfixOf`) $ lines guardErrors
+    forM_
+      [ ("C a => Token", "")
+      , ("((C a => Token))", "")
+      , ("C z => a -> Token", " @Prelude.Bool Prelude.True")
+      , ("C a => (forall b. b -> b) -> Token", " (\\x -> x)")
+      , ("C a => forall b. b -> Token", " @Prelude.Bool Prelude.True")
+      ] $ \(signature, arguments) ->
+      forM_ [False, True] $ \behavioral ->
+        forM_ ["definition", "expression"] $ \mode -> do
+          let apply name ty = "observe ((" ++ name ++ ") @Prelude." ++ ty ++ arguments ++ ")"
+              predicate = apply "selected" "Int" ++ " == 37 && " ++ apply "selected" "Bool" ++ " == 91"
+              query = if behavioral
+                then ":synth selected :: " ++ signature ++ " where " ++ predicate
+                else ":synth " ++ signature
+          (exitCode, output, errors) <- runRepl directory $
+            [ ":backend " ++ backend, ":module Methods", ":set select first"
+            , ":set target selected", ":set djinn-axioms on", ":set render " ++ mode
+            , ":set allow-unused on", ":set quality-window 4", ":set candidate-limit 4"
+            , ":set choice-budget 20000", ":set max-steps 256", query
+            ] ++ [":synth rejected :: " ++ signature ++ " where Prelude.False" | behavioral]
+          assertEqual "implicit source query exit" ExitSuccess exitCode
+          assertBool ("implicit source scope failed preflight: " ++ errors) $
+            not $ "BEHAVIORAL_PREFLIGHT" `isInfixOf` errors
+          when behavioral $ do
+            assertContains "implicit predicate never passed" "true=1" errors
+            assertBool ("False did not actually reject: " ++ errors) $
+              any (\line -> "true=0, false=" `isInfixOf` line
+                && not ("true=0, false=0," `isInfixOf` line)
+                && "error=0, timeout=0" `isInfixOf` line) $ lines errors
+          displayed <- case filter
+              ((if mode == "definition" then "selected @" else "((\\ @") `isPrefixOf`)
+              $ lines output of
+            [one] -> pure one
+            other -> fail $ "expected one scoped implementation at " ++ signature
+              ++ ": " ++ show other ++ "\n" ++ output ++ "\n" ++ errors
+          let observation name = "(" ++ apply name "Int" ++ ", " ++ apply name "Bool" ++ ")"
+              replayBody = if mode == "definition"
+                then ["selected :: " ++ signature, displayed, "main = print " ++ observation "selected"]
+                else ["main = print " ++ observation displayed]
+          withTemporaryEnvironment [("Main.hs", unlines $
+              [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications, TypeAbstractions, AllowAmbiguousTypes #-}"
+              , "module Main where", "import Methods", "main :: IO ()"
+              ] ++ replayBody)] $ \replayDirectory -> do
+            checked <- timeout 30000000 $ readCreateProcessWithExitCode
+              ((proc "runghc" ["-i" ++ directory, replayDirectory </> "Main.hs"])
+                {use_process_jobs = True}) ""
+            case checked of
+              Just (ExitSuccess, "(37,91)\n", _) -> pure ()
+              _ -> fail $ "exact implicit-source implementation lost dictionary payloads: " ++ show checked
 
 testReplParenthesizedForallBehavior :: Assertion
 testReplParenthesizedForallBehavior = withTemporaryEnvironment [] $ \directory ->

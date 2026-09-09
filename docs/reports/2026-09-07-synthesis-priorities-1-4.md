@@ -10,9 +10,12 @@ The [function-carrier delivery](2026-09-08-function-carrier-search.md) now accep
 accumulator in canonical Haskell Exference at its original limits, retaining
 13/13 extended behavior, 350 signatures per Haskell engine and all 2,309
 tests across 15 complete suites (with the documented Length fixture rerun).
-This advances priority 2; native integration, the recurring layered-provider
-deadline and the remaining cross-engine constructions stay open. All
-requirements below, including all 19 explicit defaults, remain in force.
+This advances priority 2. The [current decision](2026-09-07-synthesis-retriage.md)
+now records 701/701 native unit tests and six real-kernel method cells
+passing at working `bfc3692e`, including the previous layered-provider
+deadline failure. Remaining native integration and cross-engine constructions
+stay open. All requirements below, including all 19 explicit defaults,
+remain in force.
 
 The [current retriage](2026-09-07-synthesis-retriage.md) preserves every
 completion requirement below. **Bounded local Lean context integration is now

@@ -152,7 +152,10 @@ records fresh **13/13 Lean Exference** acceptance at Djex `3529c465` and a
 refined scheduler at `63a23f58` that preserves monomorphic goal ordering.
 The refinement passes all 2,308 Haskell tests and retains the Haskell behavior
 and signature results; its complete native integration remains open. The latest
-native unit run passes **700/701**, with one recurring layered-provider deadline.
+native unit result at that older revision was **700/701**. At the accepted
+canonical `bfc3692e` change below, a fresh complete native run passes
+**701/701**, and all six real-kernel method cells pass; the remaining
+integration gates are running. See the [current decision and preserved evidence](docs/reports/2026-09-07-synthesis-retriage.md).
 Canonical Haskell Exference now [synthesizes the supplied tree accumulator](docs/reports/2026-09-08-function-carrier-search.md)
 with a function carrier at the original bounds: two exact candidates pass all
 16 observations and all 1,024 contradictory controls reject. The scoped
@@ -166,8 +169,9 @@ now fixes generated-eliminator admission while retaining ordinary user `elim`
 functions. Its public tree inventories pass; positive Lean synthesis remains open.
 The report also corrects earlier tree False-control pass labels: the Exference
 and Both commands timed out and fail the fixture's deadline contract. The next delivery
-integrates the accepted canonical source in Lean; the recurring layered-provider
-deadline remains the release gate. Exact Haskell output is an independent delivery.
+finishes native integration, then checks the Lean tree at unchanged bounds.
+The earlier layered-provider failure now passes in the complete unit suite;
+exact Haskell output is the next independent implementation delivery.
 A broader scheduling experiment failed and was reverted. The full **13 extended
 operations and all 19 explicit defaults**, across both Haskell engines and
 Lean Djinn/Exference/Both, remain required; newer canonical Haskell results
@@ -673,9 +677,10 @@ signatures and compiler-checks the generated terms under its documented
 environment and partiality assumptions.
 
 The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) records
-accepted elaboration, case-analysis, Haskell folds, and constraint-only engine
-inference. Next are frontend provider integration and missing Church
-constructions, with supplied tree folds as an independent delivery.
+accepted elaboration, contextual inference and the Exference tree carrier,
+with 701 native unit tests passing at the newer working dependency. Finish
+native integration and tree acceptance, then exact Haskell output and the
+remaining Church constructions; broader contextual evidence follows.
 The [original roadmap](docs/reports/2026-09-06-synthesis-next-priorities.md)
 retains the full completion requirements; prepared runners and isolated
 renderers do not establish production synthesis coverage.

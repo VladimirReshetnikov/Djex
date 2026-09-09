@@ -10,15 +10,15 @@ The [function-carrier delivery](2026-09-08-function-carrier-search.md) now accep
 accumulator in canonical Haskell Exference at its original limits, retaining
 13/13 extended behavior, 350 signatures per Haskell engine and all 2,309
 tests across 15 complete suites (with the documented Length fixture rerun).
-This advances priority 2. The [current decision](2026-09-07-synthesis-retriage.md)
-now records 701/701 native unit tests, six method cells, nine method-control
-sessions and 39 local-context cells passing at working `bfc3692e`, including
-the previous layered-provider deadline failure. The
-[terminal integration report](2026-09-08-native-carrier-integration.md) records
-9/12 native List recursor cells after the deadline audit; Exference append and
-Exference/Both False controls time out. Four later integration gates were not
-run, and the dependency remains unpromoted. Cross-engine constructions stay open. All requirements below, including all 19 explicit defaults,
-remain in force.
+This advances priority 2. The
+[completed native integration](2026-09-08-combined-native-integration.md)
+now passes all ten gates, including 702 unit tests, 12/12 native List recursor
+cells, 13/13 extended Lean Exference operations and 350 signatures per native
+engine. Leant pins the tested Djex `bfc3692e` dependency. The
+[latest re-triage](2026-09-08-synthesis-frontier-retriage.md) records subsequent
+native tree and Haskell `foldl1` transfer misses and an unaccepted implicit-root
+frontend increment (360/361 tests). Cross-engine constructions and all
+requirements below, including all 19 explicit defaults, remain in force.
 
 The [current retriage](2026-09-07-synthesis-retriage.md) preserves every
 completion requirement below. **Bounded local Lean context integration is now
@@ -51,8 +51,8 @@ now records a **fresh 13/13 extended Haskell Exference run**, historical
 The [focused introduction change](2026-09-08-focused-forall-search.md) closes
 Exference `maybeEither` at unchanged limits with exact full-signature behavior
 and False controls. All 2,308 tests in 15 suites and 350 signature cases per
-Haskell engine pass. Lean Exference retains its historical first-six 6/6
-composite; the newer engine still needs native integration. Original priority
+Haskell engine pass. Lean Exference's historical first-six 6/6
+composite is superseded by the completed 13/13 native integration above. Original priority
 4 remains open for all 13 extended operations and all 19 explicit defaults
 across every required engine. The current re-triage defines execution order.
 

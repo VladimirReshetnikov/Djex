@@ -1,5 +1,10 @@
 # Synthesis re-triage: finish bounded deliveries, then extend evidence
 
+> Execution order superseded by the [tree/frontend re-triage](2026-09-08-synthesis-frontier-retriage.md).
+> The transfer checks have run and still miss; the implicit-signature
+> implementation passes 360/361 tests and remains unaccepted. The
+> native integration results below retain their recorded acceptance.
+
 This report, updated on 2026-09-08, changes the execution order, not the scope
 or numbering of the active **implement priorities 1–4** goal. The
 [original roadmap](2026-09-06-synthesis-next-priorities.md) and

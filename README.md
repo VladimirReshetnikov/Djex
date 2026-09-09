@@ -184,12 +184,17 @@ now retains selected type and dictionary choices through first/best/all renderin
 all 36 explicit-forall public queries and 330 tests across four complete affected
 suites pass at the documented fixture bounds. Implicit-root scope, one-shot
 contextual commands and typed list rendering remain open. The
-[current delivery order](docs/reports/2026-09-07-synthesis-retriage.md) checks the
-native tree transfer, completes
-implicit-root/one-shot/list frontend gaps and continues the full Church matrix.
-Broader contextual evidence follows. Further verification-request reduction
-leaves the immediate queue now that the full native recursor matrix passes.
-The tested native integration release gate is complete.
+[current re-triage](docs/reports/2026-09-08-synthesis-frontier-retriage.md)
+prioritizes the implicit-signature regression, native tree candidate tracing,
+then one-shot/list frontend coverage and the full Church behavioral matrix.
+The implicit-signature implementation passes **360/361 tests**, including the
+complete **115-test CLI suite**, but remains unaccepted because of a synonym
+source-hint regression. The tree and Haskell `foldl1` transfer checks still
+miss at their original limits. One native tree debug expression independently
+passes the full type and all 16 observations; live typed-candidate acceptance
+is still open. Broader contextual evidence follows. Duplicate suppression and
+further verifier optimization now require evidence from a remaining failure.
+The tested native integration release gate remains complete.
 A broader scheduling experiment failed and was reverted. The full **13 extended
 operations and all 19 explicit defaults**, across both Haskell engines and
 Lean Djinn/Exference/Both, remain required; newer canonical Haskell results

@@ -1,0 +1,99 @@
+{
+  "status": "failed_regression_not_accepted",
+  "base_commit": "1abbd0b117c4635dd4933fdebf8f492c067a9b7a",
+  "production_state": "uncommitted implicit-root implementation; source snapshot in archive",
+  "strict_build": "passed with -Werror",
+  "suites": [
+    {
+      "suite": "djex-tests",
+      "status": "failed",
+      "executable_sha256": "f93da2b7c28ffe824e9b9471b25a73b877755381980b4d0f2183e72b5ed200cc",
+      "inventory_count": 152,
+      "executable_unchanged": true,
+      "exit_code": 1
+    },
+    {
+      "suite": "djex-api-tests",
+      "status": "passed",
+      "executable_sha256": "52d7c37d278e37b48f87debfb94209de6071799a513af5a8a3c9d3c1f3101b39",
+      "inventory_count": 38,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 38,
+      "seconds": 0.03
+    },
+    {
+      "suite": "djex-parallel-tests",
+      "status": "passed",
+      "executable_sha256": "15f85d63a6a1dd3c142e29c086e9422a4aaf11ca1d46de5a5e6bba54b197adf9",
+      "inventory_count": 27,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 27,
+      "seconds": 0.0
+    },
+    {
+      "suite": "exference-frontend-api-tests",
+      "status": "passed",
+      "executable_sha256": "0990b4a45c1b3db2fb5ed5933d517de3c84b1923d4a47aed8020e79b29020c2b",
+      "inventory_count": 4,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 4,
+      "seconds": 0.0
+    },
+    {
+      "suite": "exference-cli-tests",
+      "status": "passed",
+      "executable_sha256": "135617abe884c5b8e00b5a166f01a5aaff9a9660006d964abf8ae39d05fca47a",
+      "inventory_count": 25,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 25,
+      "seconds": 2.66
+    },
+    {
+      "suite": "djex-cli-tests",
+      "status": "passed",
+      "executable_sha256": "dcbe2f34dc721593f9adf219d1716fd82799aa96b2eb5cc8b8f9a4a0c53efb03",
+      "inventory_count": 115,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 115,
+      "seconds": 277.68
+    }
+  ],
+  "sources_unchanged": true,
+  "helpers_unchanged": true,
+  "failure": {
+    "test": "do not reuse erased hints for synonym-introduced binders",
+    "file": "test-integration/Spec.hs:4657",
+    "expected": "fromList []",
+    "actual": "fromList [(FlexibleVariable 0,\"erased\"),(RigidVariable 0,\"erased\")]",
+    "interpretation": "Root quantification changes source-hint survival after synonym expansion. Whether the name denotes a surviving vacuous source binder or is incorrectly reassigned remains unresolved."
+  },
+  "new_cli_fixture": {
+    "engines": [
+      "djinn",
+      "exference"
+    ],
+    "positive_queries_with_exact_GHC_replay": 40,
+    "actual_false_controls": 20,
+    "invalid_explicit_forall_guards": 4,
+    "signature_variants": 5,
+    "definition_boundary": "Exact original signature with visible type patterns on the left-hand side.",
+    "expression_boundary": "Independently applied annotated polymorphic expression; ordinary RHS assignment under an ambiguous implicit signature is not established."
+  },
+  "archive": {
+    "path": "implicit-root-retriage.zip",
+    "artifacts": 333,
+    "bytes": 1971855,
+    "sha256": "bffd0579b3caeb96d4f59b35d7747a0a5398a7b1137e70cec370014813052263",
+    "all_members_rehashed": true
+  },
+  "boundaries": [
+    "Five complete suites pass; djex-tests fails one of 152 tests.",
+    "No acceptance or dependency promotion follows from the passing CLI suite.",
+    "Archive includes matching declared Haskell, Cabal and Python source inputs and raw run records; binaries are represented by recorded hashes."
+  ]
+}

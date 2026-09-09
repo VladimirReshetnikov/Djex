@@ -1,0 +1,220 @@
+{
+  "status": "canonical_haskell_accepted",
+  "tests": 2385,
+  "suites": 16,
+  "suite_results": [
+    {
+      "suite": "exference-engine-tests",
+      "status": "passed",
+      "executable_sha256": "a9111e0041cc38aec86d295e8dc0d9194dfbc9b87c414c97d8b61a530dd5761d",
+      "inventory_count": 93,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 93,
+      "seconds": 1.42
+    },
+    {
+      "suite": "exference-tests",
+      "status": "passed",
+      "executable_sha256": "6851c1e7254885c2ec85911908ae07f9281bb6cc1d1b021b912597704fdf9076",
+      "inventory_count": 515,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 515,
+      "seconds": 4.86
+    },
+    {
+      "suite": "synthesis-length-tests",
+      "status": "passed",
+      "executable_sha256": "ca6252be982deaee695ddda566e556ef04ff58c2981709a489d3ad6b203f15df",
+      "inventory_count": 436,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 436,
+      "seconds": 79.94
+    },
+    {
+      "suite": "djex-tests",
+      "status": "passed",
+      "executable_sha256": "99df6c557826b4f4df81b3f93ab8490ef536d2dbf446d62469334ae556900ef6",
+      "inventory_count": 152,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 152,
+      "seconds": 192.19
+    },
+    {
+      "suite": "djex-api-tests",
+      "status": "passed",
+      "executable_sha256": "48aaed3f2bd279e025300f9126633eeb9817dc883861ce733ae78fa59b5d29db",
+      "inventory_count": 38,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 38,
+      "seconds": 0.12
+    },
+    {
+      "suite": "djex-cli-tests",
+      "status": "passed",
+      "executable_sha256": "1054318831376ad51cba11d7c240c8b37ef85441327c386cc71232b0c0b892f3",
+      "inventory_count": 138,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 138,
+      "seconds": 1450.65
+    },
+    {
+      "suite": "exference-frontend-api-tests",
+      "status": "passed",
+      "executable_sha256": "2007893434cf7d2d279c8543a3bafdb11a61532f3600f66fba6d714415264a51",
+      "inventory_count": 4,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 4,
+      "seconds": 0.0
+    },
+    {
+      "suite": "exference-cli-tests",
+      "status": "passed",
+      "executable_sha256": "d3614eedf12bcf7b633318387a8714d463f3eb47d6c99f4a56890ff31bf1c2f3",
+      "inventory_count": 25,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 25,
+      "seconds": 3.36
+    },
+    {
+      "suite": "synthesis-tests",
+      "status": "passed",
+      "executable_sha256": "f2aae7e0d295b0afba97fdc77cf356ae549b9d460e2692b6e6bd02531d5dd07e",
+      "inventory_count": 513,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 513,
+      "seconds": 0.2
+    },
+    {
+      "suite": "synthesis-certificate-tests",
+      "status": "passed",
+      "executable_sha256": "09b2fa3db1c1c9726a9de9bf87e89c4f359c2efef4e2a4969cb574cc3e1e4651",
+      "inventory_count": 103,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 103,
+      "seconds": 0.03
+    },
+    {
+      "suite": "synthesis-term-graph-fingerprint-tests",
+      "status": "passed",
+      "executable_sha256": "5b2bd63358f8a98af6717c8b3c1dd0099f65b7639d5c34b1cdf791712a6dfe6b",
+      "inventory_count": 11,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 11,
+      "seconds": 0.01
+    },
+    {
+      "suite": "djinn-source-graph-tests",
+      "status": "passed",
+      "executable_sha256": "7079545f800cbf0f6f61bf92b2256fa80d180947a6ede1f92c72fe1adb80fc07",
+      "inventory_count": 59,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 59,
+      "seconds": 0.29
+    },
+    {
+      "suite": "djinn-source-graph-private-tests",
+      "status": "passed",
+      "executable_sha256": "af3689edc9c5eed2c3b2caae849083f8a32c52e8d434eeaf43c7f9cf7e4bdc57",
+      "inventory_count": 114,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 114,
+      "seconds": 0.02
+    },
+    {
+      "suite": "djinn-tests",
+      "status": "passed",
+      "executable_sha256": "345f794d2b9eeaf57d9e28abc8448d8d6ae46e86fd83f750515a7f1c97855a3c",
+      "inventory_count": 133,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 133,
+      "seconds": 55.77
+    },
+    {
+      "suite": "djinn-cli-tests",
+      "status": "passed",
+      "executable_sha256": "8a0b6913e3a718c396186e77a80ae69ad44484852bbc28d5752533d4c705bd00",
+      "inventory_count": 24,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 24,
+      "seconds": 1.36
+    },
+    {
+      "suite": "djex-parallel-tests",
+      "status": "passed",
+      "executable_sha256": "15f85d63a6a1dd3c142e29c086e9422a4aaf11ca1d46de5a5e6bba54b197adf9",
+      "inventory_count": 27,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 27,
+      "seconds": 0.0
+    }
+  ],
+  "behavioral_list_matrix": {
+    "signatures": 5,
+    "modes": [
+      "djinn",
+      "exference",
+      "both"
+    ],
+    "selections": [
+      "first",
+      "best",
+      "all"
+    ],
+    "render_modes": [
+      "definition",
+      "expression"
+    ],
+    "positive_false_query_pairs": 90,
+    "wrapper_replays": 2,
+    "hidden_constructor_queries": 2,
+    "unused_context_query_pairs": 6,
+    "unused_context_exact_replays": 8
+  },
+  "one_shot_lists": {
+    "queries": 80,
+    "exact_displayed_replays": 2526
+  },
+  "public_regression": {
+    "queries": 64,
+    "exact_displayed_replays": 5354,
+    "scope_guards": 4,
+    "noninhabitation_queries": 8
+  },
+  "signatures_per_haskell_engine": 350,
+  "extended_exference": {
+    "operations": 13,
+    "false_controls": 1,
+    "oracle_controls": 28
+  },
+  "archive": {
+    "path": "contextual-list-output.zip",
+    "sha256": "266c6d10c5c30736bfac9d29182b64f66fc2b0cd7f57aaebc239fe0486732485",
+    "bytes": 3075773,
+    "artifact_count": 1152,
+    "all_members_rehashed": true
+  },
+  "boundaries": [
+    "Exact replay of named behavioral results occurs inside the CLI tests; successful temporary modules are not retained individually. The archive preserves the complete executable test source and terminal full-suite log.",
+    "The one-shot archive retains every displayed alternative and its independent replay source and observations.",
+    "Type-only list queries may return empty lists or select valid closed instances; named behavioral tests enforce forwarding and list behavior.",
+    "This documents the five-signature list matrix, not arbitrary contextual data or complete higher-rank search.",
+    "Leant remains at its accepted 3adfac5c dependency; native integration of this canonical change is pending.",
+    "The complete 160-cell Church behavior objective and native tree acceptance remain open."
+  ]
+}

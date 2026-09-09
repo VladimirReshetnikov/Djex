@@ -221,6 +221,18 @@ main = defaultMain $ testGroup "Djex CLI integration"
       , (selection, ranking) <- [("first", "balanced"), ("best", "balanced"),
           ("all", "balanced"), ("all", "legacy")]
       ]
+  , testGroup "contextual lists retain exact dictionaries and polymorphic elements"
+      [ testCase (backend ++ " " ++ selection) $
+          testReplContextualLists backend selection
+      | backend <- ["djinn", "exference", "both"]
+      , selection <- ["first", "best", "all"]
+      ]
+  , testGroup "contextual constructors respect wrappers and export visibility"
+      [ testCase backend $ testReplContextualConstructors backend
+      | backend <- ["djinn", "exference"] ]
+  , testGroup "contextual lists can use arguments without method providers"
+      [ testCase backend $ testReplContextualInputList backend
+      | backend <- ["djinn", "exference", "both"] ]
   , testGroup "ordinary contextual presentation retains typed choices"
       [ testCase (backend ++ " " ++ selection) $
           testReplOrdinaryConstraintOnlyProvider backend selection
@@ -4122,6 +4134,169 @@ assertDictionaryObservations label selection count observed =
             then [(37, 91), (37, 37), (91, 91)] else [(37, 91)]
       assertBool (label ++ "\n" ++ observed) $ all (`elem` allowed) pairs
     Nothing -> fail $ "cannot parse dictionary observations: " ++ observed
+
+-- A nonempty result cannot pass through the old empty-list inhabitant. Keep
+-- the full source signature and independently replay every displayed term;
+-- the input-list case also prevents dropping or replacing the caller's tail.
+testReplContextualLists :: String -> String -> Assertion
+testReplContextualLists backend selection = withTemporaryEnvironment
+  [("Methods.hs", constraintOnlyMethodSource)] $ \directory ->
+    forM_ cases $ \(signature, implicit, observation, expected) ->
+      forM_ ["definition", "expression"] $ \mode -> do
+        let observe name = "(" ++ observation name "Int" ++ ", "
+              ++ observation name "Bool" ++ ")"
+            predicate = observe "selected" ++ " == " ++ show expected
+        (exitCode, output, errors) <- runRepl directory
+          [ ":backend " ++ backend, ":module Methods", ":set select " ++ selection
+          , ":set ranking balanced", ":set jobs 2", ":set djinn-axioms on"
+          , ":set render " ++ mode, ":set allow-unused on"
+          , ":set quality-window 32", ":set candidate-limit 32"
+          , ":set choice-budget 20000", ":set max-steps 20000"
+          , ":synth selected :: " ++ signature ++ " where " ++ predicate
+          , ":synth rejected :: " ++ signature ++ " where Prelude.False"
+          ]
+        assertEqual "contextual list query exit" ExitSuccess exitCode
+        assertBool ("contextual list query reported an error: " ++ errors) $
+          not $ "error [" `isInfixOf` errors
+        assertBool ("False was not evaluated successfully: " ++ errors) $
+          any (\line -> "true=0, false=" `isInfixOf` line
+            && not ("true=0, false=0," `isInfixOf` line)
+            && "error=0, timeout=0" `isInfixOf` line) $ lines errors
+        assertBool "False admitted a list implementation" $
+          not $ "rejected " `isInfixOf` output
+        let displayed = filter
+              (\line -> if mode == "definition" then "selected " `isPrefixOf` line
+                else any (`isPrefixOf` line) ["(", "\\", "["]) $ lines output
+        assertBool ("no matching contextual list: " ++ signature ++ "\n" ++ output ++ errors) $
+          not $ null displayed
+        when (backend == "both") $ forM_ ["-- Djinn", "-- Exference"] $ \label -> do
+          let section = takeWhile (`notElem` ["-- Djinn", "-- Exference"])
+                $ drop 1 $ dropWhile (/= label) $ lines output
+          assertBool ("combined list query lost " ++ label ++ " output: " ++ output) $
+            any (`elem` displayed) section
+        let checks = zip [0 :: Int ..] displayed
+            checkName index = "check" ++ show index
+            body (index, candidate) =
+              [ checkName index ++ " :: ([Int], [Int])"
+              , checkName index ++ " = " ++ if mode == "expression" && implicit
+                  then observe candidate
+                  else "let { selected :: " ++ signature ++ "; "
+                    ++ (if mode == "definition" then candidate else "selected = " ++ candidate)
+                    ++ " } in " ++ observe "selected"
+              ]
+        withTemporaryEnvironment [("Main.hs", unlines $
+            [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications, TypeAbstractions, AllowAmbiguousTypes #-}"
+            , "module Main where", "import Methods", "main :: IO ()"
+            ] ++ concatMap body checks ++
+            ["main = print [" ++ intercalate ", " (map (checkName . fst) checks) ++ "]"])] $
+          \replayDirectory -> do
+            checked <- timeout 30000000 $ readCreateProcessWithExitCode
+              ((proc "runghc" ["-i" ++ directory, replayDirectory </> "Main.hs"])
+                {use_process_jobs = True}) ""
+            case checked of
+              Just (ExitSuccess, observed, _) -> assertEqual
+                ("exact list replay changed a dictionary or element: " ++ signature)
+                (Just $ replicate (length displayed) expected)
+                (readMaybe observed :: Maybe [([Int], [Int])])
+              _ -> fail $ "contextual list failed exact full-type replay: " ++ show checked
+ where
+  application name ty = "((" ++ name ++ ") @Prelude." ++ ty ++ ")"
+  plain name ty = "Prelude.map observe " ++ application name ty
+  prepend name ty = "Prelude.map observe (" ++ application name ty
+    ++ " [method @Prelude." ++ (if ty == "Int" then "Bool" else "Int") ++ "])"
+  polymorphic name ty = "Prelude.map @(forall b. b -> b) @Prelude.Int (\\g -> g "
+    ++ (if ty == "Int" then "37" else "91") ++ ") (" ++ application name ty ++ " (\\x -> x))"
+  cases =
+    [ ("forall a. C a => [Token]", False, plain, ([37], [91]))
+    , ("C a => [Token]", True, plain, ([37], [91]))
+    , ("forall a. C a => [Token] -> [Token]", False, prepend, ([37,91], [91,37]))
+    , ("forall a. C a => (forall b. b -> b) -> [(forall b. b -> b)]", False,
+        polymorphic, ([37], [91]))
+    , ("forall djexSource0. C djexSource0 => (forall b. b -> b) -> [(forall b. b -> b)]", False,
+        polymorphic, ([37], [91]))
+    ]
+
+testReplContextualConstructors :: String -> Assertion
+testReplContextualConstructors backend = withTemporaryEnvironment
+  [("Methods.hs", unlines $
+      map (\line -> if "module Methods " `isPrefixOf` line
+        then "module Methods (Token, C, method, observe, Wrap(..), unwrap, Vault) where"
+        else line) (lines constraintOnlyMethodSource) ++
+      [ "data Wrap a = Wrap a", "unwrap :: Wrap a -> a", "unwrap (Wrap x) = x"
+      , "data Vault = Vault" ])] $ \directory -> do
+    let signature = "forall a. C a => Wrap [Token]"
+        observe ty = "Prelude.map observe (unwrap (selected @Prelude." ++ ty ++ "))"
+    (code, output, errors) <- runRepl directory
+      [ ":backend " ++ backend, ":module Methods", ":set select first"
+      , ":set render definition", ":set allow-unused on", ":set djinn-axioms on"
+      , ":set quality-window 32", ":set candidate-limit 32"
+      , ":set choice-budget 20000", ":set max-steps 20000"
+      , ":synth selected :: " ++ signature ++ " where (" ++ observe "Int" ++ ", "
+          ++ observe "Bool" ++ ") == ([37], [91])"
+      , ":synth rejected :: " ++ signature ++ " where Prelude.False"
+      , ":set target hidden", ":synth forall a. C a => Vault"
+      ]
+    assertEqual "contextual wrapper session exit" ExitSuccess code
+    assertBool ("wrapper query error: " ++ errors) $ not $ "error [" `isInfixOf` errors
+    assertBool "hidden constructor leaked into a candidate" $
+      not $ any ("hidden " `isPrefixOf`) $ lines output
+    assertContains "hidden constructor query reached search"
+      (if backend == "djinn" then "DJEX_DJINN_UNDECIDED" else "DJEX_EXF_NO_RESULT") errors
+    assertBool "False accepted a wrapper" $ not $ any ("rejected " `isPrefixOf`) $ lines output
+    assertBool ("wrapper False control did not run cleanly: " ++ errors) $
+      any (\line -> "true=0, false=" `isInfixOf` line
+        && not ("true=0, false=0," `isInfixOf` line)
+        && "error=0, timeout=0" `isInfixOf` line) $ lines errors
+    let displayed = filter ("selected " `isPrefixOf`) $ lines output
+    assertEqual ("wrapper output: " ++ output ++ errors) 1 $ length displayed
+    withTemporaryEnvironment [("Main.hs", unlines $
+        [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications, AllowAmbiguousTypes #-}"
+        , "module Main where", "import Methods", "selected :: " ++ signature
+        ] ++ displayed ++ ["main :: IO ()", "main = print (" ++ observe "Int" ++ ", " ++ observe "Bool" ++ ")"])] $
+      \replayDirectory -> do
+        checked <- timeout 30000000 $ readCreateProcessWithExitCode
+          ((proc "runghc" ["-i" ++ directory, replayDirectory </> "Main.hs"])
+            {use_process_jobs = True}) ""
+        case checked of
+          Just (ExitSuccess, observed, _) -> assertEqual "wrapper changed a dictionary"
+            (Just ([37], [91])) (readMaybe observed :: Maybe ([Int], [Int]))
+          _ -> fail $ "wrapper failed exact full-signature replay: " ++ show checked
+
+testReplContextualInputList :: String -> Assertion
+testReplContextualInputList backend = forM_
+  ["forall a b. C a => b -> [b]", "forall a b. b -> (C a => [b])"] $ \signature ->
+  withTemporaryEnvironment
+  [("Input.hs", unlines ["module Input (C) where", "class C a", "instance C Int"])] $ \directory -> do
+    (code, output, errors) <- runRepl directory
+      [ ":backend " ++ backend, ":module Input", ":set select first"
+      , ":set render definition", ":set allow-unused on", ":set djinn-axioms on"
+      , ":set quality-window 32", ":set candidate-limit 32"
+      , ":set choice-budget 20000", ":set max-steps 20000"
+      , ":synth selected :: " ++ signature ++ " where selected @Prelude.Int @Prelude.Int 37 == [37]"
+      , ":synth rejected :: " ++ signature ++ " where Prelude.False"
+      ]
+    assertEqual "unused-context list session exit" ExitSuccess code
+    assertBool ("unused-context query error: " ++ errors) $ not $ "error [" `isInfixOf` errors
+    let displayed = filter ("selected " `isPrefixOf`) $ lines output
+        count = if backend == "both" then 2 else 1
+    assertEqual ("no singleton without a method provider: " ++ output ++ errors) count $ length displayed
+    assertBool "False accepted an unused-context list" $ not $ any ("rejected " `isPrefixOf`) $ lines output
+    assertBool ("unused-context False control did not run cleanly: " ++ errors) $
+      any (\line -> "true=0, false=" `isInfixOf` line
+        && not ("true=0, false=0," `isInfixOf` line)
+        && "error=0, timeout=0" `isInfixOf` line) $ lines errors
+    forM_ displayed $ \candidate -> withTemporaryEnvironment [("Main.hs", unlines
+        [ "{-# LANGUAGE RankNTypes, ScopedTypeVariables, TypeApplications, AllowAmbiguousTypes #-}"
+        , "module Main where", "import Input", "selected :: " ++ signature, candidate
+        , "main :: IO ()", "main = print (selected @Int @Int 37, selected @Int @Bool True)" ])] $
+      \replayDirectory -> do
+        checked <- timeout 30000000 $ readCreateProcessWithExitCode
+          ((proc "runghc" ["-i" ++ directory, replayDirectory </> "Main.hs"])
+            {use_process_jobs = True}) ""
+        case checked of
+          Just (ExitSuccess, observed, _) -> assertEqual "unused-context list changed its argument"
+            (Just ([37], [True])) (readMaybe observed :: Maybe ([Int], [Bool]))
+          _ -> fail $ "unused-context list failed full-signature replay: " ++ show checked
 
 testLocalGraphGeneralization :: Assertion
 testLocalGraphGeneralization = do

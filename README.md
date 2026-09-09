@@ -195,11 +195,20 @@ suites** and **350 Church signatures per Haskell engine** pass. The later
 [one-shot contextual increment](docs/reports/2026-09-09-one-shot-contextual-output.md) passes **2,371 tests in 16 suites**,
 **64 public queries**, and both **350-signature** corpora. It preserves lexical
 dictionaries alongside specialization certificates and preserves scope for internal flexible
-types. Typed list output, applicable named-`where` one-shot
-commands and broader binder/provider forms remain open. The [current re-triage](docs/reports/2026-09-09-synthesis-after-native-contextual-integration.md)
-puts contextual list construction and exact replay first, then missing Church
-behaviors, remaining query forms and broader provider evidence. Native integration
-is complete; the tree investigation remains bounded.
+types.
+The [contextual list milestone](docs/reports/2026-09-09-contextual-list-output.md) passes **2,385 tests in 16 suites**,
+**80 one-shot list queries** with **2,526 exact displayed replays**, and the existing
+64-query contextual matrix. Named REPL tests check nonempty lists, preserved
+tails, polymorphic elements, wrappers, hidden constructors and construction
+from arguments under unused outer/nested contexts. Root binder names remain
+source-scoped when nested binders are alpha-renamed. Both Haskell signature
+corpora pass 350/350 and extended Exference retains 13/13 behaviors.
+Native integration of this new canonical revision remains pending.
+Applicable named-`where` one-shot commands and broader binder/provider forms
+remain open. The [current re-triage](docs/reports/2026-09-09-synthesis-after-native-contextual-integration.md)
+records this canonical acceptance. Native integration of the list change is next,
+followed by missing Church behaviors, remaining query forms and broader provider
+evidence; the tree investigation remains bounded.
 Tree and Haskell `foldl1` transfer checks
 still miss at their original limits. One native tree debug expression passes
 the full type and all 16 observations independently; live acceptance remains

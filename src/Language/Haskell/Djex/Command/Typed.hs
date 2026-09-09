@@ -6,6 +6,7 @@ module Language.Haskell.Djex.Command.Typed
   ) where
 
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Language.Haskell.Djex
 import Language.Haskell.Djex.HaskellSrc
   ( ParsedSourceType, parsedSourceType, parsedSourceTypeVariableNames )
@@ -34,6 +35,18 @@ elaborateSourceCandidate parsed projectSignature options candidate =
               (projectSignature signature) graph
       )
  where
-  sourceNames = Map.fromList
+  hintedNames = Map.fromList
     [(FlexibleVariable identifier, spelling)
     | (spelling, identifier) <- Map.toList $ parsedSourceTypeVariableNames parsed]
+  -- Alpha-normalization can give repeated nested binders fresh identities
+  -- without source-spelling hints. Their names are local presentation choices;
+  -- they must not make us discard the root signature and its dictionary scope.
+  -- Root binders still require their actual source spelling. A fresh name for
+  -- one of those would refer to a different scope at the RHS binding site.
+  nestedWithoutHints = Set.toAscList $
+    foldMap Set.singleton (parsedSourceType parsed)
+      `Set.difference` Map.keysSet hintedNames
+      `Set.difference` Set.fromList (Type.leadingForallVariables $ parsedSourceType parsed)
+  freshNames = filter (`Set.notMember` Set.fromList (Map.elems hintedNames))
+    ["djexSource" ++ show index | index <- [0 :: Integer ..]]
+  sourceNames = Map.union hintedNames $ Map.fromList $ zip nestedWithoutHints freshNames

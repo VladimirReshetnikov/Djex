@@ -1737,9 +1737,8 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
                 (all (`elem` rootGivenOpeningContexts opening) .
                     Contextual.contextualInstantiationObligations)
                 $ Contextual.contextualInstantiations family
-        if null helpers then [] else pure ()
         Right erasure <- [SourceEvidence.rootGivenErasure sourceContext opening helpers]
-        pure $ contextualPlan helpers [] erasure
+        contextualPlans helpers [] erasure
     -- A nested qualification is introduced only by a checked bridge whose
     -- proof argument binds its dictionaries. It never extends the root pool.
     -- This first scope supports monomorphic qualifiers over the jointly
@@ -1765,22 +1764,45 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
                 (\helper -> any (\givens -> all (`elem` givens) $
                     Contextual.contextualInstantiationObligations helper) available)
                 $ Contextual.contextualInstantiations family
-        if null helpers then [] else pure ()
         Right erasure <- [SourceEvidence.nestedGivenErasure sourceContext helpers introductions]
-        pure $ contextualPlan helpers introductions erasure
+        contextualPlans helpers introductions erasure
     contextualExactPremises = SharedCollection.distinctOn fst $
         activeLoadedSchemePremises ++ filter ((/= targetSymbol) . fst)
             (preparedEnvironmentFunctionPremises prepared)
     contextualTypeCheck = checkPreparedSynthesisTypesKindsWithRigids prepared
         (Set.fromList goalVariables) . (: []) . (,) KStar
-    contextualPlan helpers introductions erasure =
-        ((contextualExactPremises ++
+    contextualPlans helpers introductions erasure =
+        [ ((basePremises ++ [(symbol, form) | (symbol, _, form) <- selected],
+            [], Set.fromList [symbol | (symbol, _, _) <- selected], Map.empty,
+            Map.fromList [(symbol, (source, [])) | (symbol, source, _) <- selected],
+            goal, False), erasure)
+        | selected <- if null helpers && null introductions
+            then [constructors | not $ null constructors]
+            else if null constructors then [[]] else [[], constructors]
+        ]
+      where
+        goal = SourceEvidence.rootGivenErasureGoal erasure
+        basePremises = contextualExactPremises ++
             [(Contextual.contextualInstantiationSymbol helper,
                 Contextual.contextualInstantiationFormula helper) | helper <- helpers] ++
             [(Contextual.contextualIntroductionSymbol helper,
-                Contextual.contextualIntroductionFormula helper) | helper <- introductions],
-            [], Set.empty, Map.empty, Map.empty,
-            SourceEvidence.rootGivenErasureGoal erasure, False), erasure)
+                Contextual.contextualIntroductionFormula helper) | helper <- introductions]
+        -- Contextual plans keep datatypes nominal so dictionary identities do
+        -- not drift during structural translation. Offer their checked source
+        -- constructors through the existing provider-rewrite boundary instead.
+        -- The original plan remains first, and both spend the common budget.
+        -- An unused context needs no method helper, but still needs constructor
+        -- support. In that case add only the nonempty constructor plan.
+        constructors =
+            [ ( Symbol $ "$djinn$context-constructor$" ++ show index ++ "$" ++ show constructorIndex
+              , Symbol name
+              , foldr (:->) opaque fields)
+            | (index, (opaque, Disj alternatives)) <- zip [0 :: Natural ..] $
+                preparedEnvironmentDataConstructorViews prepared $ goal : map snd basePremises
+            , (constructorIndex, (ConsDesc name arity, Conj fields)) <-
+                zip [0 :: Natural ..] alternatives
+            , arity == length fields
+            ]
     contextualRequests availableContexts forms =
         let availableSources = SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey
                 [ source

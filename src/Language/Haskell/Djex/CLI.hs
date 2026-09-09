@@ -11,6 +11,7 @@ module Language.Haskell.Djex.CLI
 import Data.Foldable (toList)
 import Control.Monad (unless)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.List (intercalate)
 import Data.Maybe (mapMaybe)
 import Data.Version (showVersion)
@@ -21,17 +22,28 @@ import System.Console.GetOpt
   , getOpt
   , usageInfo
   )
+import System.Directory (listDirectory)
 import System.Environment (getArgs)
 import System.Exit (ExitCode (ExitFailure, ExitSuccess), exitWith)
 import System.IO (hPutStrLn, stderr)
+import System.IO.Error (tryIOError)
 
 import Language.Haskell.Djex
 import Language.Haskell.Djex.Command
+import Language.Haskell.Djex.HaskellSrc (parseSourceTypeInScope)
+import Language.Haskell.Djex.REPL.DjinnScope
+  ( DjinnAxiomPolicy (IncludeDjinnAxioms), DjinnProjection (..)
+  , projectDjinnScope, renderDjinnScopeOmission )
+import qualified Language.Haskell.Djex.Exference.Internal.Session as ExferenceSession
+import qualified Language.Haskell.Exference.Core.Types as ExferenceType
+import qualified Language.Haskell.Djex.REPL.Scope as Scope
+import qualified Language.Haskell.Djex.REPL.Workspace as Workspace
 import Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceSessionLoadReport (..)
   , defaultExferenceEnvironmentPath
   , exferenceCommandSessionPolicy
   , loadExferenceSessionWithPolicy
+  , loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy
   )
 import Language.Haskell.Djex.Package
   ( PackageOperation (..)
@@ -44,7 +56,8 @@ import Language.Haskell.Djex.Package
 import Language.Haskell.Djex.REPL
 import Language.Haskell.Djex.REPL.BehavioralWorker (runBehavioralWorker)
 import Language.Haskell.Djex.REPL.Command
-  ( parseReplBackend
+  ( ModuleChange (ReplaceModules)
+  , parseReplBackend
   , replBackendName
   )
 import Paths_djex (version)
@@ -81,6 +94,7 @@ data CommonOptions = CommonOptions
 
 data DjinnOptions = DjinnOptions
   { djinnCommon :: CommonOptions
+  , djinnEnvironment :: Maybe FilePath
   , djinnCandidateLimit :: Int
   , djinnChoiceBudget :: Maybe Integer
   }
@@ -197,6 +211,45 @@ parseReplOptions arguments = case
   (_, _, errors) -> Left $ concat errors
 
 runDjinn :: DjinnOptions -> IO ExitCode
+runDjinn options | Just directory <- djinnEnvironment options =
+  withCommandEnvironment False directory $ \workspace sourceSession context -> do
+    let inventory = exferenceSessionInventory sourceSession
+        declarations = map (mapDeclarationTypeVariables ExferenceType.defaultVariableName) $
+          environmentDeclarations $ exferenceSessionEnvironment sourceSession
+        units = Set.fromList
+          [name | DataTypeDeclaration _ name [] [DataConstructor _ constructor []] <- declarations,
+            name == constructor, nameSpecial name == Just (TupleConstructor Boxed 0)]
+        lists = [(name, [zero, step]) |
+          DataTypeDeclaration _ name [TypeParameter parameter explicitKind]
+            [DataConstructor _ zero [], DataConstructor _ step
+              [TypeVariable element, TypeApplication (TypeConstructor recursiveHead)
+                (TypeVariable recursiveElement)]] <- declarations,
+          name == listName, zero == listName, step == consName,
+          maybe True (== ProperTypeKind) explicitKind,
+          element == parameter, recursiveHead == name, recursiveElement == parameter]
+        typeNames = Set.unions [units, Set.fromList $ map fst lists,
+          Set.fromList $ Scope.scopeUnqualifiedTypeNames context]
+        valueNames = Set.unions [units, Set.fromList $ concatMap snd lists,
+          Set.fromList $ Scope.scopeUnqualifiedValueNames context]
+    case projectDjinnScope IncludeDjinnAxioms
+        (Scope.workspaceRecordProjections inventory workspace)
+        (typeConstructorKinds $ inventoryKindAssumptions inventory)
+        (ExferenceSession.sessionRecursiveDataTypeNames sourceSession)
+        declarations typeNames valueNames of
+      Left failure -> diagnosticFailure failure
+      Right projection -> do
+        mapM_ (hPutStrLn stderr . ("Djinn source omission: " ++) . renderDjinnScopeOmission) $
+          djinnProjectionOmissions projection
+        case parseSourceTypeInScope inventory (Scope.scopeExferenceQueryScope context)
+            "<command-line>" $ commonInput common of
+          Left failure -> diagnosticFailure failure
+          Right parsed -> executeDjinnSourceCommand
+            (commonPresentation common) (djinnProjectionFieldSelectors projection)
+            (djinnProjectionSession projection) (djinnQueryOptions options)
+            (commonTarget common) (djinnProjectionPromptNames projection)
+            (commonInput common) parsed
+ where
+  common = djinnCommon options
 runDjinn options = case standardDjinnSession of
   Left failure -> diagnosticFailure failure
   Right session -> executeDjinnCommand
@@ -212,6 +265,17 @@ runDjinn options = case standardDjinnSession of
   source = commonInput common
 
 runExference :: ExferenceCliOptions -> IO ExitCode
+runExference options | Just directory <- exferenceEnvironment options =
+  withCommandEnvironment (exferenceAllowFix options) directory $ \_ base context ->
+    case ExferenceSession.scopeExferenceSession
+        (Set.fromList $ Scope.scopeSearchNames context) base of
+      Left failure -> diagnosticFailure failure
+      Right session -> executeExferenceCommandInScope
+        (commonPresentation common) noFieldSelectors session
+        (exferenceSearchOptions options) (commonTarget common)
+        (Scope.scopeExferenceQueryScope context) "<command-line>" (commonInput common)
+ where
+  common = exferenceCommon options
 runExference options = case
     exferenceCommandSessionPolicy (exferenceAllowFix options) of
   Left failure -> diagnosticFailure failure
@@ -241,6 +305,42 @@ runExference options = case
   common = exferenceCommon options
   source = commonInput common
 
+-- A custom source environment is a set of imported modules. Use their checked
+-- export/import scope, including type-visibility snapshots, just as the REPL
+-- does. Loading declarations alone would expose private constructors/methods.
+withCommandEnvironment
+  :: Bool -> FilePath
+  -> (Workspace.SourceWorkspace -> ExferenceSession -> Scope.ReplScope -> IO ExitCode)
+  -> IO ExitCode
+withCommandEnvironment allowFix directory action = do
+  inspected <- tryIOError $ listDirectory directory
+  case inspected of
+    Left failure -> diagnosticFailure $ withSource directory $
+      contextualDiagnostic Error "EXF_ENV_DIRECTORY_READ"
+        ("cannot read environment directory: " ++ directory) (show failure)
+    Right _ -> do
+      loaded <- Workspace.loadWorkspace [directory]
+      case loaded of
+        Left failures -> mapM_ emitDiagnostic (toList failures) >> pure runtimeFailure
+        Right workspace -> case exferenceCommandSessionPolicy allowFix of
+          Left failure -> diagnosticFailure failure
+          Right policy -> do
+            report <- loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy policy
+              (Workspace.workspaceModuleSources workspace)
+              (Workspace.workspaceRatingSources workspace)
+              (Workspace.workspaceTypeVisibilitySources workspace)
+            mapM_ emitDiagnostic $ filter ((/= Info) . diagnosticSeverity) $
+              exferenceSessionLoadDiagnostics report
+            case exferenceSessionLoadResult report of
+              Left failures -> mapM_ emitDiagnostic (toList failures) >> pure runtimeFailure
+              Right session -> case Scope.scopeFromWorkspace (exferenceSessionInventory session) workspace of
+                Left failure -> diagnosticFailure failure
+                Right initial -> case Scope.changeScopeModules (exferenceSessionInventory session)
+                    workspace ReplaceModules
+                    (map Workspace.workspaceModuleName $ Workspace.workspaceModules workspace) initial of
+                  Left failure -> diagnosticFailure failure
+                  Right context -> action workspace session context
+
 djinnQueryOptions :: DjinnOptions -> QueryOptions
 djinnQueryOptions options = defaultQueryOptions
   { optionCutoff = djinnCandidateLimit options
@@ -253,6 +353,7 @@ parseDjinnOptions :: [String] -> Either String DjinnOptions
 parseDjinnOptions arguments = do
   (flags, source) <- parseOptions DjinnBackend arguments
   common <- parseCommonOptions flags source
+  environment <- optionalUniqueValue "--environment" environmentValue flags
   candidateLimit <- uniqueValue "--candidate-limit" candidateLimitValue
     (show defaultDjinnCandidateLimit) flags >>= positiveInt "--candidate-limit"
   rawBudget <- uniqueValue "--choice-budget" choiceBudgetValue
@@ -260,6 +361,7 @@ parseDjinnOptions arguments = do
   budget <- nonNegativeInteger "--choice-budget" rawBudget
   pure DjinnOptions
     { djinnCommon = common
+    , djinnEnvironment = environment
     , djinnCandidateLimit = candidateLimit
     , djinnChoiceBudget = if budget == 0 then Nothing else Just budget
     }
@@ -456,7 +558,9 @@ commonOptions =
 
 djinnOptions :: [OptDescr Flag]
 djinnOptions =
-  [ Option [] ["candidate-limit"] (ReqArg CandidateLimitFlag "N")
+  [ Option [] ["environment"] (ReqArg EnvironmentFlag "DIR")
+      "source environment directory, including supplied providers"
+  , Option [] ["candidate-limit"] (ReqArg CandidateLimitFlag "N")
       $ defaulted "positive proof-candidate limit"
           $ show defaultDjinnCandidateLimit
   , Option [] ["choice-budget"] (ReqArg ChoiceBudgetFlag "N")

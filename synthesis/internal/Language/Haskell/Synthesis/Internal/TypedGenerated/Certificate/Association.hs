@@ -23,6 +23,7 @@ module Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Associatio
   , CheckedTypeApplicationCertificateGraph
   , sealCheckedTypeApplicationCertificateGraph
   , sealCheckedTypeApplicationCertificateGraphWithProjection
+  , sealCheckedTypeApplicationCertificateGraphWithLexicalContext
   , checkedTypeApplicationCertificateGraph
   , foldCheckedTypeApplicationCertificateGraph
   ) where
@@ -76,6 +77,8 @@ import Language.Haskell.Synthesis.TypedGenerated
   , TypeStructure (..)
   , lookupTermNode
   , sealTermGraphWithProjection
+  , sealTermGraphWithContextAndProjection
+  , sharedContextTypeStructure
   , termGraphRoot
   )
 
@@ -235,17 +238,52 @@ sealCheckedTypeApplicationCertificateGraphWithProjection
   -> Either
       (TypeApplicationCertificateAssociationError variable local)
       (CheckedTypeApplicationCertificateGraph variable local)
-sealCheckedTypeApplicationCertificateGraphWithProjection projectionStyle certificateLimits baseStructure
+sealCheckedTypeApplicationCertificateGraphWithProjection =
+  sealCertificateGraph False
+
+-- | Admit lexical dictionary nodes only through the context-aware graph
+-- sealer. Certificate plans, owners, complete occurrence chains and activated
+-- obligations retain exactly the same independent checks. This does not turn
+-- an activated obligation into a Given or claim instance-discharge identity.
+sealCheckedTypeApplicationCertificateGraphWithLexicalContext
+  :: (Ord variable, Ord local)
+  => TermGraphProjectionStyle
+  -> TypeApplicationCertificateLimits
+  -> TypeStructure (Type variable)
+  -> TermGraphLimits
+  -> TermGraphSource (Type variable) local
+  -> [TypeApplicationCertificateOrigin variable]
+  -> Either
+      (TypeApplicationCertificateAssociationError variable local)
+      (CheckedTypeApplicationCertificateGraph variable local)
+sealCheckedTypeApplicationCertificateGraphWithLexicalContext =
+  sealCertificateGraph True
+
+sealCertificateGraph
+  :: (Ord variable, Ord local)
+  => Bool
+  -> TermGraphProjectionStyle
+  -> TypeApplicationCertificateLimits
+  -> TypeStructure (Type variable)
+  -> TermGraphLimits
+  -> TermGraphSource (Type variable) local
+  -> [TypeApplicationCertificateOrigin variable]
+  -> Either
+      (TypeApplicationCertificateAssociationError variable local)
+      (CheckedTypeApplicationCertificateGraph variable local)
+sealCertificateGraph lexicalContext projectionStyle certificateLimits baseStructure
     graphLimits graphSource origins = do
   table <- first TypeApplicationCertificateAssociationPlanError $
     sealTypeApplicationCertificateTable certificateLimits $
       map certificateSource origins
   preparedOrigins <- mapM (prepareOrigin table) origins
   graph <- first TypeApplicationCertificateAssociationGraphError $
-    sealTermGraphWithProjection projectionStyle (provisionalCertificateStructure baseStructure)
-      graphLimits graphSource
+    (if lexicalContext
+      then sealTermGraphWithContextAndProjection projectionStyle sharedContextTypeStructure
+      else sealTermGraphWithProjection projectionStyle)
+      (provisionalCertificateStructure baseStructure) graphLimits graphSource
   rooted <- rootedTermNodes graph
-  (uses, reversedUses) <- collectCertificateUses rooted
+  (uses, reversedUses) <- collectCertificateUses lexicalContext rooted
   let rootedUses = reverse reversedUses
   let originsByCertificate = Map.fromList
         [ (typeApplicationCertificateOriginId origin, prepared)
@@ -339,13 +377,13 @@ childNodes form = case form of
   TypedCase scrutinee alternatives -> scrutinee : map snd alternatives
 
 collectCertificateUses
-  :: [(TermNodeId, TermNode (Type variable) local)]
+  :: Bool -> [(TermNodeId, TermNode (Type variable) local)]
   -> Either
       (TypeApplicationCertificateAssociationError variable local)
       ( Map (CertificateId, Natural) (GraphCertificateUse variable)
       , [((CertificateId, Natural), GraphCertificateUse variable)]
       )
-collectCertificateUses = foldM collect (Map.empty, [])
+collectCertificateUses lexicalContext = foldM collect (Map.empty, [])
  where
   collect current@(_, ordered) (nodeId, TermNode _ form) = case form of
     TypedVisibleTypeApplication occurrence function argument witness ->
@@ -369,8 +407,10 @@ collectCertificateUses = foldM collect (Map.empty, [])
     TypedApply{} -> Right current
     TypedForallIntroduction{} -> Right current
     TypedImplicitTypeApplication{} -> Right current
+    TypedContextIntroduction{} | lexicalContext -> Right current
     TypedContextIntroduction{} -> Left $
       TypeApplicationCertificateContextEvidenceUnsupported nodeId
+    TypedContextApplication{} | lexicalContext -> Right current
     TypedContextApplication{} -> Left $
       TypeApplicationCertificateContextEvidenceUnsupported nodeId
     TypedTuple{} -> Right current

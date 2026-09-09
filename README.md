@@ -39,7 +39,7 @@ version, and dependency contract.
 - For better first results and useful alternatives under bounded search, see
   [candidate quality, checked normalization, and ranking policies](docs/candidate-quality.md).
 - For the next improvements and their acceptance requirements, see the
-  [current synthesis re-triage](docs/reports/2026-09-09-synthesis-after-contextual-frontier.md).
+  [current synthesis re-triage](docs/reports/2026-09-09-synthesis-after-one-shot-acceptance.md).
 
 New library code should start with `Language.Haskell.Djex`, a narrower checked
 backend adapter, or a focused `Language.Haskell.Synthesis.*` import. The package
@@ -108,9 +108,9 @@ The matching [Leant integration](https://github.com/VladimirReshetnikov/Leant/bl
 passes nine native ordinary/behavioral/False cells across all three engine
 modes: six exact full-type replays, 24 observations and 16 empty axiom
 inventories. Its strict build and all 686 unfiltered tests pass. The
-[updated re-triage](docs/reports/2026-09-09-synthesis-after-contextual-frontier.md) orders
-the remaining deadline and contextual-certificate closure, public frontend and
-Church behavior work, with a bounded tree investigation, after
+[updated re-triage](docs/reports/2026-09-09-synthesis-after-one-shot-acceptance.md) orders
+deadline closure and native dependency integration, remaining public frontend
+forms and Church behavior work, with a bounded tree investigation, after
 the accepted global-method and loaded-provider increments described below.
 The new [constraint-only provider increment](docs/reports/2026-09-08-constraint-only-provider-inference.md)
 infers a unique coherent selection from lexical class assumptions in both
@@ -130,7 +130,7 @@ replay, with 48 empty axiom inventories and three actual false controls.
 Its earlier full configured 647-test integration run passes in 343.79 seconds, with
 unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
 retain source graphs as checked wildcards, preserving exact compatibility
-erasure. The [current re-triage](docs/reports/2026-09-09-synthesis-after-contextual-frontier.md) records
+erasure. The [current re-triage](docs/reports/2026-09-09-synthesis-after-one-shot-acceptance.md) records
 the now-passing native recursor matrix after the accepted
 [combined verification increment](docs/reports/2026-09-08-combined-behavioral-verification.md).
 All ten native integration gates passed at that recorded revision, which Leant pins;
@@ -191,11 +191,14 @@ contextual definitions with GHC `TypeAbstractions`. Ordinary and named-`where`
 queries retain binder order and dictionary payloads: **40 exact positive
 replays**, **20 actual False controls**, four explicit-forall guards and the
 strengthened synonym-identity regression pass. All **361 tests in six complete
-suites** and **350 Church signatures per Haskell engine** pass. One-shot
-contextual commands, typed list output and broader binder/provider forms remain
-open. The [current re-triage](docs/reports/2026-09-09-synthesis-after-contextual-frontier.md)
-puts deadline and contextual-certificate closure first, followed by frontend
-coverage and Church behavior, with a bounded independent tree investigation.
+suites** and **350 Church signatures per Haskell engine** pass. The later
+[one-shot contextual increment](docs/reports/2026-09-09-one-shot-contextual-output.md) passes **2,371 tests in 16 suites**,
+**64 public queries**, and both **350-signature** corpora. It preserves lexical
+dictionaries alongside specialization certificates and preserves scope for internal flexible
+types. Typed list output, applicable named-`where` one-shot
+commands and broader binder/provider forms remain open. The [current re-triage](docs/reports/2026-09-09-synthesis-after-one-shot-acceptance.md)
+puts deadline closure and native dependency integration first, followed by
+remaining frontend forms and Church behavior, with a bounded tree investigation.
 Tree and Haskell `foldl1` transfer checks
 still miss at their original limits. One native tree debug expression passes
 the full type and all 16 observations independently; live acceptance remains
@@ -374,7 +377,9 @@ remaining bounds, and reproducible validation:
 The `djex` executable is the merged frontend. With no arguments (or the
 `repl` subcommand) it starts one persistent session that can query Djinn,
 Exference, or both; the `djinn` and `exference` subcommands retain explicit
-one-shot operation. The historical `djinn` and `exference` executable names
+one-shot operation. Both synthesis commands accept `--environment DIR` and use
+the source workspace's normal import/export scope for supplied providers.
+The historical `djinn` and `exference` executable names
 remain available for their distinct compatibility contracts. The single
 library deliberately trades Haskeline/HSE dependency
 isolation for one dependency and version contract; parser-independent module
@@ -706,15 +711,16 @@ and worked `:djinn`/`:exference`/`:compare` examples. The
 signatures and compiler-checks the generated terms under its documented
 environment and partiality assumptions.
 
-The [current re-triage](docs/reports/2026-09-09-synthesis-after-contextual-frontier.md) records
+The [current re-triage](docs/reports/2026-09-09-synthesis-after-one-shot-acceptance.md) records
 accepted elaboration, contextual inference and the Exference tree carrier,
 with the later combined verification increment passing 702 native unit tests
 and the original Exference append/False queries. Remaining exact-output and
 Church deliveries follow the completed native integration. Broader contextual
 evidence follows; duplicate suppression is deferred pending measured repetition.
-The latest local one-shot matrix passes 6/8 cases; Exference all-selection
-exposes a contextual-certificate boundary. The subsequent extension remains
-unbuilt and untested. Leant deadline integration has nine completed gates,
+The [one-shot contextual matrix](docs/reports/2026-09-09-one-shot-contextual-output.md) now passes all eight
+engine/selection profiles and 64 public queries, including exact displayed-output
+replay. Contextual certificates and internal flexible-variable scope are covered
+by 2,371 passing tests across 16 complete suites. Leant deadline integration has nine completed gates,
 with the final Exference corpus interrupted rather than accepted.
 The [original roadmap](docs/reports/2026-09-06-synthesis-next-priorities.md)
 retains the full completion requirements; prepared runners and isolated

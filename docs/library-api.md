@@ -1612,6 +1612,24 @@ independently checked by GHC at the original requested signature. Rendering
 does not create source, provider, or certificate authority. Prefer the graph
 from the exact opaque `TypedCandidate` being presented.
 
+`renderHaskellTermGraphAtSignature` additionally accepts the original closed
+source signature, checking alpha-equivalence before using its outer binder
+names. This is necessary for a parameter that occurs only in a class constraint.
+The `renderHaskellTermGraphWithMetavariables` and
+`renderHaskellTermGraphAtSignatureWithMetavariables` variants accept graphs over
+tagged `Variable` values. They can give internal flexible variables a local
+polymorphic scope when those variables escape into neither the result nor
+captured locals, globals or dictionaries. Retained proper term types determine
+their kinds through unused identity-function arguments. Rigid variables remain
+ineligible; rendering still supplies no typing or certificate authority.
+
+The public contextual REPL and one-shot frontends share this typed elaboration.
+Both one-shot engines accept `--environment DIR` and respect the loaded
+workspace's ordinary import/export scope. Standalone expressions carry their
+own original-signature scope, using GHC `TypeAbstractions` when necessary.
+See the [one-shot contextual output report](reports/2026-09-09-one-shot-contextual-output.md)
+for the exact supported matrix and remaining binder/frontend limitations.
+
 Exference also retains checker-owned implicit instantiations of context-free
 local polymorphic values as `TypedImplicitTypeApplication` nodes. Each use has
 its own fresh selections, normalized after independent checking; erasure keeps
@@ -1620,6 +1638,13 @@ certificate. Uses whose required dictionaries lack exact source evidence
 still report graph absence. The
 [implementation register](reports/2026-09-07-synthesis-priorities-1-4.md)
 records the live Haskell elaboration acceptance and remaining host work.
+
+Exference's private certificate association can also retain lexical context
+nodes after the shared context-aware sealer checks their scopes and dictionary
+slots. Certificate ownership, selections, activated obligations and complete
+occurrence chains are checked independently. Activated obligations do not gain
+Given identity, and projecting the resulting graph still grants no independent
+certificate or fingerprint authority.
 
 Exference retains the original root closure and context-free nested forall
 introductions in its source graph. Constructor globals retain their closed

@@ -22,6 +22,8 @@ import qualified Language.Haskell.Synthesis.Inventory as I
 import qualified Language.Haskell.Synthesis.KindInference as K
 import qualified Language.Haskell.Synthesis.TypeAtom as A
 import qualified Language.Haskell.Synthesis.TypedGenerated as Q
+import qualified Language.Haskell.Synthesis.TypedGenerated.Haskell as H
+import qualified Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association as Association
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertEqual, testCase)
 
@@ -178,7 +180,7 @@ tests = testGroup "Independent lexical Given evidence"
             E.ExpApply (E.ExpName tokenName) $ E.ExpVar 2 integerType
       checked <- evidence classes [tokenBinding] Map.empty goal expression
       unsupportedGiven checked
-  , testCase "contextual visible origins remain explicit unsupported graphs" $ do
+  , testCase "contextual visible origins retain lexical scope and certificate ownership" $ do
       classes <- unaryClasses
       (bindings, schemes) <- tokenEnvironment
       selected <- expectRight $ G.specifiedVisibleTypeArgument integerType
@@ -187,11 +189,46 @@ tests = testGroup "Independent lexical Given evidence"
           expression = E.ExpLambda 2 integerType $
             E.ExpApply (E.ExpTypeApply (E.ExpName tokenName) selected) $ E.ExpVar 2 integerType
       checked <- evidence classes bindings schemes goal expression
-      assertBool "unsupported graph silently dropped its original certificate origin" $
+      assertBool "graph silently dropped its original certificate origin" $
         not $ null $ checkedExpressionTypeApplicationOrigins checked
       case checkedExpressionTermGraph 11 checked of
-        ExferenceTermGraphUnavailable UnsupportedContextualCertificateGraph -> pure ()
-        other -> fail $ "expected the contextual certificate boundary, got " ++ show other
+        ExferenceTermGraphAssociated associated -> do
+          let graph = Association.checkedTypeApplicationCertificateGraph associated
+          assertRoot goal graph
+          assertEqual "certificate erasure changed the selected expression"
+            (G.discardUnusedPatternBindingsBy id $ E.toGeneratedExpression expression) $
+            Q.eraseTermGraph graph
+          assertEqual "lexical dictionary introduction disappeared" [0] $
+            map Q.evidenceBinderSlot $ introductions graph
+          assertEqual "activated obligation was incorrectly converted into a Given" [] $
+            applications graph
+          assertEqual "associated global owner or complete chain was lost" [(tokenName, 1)] $
+            Association.foldCheckedTypeApplicationCertificateGraph
+              (\rows _ owner _ _ _ receipts -> rows ++ [(owner, length receipts)]) [] associated
+        other -> fail $ "expected associated contextual certificate evidence, got " ++ show other
+  , testCase "closed visible dictionary selections remain distinct under an unused root Given" $ do
+      let booleanType = TypeCons $ name "Bool"
+          provider = TypeForall [3] [constraint 3] tokenType
+          goal = TypeForall [0] [constraint 0] tokenType
+      classes <- expectRight $ mkStaticClassEnv [HsTypeClass className [0] []]
+        [ HsInstance [] $ HsConstraint className [integerType]
+        , HsInstance [] $ HsConstraint className [booleanType]
+        ]
+      (bindings, schemes) <- providerEnvironment provider
+      forM_ [(integerType, "Int"), (booleanType, "Bool")] $ \(chosen, spelling) -> do
+        selected <- expectRight $ G.specifiedVisibleTypeArgument chosen
+        let expression = E.ExpTypeApply (E.ExpName tokenName) selected
+        checked <- evidence classes bindings schemes goal expression
+        case checkedExpressionTermGraph 11 checked of
+          ExferenceTermGraphAssociated associated -> do
+            let graph = Association.checkedTypeApplicationCertificateGraph associated
+            assertRoot goal graph
+            assertEqual "selected instance became lexical Given evidence" [] $ applications graph
+            rendered <- expectRight $ H.renderHaskellTermGraphAtSignature
+              (G.defaultRenderOptions $ const "x") (fmap (const "a") goal) graph
+            assertEqual "renderer substituted a different dictionary selection"
+              ("(token @(" ++ spelling ++ "))") rendered
+          other -> fail $ "closed selection lacks associated evidence: " ++ show other
   , testCase "a sibling cannot consume a locally introduced dictionary" $ do
       classes <- unaryClasses
       let arrow = TypeArrow (TypeVar 0) tokenType

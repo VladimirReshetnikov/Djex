@@ -7,6 +7,7 @@ module Language.Haskell.Djex.HaskellSrc.Scope
   , scopedTypePatterns
   , scopedSourceDefinition
   , scopedSourceExpression
+  , standaloneSourceExpression
   ) where
 
 import qualified Data.Set as Set
@@ -53,6 +54,31 @@ scopedSourceExpression source term = case bindingScope source of
       (haskellSrcExtsParseMode "synthesis-expression-signature") source of
     HSE.ParseOk parsed -> unwords $ lines $ HSE.prettyPrint parsed
     HSE.ParseFailed{} -> source
+
+-- | One-shot expression output must carry its own binding scope, including
+-- explicit outer quantifiers. The REPL's RHS form can instead use binders from
+-- the surrounding requested signature, so that existing form stays separate.
+standaloneSourceExpression :: String -> String -> Either String String
+standaloneSourceExpression source term = case bindingScope source of
+  (_ : _, _) -> Right $ scopedSourceExpression source term
+  _ -> case HSE.parseTypeWithMode
+      (haskellSrcExtsParseMode "synthesis-standalone-signature") source of
+    HSE.ParseFailed{} -> Left "cannot parse the standalone expression's source signature"
+    HSE.ParseOk parsed -> do
+      binders <- leading parsed
+      if length binders /= Set.size (Set.fromList binders)
+        then Left "standalone expression has repeated leading type binder names"
+        else let annotation = unwords $ lines $ HSE.prettyPrint parsed
+             in Right $ if null binders then "(" ++ term ++ " :: " ++ annotation ++ ")"
+                  else "((\\" ++ concatMap (" @" ++) binders ++ " -> " ++ term
+                    ++ ") :: " ++ annotation ++ ")"
+ where
+  leading (HSE.TyParen _ body) = leading body
+  leading (HSE.TyForall _ variables _ body) =
+    (++) <$> maybe (Right []) (traverse binder) variables <*> leading body
+  leading _ = Right []
+  binder (HSE.UnkindedVar _ name) = Right $ HSE.prettyPrint name
+  binder HSE.KindedVar{} = Left "standalone expression does not yet support kinded source binders"
 
 bindingScope :: String -> ([String], [String])
 bindingScope source = case HSE.parseTypeWithMode

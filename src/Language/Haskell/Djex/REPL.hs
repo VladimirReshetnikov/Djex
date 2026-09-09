@@ -89,7 +89,6 @@ import Language.Haskell.Djex.HaskellSrc
   ( ParsedSourceType
   , parseSourceTypeInScope
   , parsedSourceType
-  , parsedSourceTypeVariableNames
   )
 import Language.Haskell.Djex.Package
   ( PackageOperation (DownloadOperation, InstallOperation)
@@ -118,7 +117,7 @@ import Language.Haskell.Djex.HaskellSrc.Scope
 import Language.Haskell.Djex.REPL.Workspace
 import Language.Haskell.Djex.Text (normalize, trim)
 import Language.Haskell.Synthesis.Behavioral (BehavioralQuery (..))
-import qualified Language.Haskell.Synthesis.TypedGenerated.Haskell as TypedHaskell
+import Language.Haskell.Djex.Command.Typed (elaborateSourceCandidate)
 import qualified Language.Haskell.Djex.Exference.Internal.Session
   as ExferenceSession
 import qualified Language.Haskell.Exference.Core.Types as ExferenceType
@@ -812,20 +811,8 @@ runQuery sourceName query state = do
       . typedCandidateCompatibility
     expression = functionClauseExpression . candidateOutput . projected
 
-  elaborateBehavioral parsed projectSignature renderOptions candidate = case typedCandidateTermGraph candidate of
-    Left failure -> ("graph unavailable: " ++ show failure, Left "no source graph for this candidate")
-    Right graph ->
-      ( "graph present; root=" ++ show (termGraphRoot graph)
-          ++ "; nodes=" ++ show (length $ termGraphNodes graph)
-      , either (Left . show) Right $ case traverse (`Map.lookup` sourceNames) $ parsedSourceType parsed of
-          Nothing -> TypedHaskell.renderHaskellTermGraph renderOptions graph
-          Just signature -> TypedHaskell.renderHaskellTermGraphAtSignature renderOptions
-            (projectSignature signature) graph
-      )
-   where
-    sourceNames = Map.fromList
-      [(FlexibleVariable identifier, spelling)
-      | (spelling, identifier) <- Map.toList $ parsedSourceTypeVariableNames parsed]
+  elaborateBehavioral parsed projectSignature renderOptions candidate =
+    elaborateSourceCandidate parsed projectSignature renderOptions candidate
 
   projectSignatureToDjinn = mapTypeNames $ \name -> Map.findWithDefault name name $
     maybe Map.empty djinnProjectionPromptNames $ djinnProjection $ djinnRuntime state

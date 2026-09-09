@@ -34,6 +34,7 @@ module Language.Haskell.Djex.Command
   , noFieldSelectors
   , prepareDjinnQueryOptions
   , executeDjinnCommand
+  , executeDjinnSourceCommand
   , executeExferenceCommand
   , executeExferenceCommandInScope
   , prepareDjinnPresentation
@@ -76,12 +77,18 @@ import Language.Haskell.Djex.Command.Output
   , CommandOutputEvent (..)
   , replayCommandOutput
   )
+import Language.Haskell.Djex.Command.Typed (elaborateSourceCandidate)
+import Language.Haskell.Djex.HaskellSrc
+  ( ParsedSourceType, parseSourceType, parseSourceTypeInScope, parsedSourceType )
+import Language.Haskell.Djex.HaskellSrc.Scope
+  ( scopedSourceDefinition, standaloneSourceExpression )
+import qualified Language.Haskell.Synthesis.Type as SourceType
+import qualified Language.Haskell.Exference.Core.Types as ExferenceType
 import Language.Haskell.Exference.Core.Internal.Options
   (heuristicAssignments, heuristicFields)
 import Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceQueryScope
-  , parseExferenceRequestWithCheckedTarget
-  , parseExferenceRequestWithCheckedTargetInScope
+  , mkExferenceRequestWithCheckedTargetFromParsed
   )
 import Language.Haskell.Djex.Text (normalize, trim)
 
@@ -335,6 +342,40 @@ executeDjinnCommand presentation fieldSelectors session options target
     (runDjinnQuery session)
     (presentDjinn presentation fieldSelectors)
 
+-- | Execute a query parsed in a loaded source inventory. Project nominal names
+-- before Djinn seals the request; never relabel the selected candidate graph.
+executeDjinnSourceCommand
+  :: PresentationOptions -> FieldSelectors -> DjinnSession -> QueryOptions
+  -> DefinitionName -> Map.Map Name Name -> String -> ParsedSourceType -> IO ExitCode
+executeDjinnSourceCommand presentation fieldSelectors session options target names source parsed =
+  case mkDjinnRequest QueryRequest
+      { requestTarget = target
+      , requestGoal = projectNames $ fmap ExferenceType.defaultVariableName $ parsedSourceType parsed
+      , requestContexts = []
+      , requestOptions = prepareDjinnQueryOptions presentation options
+      } of
+    Left failure -> diagnosticFailure failure
+    Right request
+      | not $ null $ SourceType.typeConstraints $ parsedSourceType parsed ->
+          case runDjinnTypedQuery session request of
+            Left failure -> diagnosticFailure failure
+            Right result -> replayCommandOutput $ prepareTypedDjinnPresentation
+              presentation fieldSelectors renderContextual result
+      | otherwise -> case runDjinnQuery session request of
+          Left failure -> diagnosticFailure failure
+          Right result -> presentDjinn presentation fieldSelectors result
+ where
+  projectNames = mapTypeNames $ \name -> Map.findWithDefault name name names
+  renderContextual candidate = do
+    term <- snd $ elaborateSourceCandidate parsed projectNames
+      (defaultRenderOptions id)
+        {renderQualification = presentationQualification presentation} candidate
+    case presentationRenderMode presentation of
+      RenderExpression -> standaloneSourceExpression source term
+      RenderDefinition -> pure $ scopedSourceDefinition source
+        (renderNamePrefix Unqualified $ definitionName $ clauseName $
+          candidateOutput $ typedCandidateCompatibility candidate) term
+
 -- | Parse, execute, and present one checked Exference query.
 executeExferenceCommand
   :: PresentationOptions
@@ -347,11 +388,8 @@ executeExferenceCommand
   -> IO ExitCode
 executeExferenceCommand presentation fieldSelectors session options target
     sourceName source =
-  executeParsedQuery
-    (parseExferenceRequestWithCheckedTarget
-      session (prepareExferenceQualityOptions presentation options) target sourceName source)
-    (runExferenceQuery session)
-    (presentExference presentation fieldSelectors)
+  executeParsedExferenceCommand presentation fieldSelectors session options target source
+    $ parseSourceType (exferenceSessionInventory session) sourceName source
 
 -- | Parse, execute, and present an Exference query in an interactive module
 -- scope. The supplied session may already have its search dictionary narrowed;
@@ -368,11 +406,46 @@ executeExferenceCommandInScope
   -> IO ExitCode
 executeExferenceCommandInScope presentation fieldSelectors session options
     target scope sourceName source =
-  executeParsedQuery
-    (parseExferenceRequestWithCheckedTargetInScope
-      session (prepareExferenceQualityOptions presentation options) target scope sourceName source)
-    (runExferenceQuery session)
-    (presentExference presentation fieldSelectors)
+  executeParsedExferenceCommand presentation fieldSelectors session options target source
+    $ parseSourceTypeInScope (exferenceSessionInventory session) scope sourceName source
+
+-- Keep the same source parse and selected typed handle through one-shot and
+-- scoped command presentation. Unconstrained compatibility output is unchanged.
+executeParsedExferenceCommand
+  :: PresentationOptions -> FieldSelectors -> ExferenceSession -> ExferenceOptions
+  -> DefinitionName -> String -> Either Diagnostic ParsedSourceType -> IO ExitCode
+executeParsedExferenceCommand presentation fieldSelectors session options target source parsed =
+  case first (withCode "DJEX_EXF_PARSE") parsed of
+    Left failure -> diagnosticFailure failure
+    Right signature -> case mkExferenceRequestWithCheckedTargetFromParsed
+        (prepareExferenceQualityOptions presentation options) target signature of
+      Left failure -> diagnosticFailure failure
+      Right request
+        | not $ null $ SourceType.typeConstraints $ parsedSourceType signature ->
+            case runExferenceTypedQuery session request of
+              Left failure -> diagnosticFailure failure
+              Right results -> presentTypedExference presentation fieldSelectors
+                (renderContextual signature) results
+        | otherwise -> case runExferenceQuery session request of
+            Left failure -> diagnosticFailure failure
+            Right results -> presentExference presentation fieldSelectors results
+ where
+  renderContextual signature candidate = do
+    let attempted = elaborateSourceCandidate signature id
+          (defaultRenderOptions (const "x"))
+            {renderQualification = presentationQualification presentation} candidate
+    term <- snd attempted
+    constraints <- either (Left . show) Right $
+      renderExferenceResidualConstraintsWithQualification
+        (presentationQualification presentation) $ typedCandidateCompatibility candidate
+    rendered <- case presentationRenderMode presentation of
+          RenderExpression -> standaloneSourceExpression source term
+          RenderDefinition -> pure $ scopedSourceDefinition source
+            (renderNamePrefix Unqualified $ definitionName $ clauseName $
+              candidateOutput $ typedCandidateCompatibility candidate) term
+    pure $ case constraints of
+      [] -> rendered
+      _ -> "-- requires: " ++ intercalate ", " constraints ++ "\n" ++ rendered
 
 prepareExferenceQualityOptions :: PresentationOptions -> ExferenceOptions -> ExferenceOptions
 prepareExferenceQualityOptions presentation options = options

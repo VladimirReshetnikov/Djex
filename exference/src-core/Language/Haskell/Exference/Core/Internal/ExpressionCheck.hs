@@ -1723,38 +1723,37 @@ checkedExpressionTermGraph candidateKey
   case checkedResult of
     CheckedTermResult _ (Left reason) ->
       ExferenceTermGraphUnavailable reason
-    CheckedTermResult _ (Right checkedTerm)
-      | not (null origins), checkedTermHasContext checkedTerm ->
-          ExferenceTermGraphUnavailable UnsupportedContextualCertificateGraph
-      | otherwise ->
-          case buildCheckedTermGraph candidateKey checkedTerm of
-            Left reason -> ExferenceTermGraphUnavailable reason
-            Right source -> case origins of
-              [] -> case SharedTyped.sealTermGraphWithContextAndProjection
-                  SharedTyped.PreserveLambdaBoundaries
-                  SharedTyped.sharedContextTypeStructure
-                  (checkedTermTypeStructure checkedTerm)
-                  SharedTyped.defaultTermGraphLimits
-                  source of
-                Left failure -> ExferenceTermGraphUnavailable
-                  $ TermGraphSealingFailure failure
-                Right graph -> retainPlain compatibility graph
-              _ -> case SharedAssociation.sealCheckedTypeApplicationCertificateGraphWithProjection
-                  SharedTyped.PreserveLambdaBoundaries
-                  SharedCertificate.defaultTypeApplicationCertificateLimits
-                  (checkedTermTypeStructure checkedTerm)
-                  SharedTyped.defaultTermGraphLimits
-                  source
-                  (map lowerTypeApplicationOrigin origins) of
-                Left failure -> ExferenceTermGraphUnavailable
-                  $ associationAbsence failure
-                Right checked ->
-                  let graph =
-                        SharedAssociation.checkedTypeApplicationCertificateGraph
-                          checked
-                  in if SharedTyped.eraseTermGraph graph == compatibility
-                      then ExferenceTermGraphAssociated checked
-                      else ExferenceTermGraphUnavailable TermGraphProjectionMismatch
+    CheckedTermResult _ (Right checkedTerm) ->
+      case buildCheckedTermGraph candidateKey checkedTerm of
+        Left reason -> ExferenceTermGraphUnavailable reason
+        Right source -> case origins of
+          [] -> case SharedTyped.sealTermGraphWithContextAndProjection
+              SharedTyped.PreserveLambdaBoundaries
+              SharedTyped.sharedContextTypeStructure
+              (checkedTermTypeStructure checkedTerm)
+              SharedTyped.defaultTermGraphLimits
+              source of
+            Left failure -> ExferenceTermGraphUnavailable
+              $ TermGraphSealingFailure failure
+            Right graph -> retainPlain compatibility graph
+          _ -> case (if checkedTermHasContext checkedTerm
+              then SharedAssociation.sealCheckedTypeApplicationCertificateGraphWithLexicalContext
+              else SharedAssociation.sealCheckedTypeApplicationCertificateGraphWithProjection)
+              SharedTyped.PreserveLambdaBoundaries
+              SharedCertificate.defaultTypeApplicationCertificateLimits
+              (checkedTermTypeStructure checkedTerm)
+              SharedTyped.defaultTermGraphLimits
+              source
+              (map lowerTypeApplicationOrigin origins) of
+            Left failure -> ExferenceTermGraphUnavailable
+              $ associationAbsence failure
+            Right checked ->
+              let graph =
+                    SharedAssociation.checkedTypeApplicationCertificateGraph
+                      checked
+              in if SharedTyped.eraseTermGraph graph == compatibility
+                  then ExferenceTermGraphAssociated checked
+                  else ExferenceTermGraphUnavailable TermGraphProjectionMismatch
 
 retainPlain
   :: SharedGenerated.Expression TVarId

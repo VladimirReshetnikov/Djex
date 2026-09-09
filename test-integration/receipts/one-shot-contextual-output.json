@@ -1,0 +1,236 @@
+{
+  "status": "accepted_documented_one_shot_contextual_matrix",
+  "base_commit": "1e12b4f9321f68a7d635dbd4494919e299630e2c",
+  "strict_build": "passed -Werror",
+  "suites": [
+    {
+      "suite": "exference-engine-tests",
+      "status": "passed",
+      "executable_sha256": "89cec885ce3a68728426d82ed23b624caa01c035c4009d07305a7d1771797ecb",
+      "inventory_count": 93,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 93,
+      "seconds": 0.27
+    },
+    {
+      "suite": "exference-tests",
+      "status": "passed",
+      "executable_sha256": "d41a7390f139bd717ffc22737404769ceee8707d3facef763db9b1623b806374",
+      "inventory_count": 515,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 515,
+      "seconds": 1.41
+    },
+    {
+      "suite": "synthesis-length-tests",
+      "status": "passed",
+      "executable_sha256": "b7e4d5ca63fe056338df27d4941b028f547b5df03a022d820b7e20a9eab81bde",
+      "inventory_count": 436,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 436,
+      "seconds": 63.47
+    },
+    {
+      "suite": "djex-tests",
+      "status": "passed",
+      "executable_sha256": "6520376588c243ba52a4f0b149e8026f0b002a1ac204d02fc83e03708df23c76",
+      "inventory_count": 152,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 152,
+      "seconds": 90.45
+    },
+    {
+      "suite": "djex-api-tests",
+      "status": "passed",
+      "executable_sha256": "ea174fd03a5021e3cde4c670ff40c82eda2174391fe278579a08a4c7912dbbe2",
+      "inventory_count": 38,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 38,
+      "seconds": 0.03
+    },
+    {
+      "suite": "djex-cli-tests",
+      "status": "passed",
+      "executable_sha256": "f091b7df6c765cf6861967876c85866b0325b6843f4864fe16944b435d24d8b9",
+      "inventory_count": 124,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 124,
+      "seconds": 342.65
+    },
+    {
+      "suite": "exference-frontend-api-tests",
+      "status": "passed",
+      "executable_sha256": "e614ac26cc0cbd9c40f6ee024829608b3cb3d986dee074313efae6fff26fe919",
+      "inventory_count": 4,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 4,
+      "seconds": 0.0
+    },
+    {
+      "suite": "exference-cli-tests",
+      "status": "passed",
+      "executable_sha256": "08551e1b6a66b862504baeb8cccb8c5c947f3ad4786d25cd417594f997e50475",
+      "inventory_count": 25,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 25,
+      "seconds": 2.24
+    },
+    {
+      "suite": "synthesis-tests",
+      "status": "passed",
+      "executable_sha256": "1adb18bb7128f02ed954807489ae90988be3bc1eef2bbe316c5e39f82101d009",
+      "inventory_count": 513,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 513,
+      "seconds": 0.14
+    },
+    {
+      "suite": "synthesis-certificate-tests",
+      "status": "passed",
+      "executable_sha256": "09b2fa3db1c1c9726a9de9bf87e89c4f359c2efef4e2a4969cb574cc3e1e4651",
+      "inventory_count": 103,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 103,
+      "seconds": 0.02
+    },
+    {
+      "suite": "synthesis-term-graph-fingerprint-tests",
+      "status": "passed",
+      "executable_sha256": "d9769d0543b324482601abd4cc3417560889994f821c7923c60711a93bd61621",
+      "inventory_count": 11,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 11,
+      "seconds": 0.0
+    },
+    {
+      "suite": "djinn-source-graph-tests",
+      "status": "passed",
+      "executable_sha256": "8f5df01ec7405a450095dbbb424061661029c02d392bc13df038aff978b949cf",
+      "inventory_count": 59,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 59,
+      "seconds": 0.29
+    },
+    {
+      "suite": "djinn-source-graph-private-tests",
+      "status": "passed",
+      "executable_sha256": "dba173fd50bcb9350683878ef7019b0b1ad7495b49f356965a39a767b08fd97f",
+      "inventory_count": 114,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 114,
+      "seconds": 0.03
+    },
+    {
+      "suite": "djinn-tests",
+      "status": "passed",
+      "executable_sha256": "4ce448d406b010e02d926f5afbe28d81e4018f73479473de827b59cfadf17c2e",
+      "inventory_count": 133,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 133,
+      "seconds": 44.27
+    },
+    {
+      "suite": "djinn-cli-tests",
+      "status": "passed",
+      "executable_sha256": "1395e6128850e0ef5510142fd10898f1b41b814aca106584e37007c9e53a57ba",
+      "inventory_count": 24,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 24,
+      "seconds": 1.0
+    },
+    {
+      "suite": "djex-parallel-tests",
+      "status": "passed",
+      "executable_sha256": "15f85d63a6a1dd3c142e29c086e9422a4aaf11ca1d46de5a5e6bba54b197adf9",
+      "inventory_count": 27,
+      "executable_unchanged": true,
+      "exit_code": 0,
+      "passed_count": 27,
+      "seconds": 0.0
+    }
+  ],
+  "test_count": 2371,
+  "public_fixture": {
+    "positive_queries": 64,
+    "exact_displayed_replays": 5354,
+    "explicit_forall_guards": 4,
+    "noninhabitation_queries": 8,
+    "engines": [
+      "djinn",
+      "exference"
+    ],
+    "original_signatures": [
+      "forall a. C a => Token",
+      "C a => Token",
+      "forall a. C a => (forall b. b -> b) -> Token",
+      "C z => forall b. b -> Token"
+    ],
+    "selections": [
+      "first/balanced",
+      "best/balanced",
+      "all/balanced",
+      "all/legacy"
+    ],
+    "output_modes": [
+      "definition",
+      "expression"
+    ],
+    "window": 4,
+    "djinn_choices": 20000,
+    "exference_steps": 256
+  },
+  "signature_corpus": {
+    "djinn": 350,
+    "exference": 350,
+    "independent_GHC_compilation": "passed",
+    "query_seconds": 2,
+    "steps": 10000
+  },
+  "extended_behavior": {
+    "engine": "exference",
+    "operations": 13,
+    "false_controls": 1,
+    "oracle_controls": 28,
+    "settings": {
+      "exference": {
+        "window": 256,
+        "budget": 100000,
+        "djinn_strategy": "depth-first",
+        "steps": 100000,
+        "process_timeout": 300,
+        "queue": 8192
+      }
+    }
+  },
+  "source_and_runtime_inputs_unchanged": true,
+  "archive": {
+    "path": "one-shot-contextual-output.zip",
+    "artifacts": 970,
+    "bytes": 3125221,
+    "sha256": "bf2cdd8087ad1c2c3f4d9fabf82f7e052b30138fbac70443f1fb0bb7b126a2f7",
+    "all_members_rehashed": true
+  },
+  "boundaries": [
+    "Acceptance covers the stated four original signatures and selection/output matrix, not every contextual query.",
+    "Type-only all admits closed instance choices. Controlled checker/renderer tests separately pin their exact type arguments.",
+    "Lexical evidence does not turn activated certificate obligations into Given or instance-discharge identity.",
+    "Typed list output, applicable one-shot named-where syntax, kinded source binders and broader provider forms remain open.",
+    "The 160-cell Church behavior objective is unchanged; signature inhabitation is separate.",
+    "Leant remains pinned to bfc3692e; its deadline closure and integration of this canonical revision remain unaccepted."
+  ]
+}

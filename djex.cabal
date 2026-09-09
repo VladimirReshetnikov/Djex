@@ -257,6 +257,7 @@ Library
     Djinn.Internal.TypeFormula
     Language.Haskell.Djex.Command
     Language.Haskell.Djex.Command.Output
+    Language.Haskell.Djex.Command.Typed
     Language.Haskell.Djex.Internal.DependencyGraph
     Language.Haskell.Djex.Internal.ImplicitPrelude
     Language.Haskell.Djex.Package

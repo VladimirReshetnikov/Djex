@@ -48,6 +48,7 @@ import Test.Tasty.HUnit
   , testCase
   )
 import qualified Language.Haskell.Djex as Djex
+import qualified Language.Haskell.Synthesis.TypedGenerated.Haskell as HaskellGraph
 
 main :: IO ()
 main = defaultMain $ testGroup "Djex CLI integration"
@@ -210,6 +211,15 @@ main = defaultMain $ testGroup "Djex CLI integration"
   , testGroup "implicit contextual signatures preserve binding scope"
       [ testCase backend $ testReplImplicitConstraintOnlyProvider backend
       | backend <- ["djinn", "exference"]
+      ]
+  , testCase "local graph generalization compiles at proper and higher kinds"
+      testLocalGraphGeneralization
+  , testGroup "one-shot commands retain contextual source scope"
+      [ testCase (backend ++ " " ++ selection ++ " " ++ ranking) $
+          testOneShotContextual backend selection ranking
+      | backend <- ["djinn", "exference"]
+      , (selection, ranking) <- [("first", "balanced"), ("best", "balanced"),
+          ("all", "balanced"), ("all", "legacy")]
       ]
   , testGroup "ordinary contextual presentation retains typed choices"
       [ testCase (backend ++ " " ++ selection) $
@@ -3994,6 +4004,8 @@ testReplOrdinaryConstraintOnlyProvider backend selection = withTemporaryEnvironm
           , ":synth " ++ signature
           ]
         assertEqual (backend ++ " ordinary contextual REPL exit") ExitSuccess exitCode
+        assertBool ("ordinary contextual output stopped at a rendering error: " ++ errors) $
+          not $ "error [" `isInfixOf` errors
         assertBool ("ordinary query entered the behavioral worker: " ++ errors) $
           not $ "DJEX_REPL_BEHAVIORAL" `isInfixOf` errors
         let candidateLines = filter
@@ -4024,9 +4036,9 @@ testReplOrdinaryConstraintOnlyProvider backend selection = withTemporaryEnvironm
             ((proc "runghc" ["-i" ++ directory, replayDirectory </> "Main.hs"])
               {use_process_jobs = True}) ""
           case replay of
-            Just (ExitSuccess, observed, _) -> assertEqual
+            Just (ExitSuccess, observed, _) -> assertDictionaryObservations
               ("exact ordinary contextual replay changed a payload: " ++ output)
-              (Just $ replicate (length displayed) (37 :: Int, 91 :: Int)) (readMaybe observed)
+              selection (length displayed) observed
             _ -> fail $ "ordinary contextual output failed original-signature replay: " ++ show replay
 
 -- Implicit root variables are scoped by visible type patterns in a named
@@ -4093,6 +4105,121 @@ testReplImplicitConstraintOnlyProvider backend = withTemporaryEnvironment
             case checked of
               Just (ExitSuccess, "(37,91)\n", _) -> pure ()
               _ -> fail $ "exact implicit-source implementation lost dictionary payloads: " ++ show checked
+
+-- A one-shot ordinary command has no predicate worker to repair its output.
+-- Compile every displayed alternative at the original source signature and
+-- observe two distinct dictionaries. Expression output is applied directly.
+-- Ordinary all-selection may choose closed instances. Controlled engine tests
+-- independently pin those selections to exact graph/rendered arguments; the
+-- first/best policy still forwards the caller's dictionary. Keep cardinality
+-- exact so a partial output stream cannot masquerade as complete replay.
+assertDictionaryObservations :: String -> String -> Int -> String -> Assertion
+assertDictionaryObservations label selection count observed =
+  case (readMaybe observed :: Maybe [(Int, Int)]) of
+    Just pairs -> do
+      assertEqual "dictionary replay omitted a displayed alternative" count $ length pairs
+      let allowed = if selection == "all"
+            then [(37, 91), (37, 37), (91, 91)] else [(37, 91)]
+      assertBool (label ++ "\n" ++ observed) $ all (`elem` allowed) pairs
+    Nothing -> fail $ "cannot parse dictionary observations: " ++ observed
+
+testLocalGraphGeneralization :: Assertion
+testLocalGraphGeneralization = do
+  let unit = Djex.TupleType Djex.Boxed []
+      variable = Djex.TypeVariable . Djex.FlexibleVariable
+      selected = [variable "t", Djex.TypeApplication (variable "f") unit]
+      right value = either (fail . show) pure value
+  listName <- right $ Djex.parseName "[]"
+  terms <- mapM (\element -> do
+    let list = Djex.TypeApplication $ Djex.TypeConstructor listName
+        scheme = Djex.ForallType [Djex.FlexibleVariable "element"] [] $ list $ variable "element"
+        result = list element
+        nid = Djex.termNodeId
+        oid = Djex.occurrenceId
+        source :: Djex.TermGraphSource (Djex.Type (Djex.Variable String)) String
+        source = Djex.TermGraphSource (nid 0)
+          [ (nid 0, Djex.TermNode unit $ Djex.TypedLet
+              (Djex.TypedPattern (oid 10) result Djex.TypedWildcard) (nid 1) (nid 3))
+          , (nid 1, Djex.TermNode result $ Djex.TypedImplicitTypeApplication (oid 1) (nid 2) $
+              Djex.ImplicitTypeApplicationWitness scheme element result)
+          , (nid 2, Djex.TermNode scheme $ Djex.TypedGlobal (oid 2) listName)
+          , (nid 3, Djex.TermNode unit $ Djex.TypedTuple [])
+          ]
+    graph <- right $ Djex.sealTermGraph
+      Djex.sharedTypeStructure {Djex.forallTypeStructure = Just Djex.sharedForallTypeStructure}
+      Djex.defaultTermGraphLimits source
+    right $ HaskellGraph.renderHaskellTermGraphWithMetavariables (Djex.defaultRenderOptions id) graph)
+      selected
+  let source = unlines $
+        [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications #-}"
+        , "module Main where"
+        ] ++ concat [["value" ++ show index ++ " :: ()", "value" ++ show index ++ " = " ++ term]
+          | (index, term) <- zip [0 :: Int ..] terms] ++
+        ["main :: IO ()", "main = print [value0, value1]"]
+  withTemporaryEnvironment [("Main.hs", source)] $ \directory -> do
+    checked <- timeout 30000000 $ readCreateProcessWithExitCode
+      ((proc "runghc" [directory </> "Main.hs"]) {use_process_jobs = True}) ""
+    case checked of
+      Just (ExitSuccess, "[(),()]\n", _) -> pure ()
+      other -> fail $ "exact generalized graph output failed independent GHC replay: " ++ show other
+
+testOneShotContextual :: String -> String -> String -> Assertion
+testOneShotContextual backend selection ranking = withTemporaryEnvironment
+  [("Methods.hs", constraintOnlyMethodSource)] $ \directory -> do
+    when (selection == "first" && ranking == "balanced") $
+      forM_ ["forall a. C b => Token", "(forall a. C b => Token)"] $ \invalid -> do
+        (exitCode, output, errors) <- runDjex
+          [backend, "--environment", directory, invalid]
+        assertEqual "invalid explicit forall must fail before synthesis" (ExitFailure 1) exitCode
+        assertEqual "invalid explicit forall displayed an implementation" "" output
+        assertContains "explicit forall must retain the source parser's scope guard"
+          "explicit forall leaves unbound type variables" errors
+    forM_
+      [ ("forall a. C a => Token", "")
+      , ("C a => Token", "")
+      , ("forall a. C a => (forall b. b -> b) -> Token", " (\\x -> x)")
+      , ("C z => forall b. b -> Token", " @Prelude.Bool Prelude.True")
+      ] $ \(signature, arguments) ->
+      forM_ ["definition", "expression"] $ \mode -> do
+        (exitCode, output, errors) <- runDjex $
+          [ backend, "--environment", directory, "--target", "selected"
+          , "--select", selection, "--ranking", ranking, "--render", mode
+          , "--quality-window", "4"
+          ] ++ (if backend == "djinn"
+            then ["--candidate-limit", "4", "--choice-budget", "20000"]
+            else ["--allow-unused", "--max-steps", "256"]) ++ [signature]
+        assertEqual ("one-shot contextual command failed: " ++ errors) ExitSuccess exitCode
+        let displayed = filter
+              ((if mode == "definition" then "selected " else "(") `isPrefixOf`) $ lines output
+        assertBool ("one-shot command displayed no contextual result: " ++ output ++ errors) $
+          not $ null displayed
+        let apply expression ty = "observe ((" ++ expression ++ ") @Prelude."
+                ++ ty ++ arguments ++ ")"
+            observation expression = "(" ++ apply expression "Int" ++ ", "
+                ++ apply expression "Bool" ++ ")"
+            checkName index = "check" ++ show index
+            checks = zip [0 :: Int ..] displayed
+            body (index, candidate) =
+              [ checkName index ++ " :: (Int, Int)"
+              , checkName index ++ " = " ++ if mode == "definition"
+                  then "let { selected :: " ++ signature ++ "; " ++ candidate
+                    ++ " } in " ++ observation "selected"
+                  else observation candidate
+              ]
+        withTemporaryEnvironment [("Main.hs", unlines $
+            [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications, TypeAbstractions, AllowAmbiguousTypes #-}"
+            , "module Main where", "import Methods", "main :: IO ()"
+            ] ++ concatMap body checks ++
+            ["main = print [" ++ intercalate ", " (map (checkName . fst) checks) ++ "]"])] $
+          \replayDirectory -> do
+            checked <- timeout 30000000 $ readCreateProcessWithExitCode
+              ((proc "runghc" ["-i" ++ directory, replayDirectory </> "Main.hs"])
+                {use_process_jobs = True}) ""
+            case checked of
+              Just (ExitSuccess, observed, _) -> assertDictionaryObservations
+                ("one-shot exact source replay lost dictionary semantics: " ++ signature ++ "\n" ++ output)
+                selection (length displayed) observed
+              _ -> fail $ "one-shot exact source replay failed: " ++ signature ++ "\n" ++ show checked
 
 testReplParenthesizedForallBehavior :: Assertion
 testReplParenthesizedForallBehavior = withTemporaryEnvironment [] $ \directory ->

@@ -22,6 +22,7 @@ import Language.Haskell.Synthesis.TypedGenerated
   , OccurrenceId
   , TermGraphError (..)
   , TermGraphSource (..)
+  , TermGraphProjectionStyle (PreserveLambdaBoundaries)
   , TermNode (..)
   , TermNodeForm (..)
   , TypedPattern (..)
@@ -30,12 +31,17 @@ import Language.Haskell.Synthesis.TypedGenerated
   , TypeStructure (..)
   , TermNodeId
   , certificateId
+  , contextApplicationWitness
+  , contextIntroductionWitness
+  , contextEvidenceBinder
+  , givenContextEvidence
   , defaultTermGraphLimits
   , eraseTermGraph
   , occurrenceId
   , occurrenceIdValue
   , sealTermGraph
   , sharedTypeStructure
+  , sharedContextTypeStructure
   , termGraphMetrics
   , termGraphNodes
   , termNodeId
@@ -65,11 +71,113 @@ typedCandidateCertificateGraphFixture =
 tests :: TestTree
 tests = testGroup "atomic certificate graph occurrence associations"
   [ successTests
+  , lexicalContextTests
   , certificateFingerprintTests
   , observationTests
   , occurrenceTests
   , demandTests
   ]
+
+lexicalContextTests :: TestTree
+lexicalContextTests = testGroup "lexical context with retained certificates"
+  [ testCase "retain unused lexical context and complete certificate ownership" $ do
+      plain <- expectRight $ sealGraph contextualGraph [contextualOrigin]
+      checked <- expectRight $ sealLexicalGraph
+        (withLexicalContext [Constraint classC [boolType]] contextualGraph)
+        [contextualOrigin]
+      foldCheckedTypeApplicationCertificateGraph collect [] checked @?=
+        foldCheckedTypeApplicationCertificateGraph collect [] plain
+      foldCheckedTypeApplicationCertificateGraph collectObligations [] checked @?=
+        foldCheckedTypeApplicationCertificateGraph collectObligations [] plain
+      eraseTermGraph (checkedTypeApplicationCertificateGraph checked) @?=
+        eraseTermGraph (checkedTypeApplicationCertificateGraph plain)
+  , testCase "retain a separately checked Given application alongside a certificate" $ do
+      checked <- expectRight $ sealLexicalGraph
+        (givenAndCertificateGraph intType 900 0) [oneSlotOrigin]
+      foldCheckedTypeApplicationCertificateGraph collect [] checked @?=
+        [(cert7, providerName, oneSlotScheme, 0, 10, [(0, 1, 11)])]
+      length (termGraphNodes $ checkedTypeApplicationCertificateGraph checked) @?= 6
+  , testCase "legacy entrance still rejects lexical context" $ do
+      case sealGraph (withLexicalContext [Constraint classC [intType]] oneSlotGraph)
+          [oneSlotOrigin] of
+        Left TypeApplicationCertificateAssociationGraphError{} -> pure ()
+        Left TypeApplicationCertificateContextEvidenceUnsupported{} -> pure ()
+        Left failure -> assertFailure $ "unexpected legacy rejection: " ++ show failure
+        Right _ -> assertFailure "legacy entrance admitted context"
+  , testCase "reject an out-of-scope Given despite a valid certificate" $ do
+      assertLeft (TypeApplicationCertificateAssociationGraphError $
+        UnboundContextEvidence (termNodeId 3) $
+          contextEvidenceBinder $ givenContextEvidence (occurrenceId 901) 0) $
+        sealLexicalGraph (givenAndCertificateGraph intType 901 0) [oneSlotOrigin]
+  , testCase "reject a wrong dictionary slot despite a valid certificate" $ do
+      assertLeft (TypeApplicationCertificateAssociationGraphError $
+        UnboundContextEvidence (termNodeId 3) $
+          contextEvidenceBinder $ givenContextEvidence (occurrenceId 900) 1) $
+        sealLexicalGraph (givenAndCertificateGraph intType 900 1) [oneSlotOrigin]
+  , testCase "reject a different dictionary predicate despite a valid certificate" $ do
+      assertLeft (TypeApplicationCertificateAssociationGraphError $
+        ContextGivenTypeMismatch (termNodeId 3)
+          (contextEvidenceBinder $ givenContextEvidence (occurrenceId 900) 0)
+          (Constraint classC [intType]) (Constraint classC [boolType])) $
+        sealLexicalGraph (givenAndCertificateGraph boolType 900 0) [oneSlotOrigin]
+  , testCase "lexical context cannot authorize a different certificate owner" $ do
+      assertLeft (TypeApplicationCertificateGlobalOwnerMismatch
+        cert7 providerName otherProviderName) $
+        sealLexicalGraph (withLexicalContext [Constraint classC [intType]] wrongOwnerGraph)
+          [oneSlotOrigin]
+  , testCase "lexical context cannot authorize an incomplete certificate chain" $ do
+      assertLeft (MissingGraphTypeApplicationCertificateUse cert7 1) $
+        sealLexicalGraph (withLexicalContext [Constraint classC [intType]] oneSlotFromTwoSlotGraph)
+          [twoSlotOrigin]
+  , testCase "lexical context cannot authorize a broken certificate child chain" $ do
+      assertLeft (TypeApplicationCertificateChildChainMismatch
+        cert7 1 (termNodeId 1) (termNodeId 3)) $
+        sealLexicalGraph (withLexicalContext [Constraint classC [intType]] brokenChainGraph)
+          [twoSlotOrigin]
+  ]
+
+sealLexicalGraph
+  :: TermGraphSource TestType TestLocal
+  -> [TypeApplicationCertificateOrigin TestVariable]
+  -> Either (TypeApplicationCertificateAssociationError TestVariable TestLocal)
+      (CheckedTypeApplicationCertificateGraph TestVariable TestLocal)
+sealLexicalGraph = sealCheckedTypeApplicationCertificateGraphWithLexicalContext
+  PreserveLambdaBoundaries defaultTypeApplicationCertificateLimits
+  sharedTypeStructure defaultTermGraphLimits
+
+withLexicalContext
+  :: [Constraint TestType] -> TermGraphSource TestType TestLocal
+  -> TermGraphSource TestType TestLocal
+withLexicalContext constraints source =
+  let root = termGraphSourceRoot source
+      body = case lookup root $ termGraphSourceNodes source of
+        Just (TermNode ty _) -> ty
+        Nothing -> error "missing lexical fixture root"
+      qualified = ForallType [] constraints body
+      witness = maybe (error "invalid lexical introduction fixture") id $
+        contextIntroductionWitness sharedContextTypeStructure qualified
+  in TermGraphSource (termNodeId 900) $
+    (termNodeId 900, TermNode qualified $
+      TypedContextIntroduction (occurrenceId 900) root witness)
+    : termGraphSourceNodes source
+
+givenAndCertificateGraph :: TestType -> Natural -> Natural
+  -> TermGraphSource TestType TestLocal
+givenAndCertificateGraph givenType introduction slot =
+  withLexicalContext [Constraint classC [givenType]] $
+    TermGraphSource (termNodeId 4) $
+      termGraphSourceNodes oneSlotGraph ++
+        [ globalNode 2 12 otherProviderName qualified
+        , (termNodeId 3, TermNode intType $
+            TypedContextApplication (occurrenceId 13) (termNodeId 2) witness)
+        , (termNodeId 4, TermNode (TupleType Boxed [intType, intType]) $
+            TypedTuple [termNodeId 1, termNodeId 3])
+        ]
+ where
+  qualified = ForallType [] [Constraint classC [intType]] intType
+  witness = maybe (error "invalid lexical application fixture") id $
+    contextApplicationWitness sharedContextTypeStructure qualified
+      [givenContextEvidence (occurrenceId introduction) slot]
 
 certificateFingerprintTests :: TestTree
 certificateFingerprintTests = testGroup "carrier-aware canonical fingerprints"

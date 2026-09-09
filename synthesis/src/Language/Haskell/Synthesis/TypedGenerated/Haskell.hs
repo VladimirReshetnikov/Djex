@@ -5,6 +5,8 @@ module Language.Haskell.Synthesis.TypedGenerated.Haskell
   ( HaskellGraphRenderError (..)
   , renderHaskellTermGraph
   , renderHaskellTermGraphAtSignature
+  , renderHaskellTermGraphWithMetavariables
+  , renderHaskellTermGraphAtSignatureWithMetavariables
   ) where
 
 import Control.Monad (unless)
@@ -53,7 +55,7 @@ renderHaskellTermGraph
   => G.RenderOptions local
   -> Q.TermGraph (T.Type variable) local
   -> Either HaskellGraphRenderError String
-renderHaskellTermGraph = renderGraph Nothing
+renderHaskellTermGraph = renderGraph (const False) Nothing
 
 -- | Render the right-hand side of a binding with this exact, explicitly
 -- quantified source signature. ScopedTypeVariables brings its leading binders
@@ -68,13 +70,42 @@ renderHaskellTermGraphAtSignature
   :: (Ord variable, Ord local)
   => G.RenderOptions local -> T.Type String -> Q.TermGraph (T.Type variable) local
   -> Either HaskellGraphRenderError String
-renderHaskellTermGraphAtSignature options signature = renderGraph (Just signature) options
+renderHaskellTermGraphAtSignature options signature = renderGraph (const False) (Just signature) options
+
+-- | Render tagged synthesis variables, admitting local generalization of
+-- unconstrained flexible variables in an internal expression. A fresh variable
+-- must occur in a retained proper term type and escape into neither the result
+-- nor captured local types or dictionaries. Rigid variables are never generalized. The helper's
+-- unused identity-function arguments carry those complete term types, so GHC
+-- infers its kinds without choosing an arbitrary default type. This is a
+-- presentation of the same expression, not new candidate or graph evidence;
+-- independent checking of the exact output remains required.
+renderHaskellTermGraphWithMetavariables
+  :: (Ord variable, Ord local)
+  => G.RenderOptions local
+  -> Q.TermGraph (T.Type (T.Variable variable)) local
+  -> Either HaskellGraphRenderError String
+renderHaskellTermGraphWithMetavariables = renderGraph flexible Nothing
+
+-- | The source-signature counterpart of 'renderHaskellTermGraphWithMetavariables'.
+renderHaskellTermGraphAtSignatureWithMetavariables
+  :: (Ord variable, Ord local)
+  => G.RenderOptions local -> T.Type String
+  -> Q.TermGraph (T.Type (T.Variable variable)) local
+  -> Either HaskellGraphRenderError String
+renderHaskellTermGraphAtSignatureWithMetavariables options signature =
+  renderGraph flexible (Just signature) options
+
+flexible :: T.Variable variable -> Bool
+flexible T.FlexibleVariable{} = True
+flexible T.RigidVariable{} = False
 
 renderGraph
   :: (Ord variable, Ord local)
-  => Maybe (T.Type String) -> G.RenderOptions local -> Q.TermGraph (T.Type variable) local
+  => (variable -> Bool) -> Maybe (T.Type String)
+  -> G.RenderOptions local -> Q.TermGraph (T.Type variable) local
   -> Either HaskellGraphRenderError String
-renderGraph suppliedSignature options graph = do
+renderGraph canGeneralize suppliedSignature options graph = do
   _ <- syntax $ G.renderExpression options erased
   root <- node $ Q.termGraphRoot graph
   unless (Set.null $ T.freeVariables $ Q.termNodeType root) $
@@ -89,7 +120,7 @@ renderGraph suppliedSignature options graph = do
     unless (all validBinder spellings && length spellings == Set.size (Set.fromList spellings)) $
       Left HaskellGraphRootSignatureMismatch
     renderRoot names Map.empty Map.empty spellings $ Q.termGraphRoot graph
-  else render names Map.empty Map.empty $ Q.termGraphRoot graph
+  else render names Map.empty Map.empty Map.empty $ Q.termGraphRoot graph
  where
   erased = Q.eraseTermGraph graph
   qualification = G.renderQualification options
@@ -98,7 +129,42 @@ renderGraph suppliedSignature options graph = do
    where
     choose name | name `elem` globals = choose $ name ++ "_"
                 | otherwise = name
-  helpers = [helper key | (key, _) <- Q.termGraphNodes graph]
+  metaHelper key = choose $ helper key ++ "_types"
+   where
+    choose name | name `elem` globals = choose $ name ++ "_"
+                | otherwise = name
+  helpers = concat [[helper key, metaHelper key] | (key, _) <- Q.termGraphNodes graph]
+  flexibleVariables = Set.filter canGeneralize $ foldMap
+    (T.freeVariables . Q.termNodeType . snd) $ Q.termGraphNodes graph
+  capturedGlobalVariables = foldMap T.freeVariables
+    [Q.termNodeType current | (_, current) <- Q.termGraphNodes graph,
+      Q.TypedGlobal{} <- [Q.termNodeForm current]]
+
+  -- Traverse this rooted subtree only. A sibling must not supply a type scope.
+  subtreeTypes key = collect Set.empty [key]
+   where
+    collect _ [] = Right []
+    collect visited (next : rest)
+      | next `Set.member` visited = collect visited rest
+      | otherwise = do
+          current <- node next
+          remaining <- collect (Set.insert next visited) $
+            children (Q.termNodeForm current) ++ rest
+          pure $ Q.termNodeType current : remaining
+    children form = case form of
+      Q.TypedLocal{} -> []
+      Q.TypedGlobal{} -> []
+      Q.TypedHole{} -> []
+      Q.TypedLambda _ body -> [body]
+      Q.TypedApply function argument _ -> [function, argument]
+      Q.TypedVisibleTypeApplication _ function _ _ -> [function]
+      Q.TypedImplicitTypeApplication _ function _ -> [function]
+      Q.TypedForallIntroduction _ body _ -> [body]
+      Q.TypedContextIntroduction _ body _ -> [body]
+      Q.TypedContextApplication _ function _ -> [function]
+      Q.TypedTuple elements -> elements
+      Q.TypedLet _ value body -> [value, body]
+      Q.TypedCase scrutinee alternatives -> scrutinee : map snd alternatives
   syntax = either (Left . HaskellGraphSyntaxError) Right
   node key = maybe (Left HaskellGraphMissingNode) Right $ Q.lookupTermNode key graph
   local names key = maybe (Left $ HaskellGraphSyntaxError G.UnboundLocalIdentity)
@@ -140,7 +206,7 @@ renderGraph suppliedSignature options graph = do
         checkContext (Q.contextIntroductionSource witness) constraints $
           Q.contextIntroductionBody witness
         renderRoot names scope (Map.union introduced givens) remaining body
-      _ | null remaining -> render names scope givens key
+      _ | null remaining -> render names scope givens Map.empty key
         | otherwise -> Left HaskellGraphRootSignatureMismatch
 
   -- Each bound type gets a name disjoint from every opened skolem name.
@@ -184,26 +250,68 @@ renderGraph suppliedSignature options graph = do
     pure $ if constraintOnlyForall $ Q.typedPatternType pattern
       then body else annotate body ty
 
-  render names scope givens key = do
+  bindPattern locals pattern = case Q.typedPatternNode pattern of
+    Q.TypedBind variable -> Map.insert variable (Q.typedPatternType pattern) locals
+    Q.TypedWildcard -> locals
+    Q.TypedConstructor _ fields -> foldl bindPattern locals fields
+    Q.TypedTuplePattern fields -> foldl bindPattern locals fields
+    Q.TypedAs variable child -> bindPattern
+      (Map.insert variable (Q.typedPatternType pattern) locals) child
+
+  render names scope givens locals key = do
     current <- node key
+    let protected = Map.keysSet scope `Set.union`
+          capturedGlobalVariables `Set.union`
+          T.freeVariables (Q.termNodeType current) `Set.union`
+          foldMap T.freeVariables locals `Set.union`
+          foldMap (foldMap T.freeVariables) givens
+        available = flexibleVariables `Set.difference` protected
+    carriers <- if Set.null available then pure [] else do
+      types <- subtreeTypes key
+      let eligible ty = let free = T.freeVariables ty in
+            not (Set.null $ free `Set.intersection` available) &&
+              free `Set.isSubsetOf` (Map.keysSet scope `Set.union` available)
+          select _ [] = []
+          select covered (ty : remaining)
+            | T.freeVariables ty `Set.isSubsetOf` covered = select covered remaining
+            | otherwise = ty : select (covered `Set.union` T.freeVariables ty) remaining
+      pure $ select (Map.keysSet scope) $ filter eligible types
+    if null carriers then renderNode names scope givens locals key current else do
+      let fresh = Set.toAscList $ foldMap T.freeVariables carriers
+            `Set.difference` Map.keysSet scope
+          spellings = freshSpellings (Set.fromList $ Map.elems scope)
+            ["djexMeta" ++ show (Q.termNodeIdValue key) ++ "_" ++ show index
+            | index <- [0 :: Int .. length fresh - 1]]
+          nested = Map.union (Map.fromList $ zip fresh spellings) scope
+          name = metaHelper key
+          helperType = foldr (\ty -> T.FunctionType $ T.FunctionType ty ty)
+            (Q.termNodeType current) carriers
+      signature <- typeText nested helperType
+      result <- render names nested givens locals key
+      pure $ parens $ "let { " ++ name ++ " :: forall " ++ unwords spellings
+        ++ ". " ++ signature ++ "; " ++ name ++ concatMap (const " _") carriers
+        ++ " = " ++ result ++ " } in " ++ name
+        ++ concatMap (const " (\\djexIdentity -> djexIdentity)") carriers
+
+  renderNode names scope givens locals key current =
     case Q.termNodeForm current of
       Q.TypedLocal _ variable -> local names variable
       Q.TypedGlobal _ name -> Right $ renderNamePrefix qualification name
       Q.TypedHole{} -> Left HaskellGraphHole
       Q.TypedLambda patterns body -> do
         parameters <- traverse (patternText names scope) patterns
-        result <- render names scope givens body
+        result <- render names scope givens (foldl bindPattern locals patterns) body
         pure $ parens $ "\\" ++ unwords parameters ++ " -> " ++ result
       Q.TypedApply function argument witness -> do
-        f <- render names scope givens function
-        a <- render names scope givens argument
+        f <- render names scope givens locals function
+        a <- render names scope givens locals argument
         domain <- typeText scope $ Q.applicationDomain witness
         pure $ parens $ parens f ++ " " ++ annotate a domain
       Q.TypedVisibleTypeApplication _ function _ witness ->
-        application names scope givens function (Q.typeApplicationSource witness)
+        application names scope givens locals function (Q.typeApplicationSource witness)
           (Q.typeApplicationSelected witness)
       Q.TypedImplicitTypeApplication _ function witness ->
-        application names scope givens function (Q.implicitTypeApplicationSource witness)
+        application names scope givens locals function (Q.implicitTypeApplicationSource witness)
           (Q.implicitTypeApplicationSelected witness)
       Q.TypedForallIntroduction _ body witness ->
         case (Q.forallIntroductionSource witness, Q.forallIntroductionVariable witness) of
@@ -213,7 +321,7 @@ renderGraph suppliedSignature options graph = do
                 nested = Map.insert variable spelling scope
                 name = helper key
             opened <- typeText nested $ Q.forallIntroductionBody witness
-            result <- render names nested givens body
+            result <- render names nested givens locals body
             pure $ parens $ "let { " ++ name ++ " :: forall " ++ spelling ++ ". "
               ++ opened ++ "; " ++ name ++ " = " ++ result ++ " } in " ++ name
           _ -> Left HaskellGraphUnsupportedForall
@@ -225,7 +333,7 @@ renderGraph suppliedSignature options graph = do
               | (slot, constraint) <- zip [0 ..] constraints ]
         checkContext source constraints $ Q.contextIntroductionBody witness
         signature <- typeText scope source
-        result <- render names scope (Map.union introduced givens) body
+        result <- render names scope (Map.union introduced givens) locals body
         pure $ annotate result signature
       Q.TypedContextApplication _ function witness -> do
         let source = Q.contextApplicationSource witness
@@ -235,23 +343,23 @@ renderGraph suppliedSignature options graph = do
         unless (length constraints == length evidence) $
           Left HaskellGraphUnsupportedContextEvidence
         mapM_ (checkGiven givens) $ zip constraints evidence
-        f <- render names scope givens function
+        f <- render names scope givens locals function
         signature <- typeText scope source
         result <- typeText scope $ Q.contextApplicationResult witness
         pure $ annotate (annotate f signature) result
       Q.TypedTuple elements -> do
-        fields <- traverse (render names scope givens) elements
+        fields <- traverse (render names scope givens locals) elements
         pure $ parens $ intercalate ", " fields
       Q.TypedLet pattern value body -> do
         binder <- patternText names scope pattern
-        rhs <- render names scope givens value
-        result <- render names scope givens body
+        rhs <- render names scope givens locals value
+        result <- render names scope givens (bindPattern locals pattern) body
         pure $ parens $ "let { " ++ binder ++ " = " ++ rhs ++ " } in " ++ result
       Q.TypedCase scrutinee alternatives -> do
-        value <- render names scope givens scrutinee
+        value <- render names scope givens locals scrutinee
         cases <- traverse (\(pattern, body) -> do
           binder <- patternText names scope pattern
-          result <- render names scope givens body
+          result <- render names scope givens (bindPattern locals pattern) body
           pure $ binder ++ " -> " ++ result) alternatives
         pure $ parens $ "case " ++ value ++ " of { " ++ intercalate "; " cases ++ " }"
 
@@ -277,8 +385,8 @@ renderGraph suppliedSignature options graph = do
         , length (filter (sameConstraint required) $ Map.elems givens) == 1 -> Right ()
       _ -> Left HaskellGraphUnsupportedContextEvidence
 
-  application names scope givens function source selected = do
-    f <- render names scope givens function
+  application names scope givens locals function source selected = do
+    f <- render names scope givens locals function
     signature <- typeText scope source
     argument <- typeText scope selected
     -- The checked global/local declaration already supplies its source

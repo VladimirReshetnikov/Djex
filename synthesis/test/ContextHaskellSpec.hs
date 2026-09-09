@@ -17,7 +17,39 @@ type Graph = Q.TermGraph Ty Int
 
 contextHaskellTests :: TestTree
 contextHaskellTests = testGroup "Haskell lexical context graph rendering"
-  [ testCase "a constraint-only root requires its lexical signature" $
+  [ testCase "a flexible let annotation receives a local polymorphic scope" $ do
+      let graph = unusedListGraph $ variable $ T.FlexibleVariable "anonymous"
+      H.renderHaskellTermGraph options graph @?= Left H.HaskellGraphUnboundTypeVariable
+      rendered <- either (fail . show) pure $ H.renderHaskellTermGraphWithMetavariables options graph
+      contains "forall djexMeta0_0." rendered
+      contains "[djexMeta0_0] -> [djexMeta0_0]" rendered
+      contains "@(djexMeta0_0)" rendered
+  , testCase "local generalization carries higher-kinded occurrences in its signature" $ do
+      let selected = T.TypeApplication (variable $ T.FlexibleVariable "functor") unit
+      rendered <- either (fail . show) pure $
+        H.renderHaskellTermGraphWithMetavariables options $ unusedListGraph selected
+      contains "forall djexMeta0_0." rendered
+      contains "[djexMeta0_0 ()] -> [djexMeta0_0 ()]" rendered
+  , testCase "an unnamed rigid let annotation is never generalized" $
+      H.renderHaskellTermGraphWithMetavariables options
+        (unusedListGraph $ variable $ T.RigidVariable "escaped")
+        @?= Left H.HaskellGraphUnboundTypeVariable
+  , testCase "a captured global's free type is not generalized" $ do
+      let ty = variable $ T.FlexibleVariable "captured"
+          graph = checked $ Q.TermGraphSource (nid 0)
+            [ (nid 0, node unit $ Q.TypedLet
+                (Q.TypedPattern (oid 10) ty Q.TypedWildcard) (nid 1) (nid 2))
+            , (nid 1, node ty $ Q.TypedGlobal (oid 1) provider)
+            , (nid 2, node unit $ Q.TypedTuple [])
+            ]
+      H.renderHaskellTermGraphWithMetavariables options graph
+        @?= Left H.HaskellGraphUnboundTypeVariable
+  , testCase "metavariable rendering retains the closed-root guard" $
+      H.renderHaskellTermGraphWithMetavariables options
+        (checked $ Q.TermGraphSource (nid 0)
+          [(nid 0, node (variable $ T.FlexibleVariable "result") $ Q.TypedGlobal (oid 0) provider)])
+        @?= Left H.HaskellGraphOpenRoot
+  , testCase "a constraint-only root requires its lexical signature" $
       H.renderHaskellTermGraph options constraintOnlyGraph @?= Left H.HaskellGraphRootSignatureRequired
   , testCase "a matching full signature scopes the actual constraint-only selection" $ do
       let signature = T.ForallType ["a"] [classC $ T.TypeVariable "a"] unit
@@ -243,6 +275,25 @@ node = Q.TermNode
 
 bind :: Natural -> Int -> Ty -> Q.TypedPattern Ty Int
 bind occurrence local ty = Q.TypedPattern (oid occurrence) ty $ Q.TypedBind local
+
+-- The empty list's anonymous element is absent from the result. The graph
+-- retains its exact type application and wildcard pattern even though neither
+-- appears in compatibility syntax.
+unusedListGraph :: Ty -> Graph
+unusedListGraph selected = checked $ Q.TermGraphSource (nid 0)
+  [ (nid 0, node unit $ Q.TypedLet
+      (Q.TypedPattern (oid 10) result Q.TypedWildcard) (nid 1) (nid 3))
+  , (nid 1, node result $ Q.TypedImplicitTypeApplication (oid 1) (nid 2) $
+      Q.ImplicitTypeApplicationWitness source selected result)
+  , (nid 2, node source $ Q.TypedGlobal (oid 2) listName)
+  , (nid 3, node unit $ Q.TypedTuple [])
+  ]
+ where
+  listName = right $ parseName "[]"
+  list = T.TypeApplication $ T.TypeConstructor listName
+  source = T.ForallType [T.FlexibleVariable "element"] [] $
+    list $ variable $ T.FlexibleVariable "element"
+  result = list selected
 
 given :: Natural -> Natural -> Q.ContextEvidence
 given occurrence = Q.givenContextEvidence $ oid occurrence

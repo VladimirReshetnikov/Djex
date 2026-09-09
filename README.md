@@ -129,10 +129,10 @@ Its earlier full configured 647-test integration run passes in 343.79 seconds, w
 unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
 retain source graphs as checked wildcards, preserving exact compatibility
 erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) puts
-a clean native integration gate first, with targeted provider filtering and
-supplied tree-fold repairs as the next capability deliveries. Bounded Haskell
-frontend usability remains independent; missing Church constructions, broader
-contextual source and selected-dictionary evidence stay in scope.
+a bounded native verification experiment first, followed by independent Haskell
+frontend fixes and native tree/Church construction checks. Provider filtering and
+the Haskell Exference tree carrier are delivered; broader contextual source and
+selected-dictionary evidence stay in scope.
 The [focused introduction change](docs/reports/2026-09-08-focused-forall-search.md)
 keeps determined local goals together and avoids a temporary priority drop
 while quantified function parameters enter scope. It accepts **all 13 extended
@@ -177,9 +177,11 @@ now retains selected type and dictionary choices through first/best/all renderin
 all 36 explicit-forall public queries and 330 tests across four complete affected
 suites pass at the documented fixture bounds. Implicit-root scope, one-shot
 contextual commands and typed list rendering remain open. The
-[current delivery order](docs/reports/2026-09-07-synthesis-retriage.md) returns to
-native timeout diagnosis and the Lean tree check at unchanged bounds; native
-integration remains a dependency-release gate.
+[current delivery order](docs/reports/2026-09-07-synthesis-retriage.md) prioritizes
+one bounded attempt to reduce native verification requests, then independent
+frontend fixes, the Lean tree check and remaining Church batches. The first
+combined-check prototype fails its live environment gate; no speedup is accepted.
+Native integration remains a dependency-release gate.
 A broader scheduling experiment failed and was reverted. The full **13 extended
 operations and all 19 explicit defaults**, across both Haskell engines and
 Lean Djinn/Exference/Both, remain required; newer canonical Haskell results
@@ -686,9 +688,10 @@ environment and partiality assumptions.
 
 The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) records
 accepted elaboration, contextual inference and the Exference tree carrier,
-with 701 native unit tests passing at the newer working dependency. Finish
-native integration and tree acceptance, then exact Haskell output and the
-remaining Church constructions; broader contextual evidence follows.
+with 701 native unit tests passing at the newer working dependency. One bounded
+verification experiment comes next; remaining exact-output and Church deliveries
+can proceed independently of native integration. Broader contextual evidence
+follows, with exact duplicate-output suppression a separate performance gate.
 The [original roadmap](docs/reports/2026-09-06-synthesis-next-priorities.md)
 retains the full completion requirements; prepared runners and isolated
 renderers do not establish production synthesis coverage.

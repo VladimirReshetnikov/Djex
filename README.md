@@ -12,8 +12,8 @@ evidence resolution and explicit resource controls.
 Both engines carry class obligations as the same shared
 `Constraint (Type variable)` structure. Exference resolves givens,
 superclasses, and explicit instances; Djinn validates the class, arity, and
-kinds of a context but proves only inhabitants that do not need a class
-method. Exference's nominal instance resolution terminates for accepted rules,
+kinds of a context and supports the documented checked contextual-provider
+fragment, including selected method evidence. Exference's nominal instance resolution terminates for accepted rules,
 but its broader expression search is not an inhabitation decision procedure.
 Both engines, their compatibility frontends, and a shared parser-independent
 synthesis foundation compile into one Cabal package with a single library,
@@ -39,7 +39,7 @@ version, and dependency contract.
 - For better first results and useful alternatives under bounded search, see
   [candidate quality, checked normalization, and ranking policies](docs/candidate-quality.md).
 - For the next improvements and their acceptance requirements, see the
-  [current synthesis re-triage](docs/reports/2026-09-09-synthesis-after-one-shot-acceptance.md).
+  [current synthesis re-triage](docs/reports/2026-09-09-synthesis-after-native-contextual-integration.md).
 
 New library code should start with `Language.Haskell.Djex`, a narrower checked
 backend adapter, or a focused `Language.Haskell.Synthesis.*` import. The package
@@ -108,7 +108,7 @@ The matching [Leant integration](https://github.com/VladimirReshetnikov/Leant/bl
 passes nine native ordinary/behavioral/False cells across all three engine
 modes: six exact full-type replays, 24 observations and 16 empty axiom
 inventories. Its strict build and all 686 unfiltered tests pass. The
-[updated re-triage](docs/reports/2026-09-09-synthesis-after-one-shot-acceptance.md) orders
+[updated re-triage](docs/reports/2026-09-09-synthesis-after-native-contextual-integration.md) orders
 remaining public frontend forms and Church behavior after completed native
 dependency integration, with a bounded tree investigation. The accepted
 global-method and loaded-provider increments are described below.
@@ -130,7 +130,7 @@ replay, with 48 empty axiom inventories and three actual false controls.
 Its earlier full configured 647-test integration run passes in 343.79 seconds, with
 unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
 retain source graphs as checked wildcards, preserving exact compatibility
-erasure. The [current re-triage](docs/reports/2026-09-09-synthesis-after-one-shot-acceptance.md) records
+erasure. The [current re-triage](docs/reports/2026-09-09-synthesis-after-native-contextual-integration.md) records
 the now-passing native recursor matrix after the accepted
 [combined verification increment](docs/reports/2026-09-08-combined-behavioral-verification.md).
 All ten native integration gates passed at that recorded revision, which Leant pins;
@@ -196,9 +196,10 @@ suites** and **350 Church signatures per Haskell engine** pass. The later
 **64 public queries**, and both **350-signature** corpora. It preserves lexical
 dictionaries alongside specialization certificates and preserves scope for internal flexible
 types. Typed list output, applicable named-`where` one-shot
-commands and broader binder/provider forms remain open. The [current re-triage](docs/reports/2026-09-09-synthesis-after-one-shot-acceptance.md)
-puts remaining frontend forms and Church behavior next after native integration,
-with a bounded tree investigation.
+commands and broader binder/provider forms remain open. The [current re-triage](docs/reports/2026-09-09-synthesis-after-native-contextual-integration.md)
+puts contextual list construction and exact replay first, then missing Church
+behaviors, remaining query forms and broader provider evidence. Native integration
+is complete; the tree investigation remains bounded.
 Tree and Haskell `foldl1` transfer checks
 still miss at their original limits. One native tree debug expression passes
 the full type and all 16 observations independently; live acceptance remains
@@ -711,7 +712,7 @@ and worked `:djinn`/`:exference`/`:compare` examples. The
 signatures and compiler-checks the generated terms under its documented
 environment and partiality assumptions.
 
-The [current re-triage](docs/reports/2026-09-09-synthesis-after-one-shot-acceptance.md) records
+The [current re-triage](docs/reports/2026-09-09-synthesis-after-native-contextual-integration.md) records
 accepted elaboration, contextual inference and the Exference tree carrier,
 with the later combined verification increment passing 702 native unit tests
 and the original Exference append/False queries. Remaining exact-output and

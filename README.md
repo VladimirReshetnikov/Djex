@@ -154,8 +154,11 @@ The refinement passes all 2,308 Haskell tests and retains the Haskell behavior
 and signature results; its complete native integration remains open. The latest
 native unit result at that older revision was **700/701**. At the accepted
 canonical `bfc3692e` change below, a fresh complete native run passes
-**701/701**, and all six real-kernel method cells pass; the remaining
-integration gates are running. See the [current decision and preserved evidence](docs/reports/2026-09-07-synthesis-retriage.md).
+**701/701**, with six method cells, nine method-control sessions and all 39
+local-context cells passing. The [terminal native report](docs/reports/2026-09-08-native-carrier-integration.md)
+records 9/12 recursor cells after auditing deadlines: Exference append and the
+Exference/Both False controls time out. Integration stopped at that gate; later
+behavioral, nested-forall and signature checks were not run.
 Canonical Haskell Exference now [synthesizes the supplied tree accumulator](docs/reports/2026-09-08-function-carrier-search.md)
 with a function carrier at the original bounds: two exact candidates pass all
 16 observations and all 1,024 contradictory controls reject. The scoped
@@ -168,10 +171,12 @@ Leant's [semantic provider filter](docs/reports/2026-09-08-semantic-auxiliary-pr
 now fixes generated-eliminator admission while retaining ordinary user `elim`
 functions. Its public tree inventories pass; positive Lean synthesis remains open.
 The report also corrects earlier tree False-control pass labels: the Exference
-and Both commands timed out and fail the fixture's deadline contract. The next delivery
-finishes native integration, then checks the Lean tree at unchanged bounds.
-The earlier layered-provider failure now passes in the complete unit suite;
-exact Haskell output is the next independent implementation delivery.
+and Both commands timed out and fail the fixture's deadline contract. The
+[current delivery order](docs/reports/2026-09-07-synthesis-retriage.md) prioritizes
+exact ordinary Haskell contextual output, whose prototype builds but still needs
+replay acceptance, followed by a focused native timeout diagnosis and the Lean
+tree check at unchanged bounds. Native integration remains a dependency-release
+gate. The earlier layered-provider failure now passes in the complete unit suite.
 A broader scheduling experiment failed and was reverted. The full **13 extended
 operations and all 19 explicit defaults**, across both Haskell engines and
 Lean Djinn/Exference/Both, remain required; newer canonical Haskell results

@@ -4650,6 +4650,7 @@ tests = testGroup "Exference"
                   ExpApply function actual ->
                     containsExplicit providerBinder function
                       || containsExplicit providerBinder actual
+                  ExpSelect function _ -> containsExplicit providerBinder function
                   ExpTypeApply function actualArgument ->
                     case function of
                       ExpVar returned _ ->
@@ -5040,6 +5041,7 @@ tests = testGroup "Exference"
                 ExpApply function argument ->
                   globalUses function + globalUses argument
                 ExpTypeApply function _ -> globalUses function
+                ExpSelect function _ -> globalUses function
                 ExpTuple elements -> sum $ map globalUses elements
                 ExpHole{} -> 0
                 ExpLetMatch _ _ binding body ->
@@ -9891,6 +9893,10 @@ tests = testGroup "Exference"
           staticClasses <- expectRight $ mkStaticClassEnv [unary] []
           let classEnvironment = mkQueryClassEnv staticClasses []
               constrainedGoal = TypeForall [] [malformedConstraint] integer
+          checkExpression classEnvironment [] [] integer []
+              (ExpSelect (ExpName $ name "unused") [malformedConstraint])
+            @?= Left (InvalidCheckClassConstraint $ ConstraintArityMismatch
+              QueryConstraint className 1 2)
           checkExpression classEnvironment [] [] constrainedGoal []
               (ExpName $ name "unused")
             @?= Left (InvalidCheckClassConstraint $ ConstraintArityMismatch

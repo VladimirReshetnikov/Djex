@@ -6,6 +6,7 @@ module Language.Haskell.Exference.Core.ConstraintSolver
   ( filterUnresolved
   , isPossible
   , uniqueGivenInstantiation
+  , givenInstantiations
   )
 where
 
@@ -40,39 +41,58 @@ import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 uniqueGivenInstantiation
   :: Int -> IntSet.IntSet -> [([HsConstraint], HsConstraint)] -> Maybe Substs
 uniqueGivenInstantiation limit fresh obligations = do
-  solutions <- evalStateT (collect obligations [] []) limit
+  (solutions, exhausted) <- collectGivenInstantiations limit (Just 2) fresh obligations
+  guard $ not exhausted
   case solutions of
     [selected] -> Just selected
     _ -> Nothing
+
+-- | Search may explore every coherent lexical selection within the matching
+-- guard. Unlike the independent inference operation above, multiple answers
+-- are alternatives, not a reason to reject the provider. A matching cutoff
+-- retains the already checked alternatives, without certifying uniqueness or
+-- inspecting more Givens beyond the guard.
+givenInstantiations
+  :: Int -> IntSet.IntSet -> [([HsConstraint], HsConstraint)] -> [Substs]
+givenInstantiations limit fresh obligations = maybe [] fst $
+  collectGivenInstantiations limit Nothing fresh obligations
+
+collectGivenInstantiations
+  :: Int -> Maybe Int -> IntSet.IntSet
+  -> [([HsConstraint], HsConstraint)] -> Maybe ([Substs], Bool)
+collectGivenInstantiations limit stopAfter fresh obligations = do
+  (solutions, exhausted) <- evalStateT (collect obligations [] []) limit
+  pure (reverse solutions, exhausted)
  where
   givenVariables = IntSet.fromList $ Set.toList $ foldMap
     (foldMap (foldMap freeVars . constraint_params) . fst) obligations
   eligible = fresh `IntSet.difference` givenVariables
 
   collect :: [([HsConstraint], HsConstraint)] -> [TypeEq] -> [Substs]
-    -> StateT Int Maybe [Substs]
+    -> StateT Int Maybe ([Substs], Bool)
   collect [] equations found = do
     selected <- lift $ match equations
-    pure $ if any (sameSelection selected) found then found else selected : found
+    pure (if any (sameSelection selected) found then found else selected : found, False)
   collect ((givens, required) : rest) equations found = candidates givens found
    where
-    candidates _ solutions@(_ : _ : _) = pure solutions
-    candidates [] solutions = pure solutions
+    candidates _ solutions
+      | Just count <- stopAfter, length solutions >= count = pure (solutions, False)
+    candidates [] solutions = pure (solutions, False)
     candidates (given : remaining) solutions = do
       fuel <- get
-      guard $ fuel > 0
-      put $ fuel - 1
-      if constraint_tclass given /= constraint_tclass required ||
-          length (constraint_params given) /= length (constraint_params required)
-        then candidates remaining solutions
-        else do
-          let nextEquations = equations ++ zipWith TypeEq
-                (constraint_params given) (constraint_params required)
-          case match nextEquations of
-            Nothing -> candidates remaining solutions
-            Just _ -> do
-              next <- collect rest nextEquations solutions
-              candidates remaining next
+      if fuel <= 0 then pure (solutions, True) else do
+        put $ fuel - 1
+        if constraint_tclass given /= constraint_tclass required ||
+            length (constraint_params given) /= length (constraint_params required)
+          then candidates remaining solutions
+          else do
+            let nextEquations = equations ++ zipWith TypeEq
+                  (constraint_params given) (constraint_params required)
+            case match nextEquations of
+              Nothing -> candidates remaining solutions
+              Just _ -> do
+                (next, exhausted) <- collect rest nextEquations solutions
+                if exhausted then pure (next, True) else candidates remaining next
 
   match :: [TypeEq] -> Maybe Substs
   match equations = do

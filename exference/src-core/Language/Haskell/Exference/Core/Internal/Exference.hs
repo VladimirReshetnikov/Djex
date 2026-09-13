@@ -2960,12 +2960,12 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
             { nodeGoals = nodeGoals node <> Seq.fromList additionalGoals }
 
       byUnified :: Substs -> Substs -> StateT SearchNode SearchBranches ()
-      byUnified originalGoalSS originalProvSS =
+      byUnified originalGoalSS originalProvSS = do
         -- Constraint-only parameters cannot be inferred from the result or
         -- scheduled value arguments. The allocation snapshot identifies this
         -- provider use's fresh variables, excluding every persistent goal or
-        -- local variable. Infer only a unique coherent lexical selection and
-        -- carry it through the normal scope validation and dependency updates.
+        -- local variable. Explore coherent lexical selections and preserve
+        -- their direct class arguments for independent expression checking.
         let currentGivens = map (snd . constraintApplySubsts originalGoalSS) $
               S.toList (qClassEnv_constraints contxt) ++ givenConstraints
             required = map (snd . constraintApplySubsts originalProvSS) provConstrs
@@ -2973,16 +2973,18 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
               (not . (`identifierIsReserved` nodeFlexibleIds initialNode)) $
                 IntSet.fromList $ S.toList $ foldMap
                   (foldMap freeVars . constraint_params) required
-            selected = if IntSet.null fresh then IntMap.empty else
-              fromMaybe IntMap.empty $ uniqueGivenInstantiation 4096 fresh
+            selections = if IntSet.null fresh then [] else
+              givenInstantiations 4096 fresh
                 [(currentGivens, constraint) | constraint <- required]
-            applySelected = snd . applySubsts selected
+        selected <- lift $ chooseBranches $ if null selections
+          then [IntMap.empty] else selections
+        let applySelected = snd . applySubsts selected
             goalSS = IntMap.map applySelected originalGoalSS
             provSS = IntMap.union selected $ IntMap.map applySelected originalProvSS
-        in byUnifiedWithSelections goalSS provSS
+        byUnifiedWithSelections (not $ IntMap.null selected) goalSS provSS
 
-      byUnifiedWithSelections :: Substs -> Substs -> StateT SearchNode SearchBranches ()
-      byUnifiedWithSelections goalSS provSS = do
+      byUnifiedWithSelections :: Bool -> Substs -> Substs -> StateT SearchNode SearchBranches ()
+      byUnifiedWithSelections retainSelection goalSS provSS = do
         let allSS = IntMap.union goalSS provSS
             substs = case applier of
               Left _  -> goalSS
@@ -2994,6 +2996,8 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
             currentGivens = map
               (snd . constraintApplySubsts substs) givenConstraints
             scopedConstrs2 = scopedConstraints currentGivens constrs2
+            selectedExpression = if retainSelection
+              then ExpSelect coreExp constrs2 else coreExp
         newConstraints <- lift $ maybeBranch $ if allowConstrs
           then Just $ constrs1 ++ scopedConstrs2
           else if getAny applied1
@@ -3022,7 +3026,7 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
               (nodeGoals node) }
         modify $ \node -> node
           { nodeExpression = fillExprHole var
-              (foldl' ExpApply coreExp (map ExpHole vars))
+              (foldl' ExpApply selectedExpression (map ExpHole vars))
               (nodeExpression node)
           , nodeConstraintGoals = newConstraints
           , nodeDepth = addScore (nodeDepth node) depthModMatch

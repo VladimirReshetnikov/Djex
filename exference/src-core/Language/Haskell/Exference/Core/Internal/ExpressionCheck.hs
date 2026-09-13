@@ -41,7 +41,7 @@ module Language.Haskell.Exference.Core.Internal.ExpressionCheck
 where
 
 import Control.DeepSeq (NFData (rnf))
-import Control.Monad (foldM, forM, replicateM, unless, when, zipWithM_)
+import Control.Monad (foldM, forM, forM_, replicateM, unless, when, zipWithM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict
   ( StateT (..), gets, modify', runStateT )
@@ -98,6 +98,7 @@ import qualified Language.Haskell.Synthesis.TypedGenerated as SharedTyped
 data ExpressionCheckError
   = UnknownVariable TVarId
   | VisibleTypeApplicationOccurrenceTraceMismatch
+  | ProviderSelectionRequiresDirectProvider
   | UnknownBinding QualifiedName
   | UnknownConstructor QualifiedName
   | EmptyCaseWithoutMatchingDeconstructor HsType
@@ -255,6 +256,7 @@ repairInferredProviderApplications substitutions occurrences expression = do
     ExpName name -> occurrence (Right name) original
     ExpLambda variable annotation body -> ExpLambda variable annotation <$> go body
     ExpApply function argument -> ExpApply <$> go function <*> go argument
+    ExpSelect function constraints -> (`ExpSelect` constraints) <$> go function
     -- Direct global visible spines have a separate checker entrance and do
     -- not generate ordinary occurrence records. A local visible base is
     -- inferred normally and therefore consumes its (exact-source) record.
@@ -498,6 +500,7 @@ data CheckState = CheckState
   , checkNextContextIntroduction :: !Natural
   , checkConstraints :: [ScopedConstraint]
   , checkGivenInference :: [(IntSet.IntSet, [ScopedConstraint])]
+  , checkSelectionRequirements :: Maybe [[HsConstraint]]
   , checkRigidPlan :: !RigidInstantiationPlan
   , checkRigidScope :: !RigidScope
   , checkCandidateRigidIds :: !IntSet.IntSet
@@ -745,6 +748,7 @@ checkValidatedExpression provenCandidateRigids
         , checkNextContextIntroduction = 0
         , checkConstraints = []
         , checkGivenInference = []
+        , checkSelectionRequirements = Nothing
         , checkRigidPlan = rigidPlan
         , checkRigidScope = emptyRigidScope
         , checkCandidateRigidIds = candidateRigids
@@ -922,6 +926,23 @@ checkValidatedExpression provenCandidateRigids
         body -> checkAgainst variables checkedExpression body
 
     infer :: VariableEnvironment -> Expression -> Check CheckedTermResult
+    infer variables (ExpSelect function selected) = do
+      unless (directProvider function) $
+        throwCheck ProviderSelectionRequiresDirectProvider
+      before <- gets checkSelectionRequirements
+      modify' $ \current -> current {checkSelectionRequirements = Just []}
+      checked <- infer variables function
+      after <- gets checkSelectionRequirements
+      modify' $ \current -> current {checkSelectionRequirements = before}
+      let required = maybe [] (concat . reverse) after
+      unless (not (null selected) && length required == length selected) $
+        throwCheck $ ConstraintMismatch required selected
+      forM_ (zip required selected) $ \(actual, chosen) -> do
+        unless (constraint_tclass actual == constraint_tclass chosen &&
+            length (constraint_params actual) == length (constraint_params chosen)) $
+          throwCheck $ ConstraintMismatch required selected
+        zipWithM_ unifyTypes (constraint_params actual) (constraint_params chosen)
+      pure checked
     infer variables (ExpVar variable annotation) = do
       declared <- maybe (throwCheck $ UnknownVariable variable) pure
         $ IntMap.lookup variable variables
@@ -1308,10 +1329,9 @@ checkValidatedExpression provenCandidateRigids
                 flexibleFreeIdentifiers freshType :
                   map (IntSet.unions . map flexibleFreeIdentifiers . constraint_params) freshConstraints
             obligations = scopedConstraints localGivens freshConstraints
+        recordProviderConstraints obligations
         modify' $ \current -> current
-          { checkConstraints =
-              obligations ++ checkConstraints current
-          , checkGivenInference = (fresh, obligations) : checkGivenInference current
+          { checkGivenInference = (fresh, obligations) : checkGivenInference current
           }
         pure freshType
 
@@ -1358,9 +1378,7 @@ checkValidatedExpression provenCandidateRigids
         source@(TypeForallNative [] constraints@(_ : _) body) -> do
           localGivens <- gets checkLocalGivens
           evidenceGivens <- gets checkEvidenceGivens
-          modify' $ \current -> current
-            { checkConstraints = scopedConstraints localGivens constraints
-                ++ checkConstraints current }
+          recordProviderConstraints $ scopedConstraints localGivens constraints
           recordAliveType source
           consume fresh (obligations ++ scopedConstraints localGivens constraints) $
             unaryCheckedTerm body
@@ -1456,11 +1474,7 @@ checkValidatedExpression provenCandidateRigids
                   outerContexts ++ layerContexts
                     ++ map (fmap substitute) trailingContexts
                 result = substitute sourceResult
-            modify' $ \current -> current
-              { checkConstraints =
-                  scopedConstraints localGivens dischargedContexts
-                    ++ checkConstraints current
-              }
+            recordProviderConstraints $ scopedConstraints localGivens dischargedContexts
             recordAliveType result
             pure
               ( result
@@ -2291,8 +2305,10 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
   mapM_ (validateCheckDeconstructorTypes classEnvironment) deconstructors
   validateExpressionPatternArities classEnvironment
     (constructorArityIndex deconstructors) expression
-  mapM_ (validateCheckType classEnvironment QueryConstraint . snd)
-    $ expressionTypedLocals expression
+  mapM_ (validateCheckConstraint classEnvironment QueryConstraint)
+    $ expressionSelectedConstraints expression
+  mapM_ (validateCheckType classEnvironment QueryConstraint)
+    $ expressionAnnotationTypes expression
   mapM_ validateCheckDeconstructor deconstructors
   validateGeneratedExpression expression
  where
@@ -2334,8 +2350,10 @@ validateCheckCandidateInputs
   mapM_ (validateCheckConstraint classEnvironment QueryConstraint) expected
   validateExpressionPatternArities
     classEnvironment constructorArities expression
-  mapM_ (validateCheckType classEnvironment QueryConstraint . snd)
-    $ expressionTypedLocals expression
+  mapM_ (validateCheckConstraint classEnvironment QueryConstraint)
+    $ expressionSelectedConstraints expression
+  mapM_ (validateCheckType classEnvironment QueryConstraint)
+    $ expressionAnnotationTypes expression
   validateGeneratedExpression expression
 
 validateCheckEnvironmentIdentity
@@ -2633,7 +2651,7 @@ flexibleFreeIdentifiers = IntSet.fromList . Set.toAscList . freeVars
 
 expressionRigidIdentifiers :: Expression -> IntSet.IntSet
 expressionRigidIdentifiers =
-  foldMap (rigidIdentifiers . snd) . expressionTypedLocals
+  foldMap rigidIdentifiers . expressionAnnotationTypes
 
 rigidIdentifiers :: HsType -> IntSet.IntSet
 rigidIdentifiers = foldMap
@@ -2783,6 +2801,23 @@ alignRigidAlpha originalLeft originalRight = go originalLeft originalRight
 -- A newly determined shared parameter can resolve another provider group, so
 -- repeat only while the substitution grows. No dictionary evidence is added
 -- here: final constraint solving and graph sealing independently discharge it.
+-- Capture only obligations independently produced by one provider spine.
+-- Context layers are retained in source order even though the ordinary
+-- constraint queue prepends each layer. The selected class arguments never
+-- become Givens, instance rules or source-graph authority.
+recordProviderConstraints :: [ScopedConstraint] -> Check ()
+recordProviderConstraints obligations = modify' $ \current -> current
+  { checkConstraints = obligations ++ checkConstraints current
+  , checkSelectionRequirements =
+      fmap (scopedConstraintObligations obligations :) $ checkSelectionRequirements current
+  }
+
+directProvider :: Expression -> Bool
+directProvider ExpName{} = True
+directProvider ExpVar{} = True
+directProvider (ExpTypeApply function _) = directProvider function
+directProvider _ = False
+
 inferLexicalProviderSelections :: Check ()
 inferLexicalProviderSelections = do
   before <- gets checkSubstitutions
@@ -2930,4 +2965,4 @@ checkedLayerOpenings source instantiations = case (source, instantiations) of
 
 expressionFlexibleIdentifiers :: Expression -> IntSet.IntSet
 expressionFlexibleIdentifiers =
-  foldMap (flexibleIdentifiers . snd) . expressionTypedLocals
+  foldMap flexibleIdentifiers . expressionAnnotationTypes

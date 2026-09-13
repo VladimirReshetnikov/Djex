@@ -101,7 +101,7 @@ contextualMatrix label rows = testGroup label
 -- one choice before rendering. Runtime instances exist only in GHC replay.
 selectedDictionaryTests :: TestTree
 selectedDictionaryTests = testGroup "Proof-selected dictionaries survive public synthesis"
-  [ testCase (if local then "rank-N local callback" else "global provider") $
+  [ testCase (engineName engine ++ if local then " rank-N local callback" else " global provider") $
       bounded "selected dictionaries and independent GHC replay" $ do
         c <- expectRight $ parseName "C"
         token <- expectRight $ parseName "Token"
@@ -118,21 +118,40 @@ selectedDictionaryTests = testGroup "Proof-selected dictionaries survive public 
             inventoryDeclarations = [ClassDeclaration () c [TypeParameter "p" Nothing] [] [],
               AbstractTypeDeclaration () token ProperTypeKind] ++
               [ValueDeclaration $ ValueSignature () provider providerType | not local]
-        environment <- expectRight $ mkEnvironment inventoryDeclarations
-        session <- expectRight $ mkDjinnSession environment
-        request <- expectRight $ parseDjinnRequest session defaultQueryOptions
-          { optionCutoff = 32, optionBudget = Just 20000, optionAlternatives = True
-          , optionSorted = False, optionStrategy = Interleave }
-          target "selected-dictionaries" sourceSignature
-        batch <- expectRight $ runDjinnTypedQuery session request
-        stream <- expectRight (runDjinnTypedQueryStream session request) >>= mapM expectRight
-        forM_ [("batch", batchCandidates $ resultSearch batch),
-               ("stream", concatMap (batchCandidates . resultSearch) stream)] $ \(mode, candidates) -> do
-          assertBool "selected evidence refilled the raw candidate bound" $ length candidates <= 32
-          replayObservations <- forM candidates $ \candidate -> do
-            graph <- expectRight $ typedCandidateTermGraph candidate
-            rendered <- expectRight $ H.renderHaskellTermGraphAtSignatureWithMetavariables
-              (defaultRenderOptions id) signatureType graph
+        renderedModes <- case engine of
+          DjinnEngine -> do
+            environment <- expectRight $ mkEnvironment inventoryDeclarations
+            session <- expectRight $ mkDjinnSession environment
+            request <- expectRight $ parseDjinnRequest session defaultQueryOptions
+              { optionCutoff = 32, optionBudget = Just 20000, optionAlternatives = True
+              , optionSorted = False, optionStrategy = Interleave }
+              target "selected-dictionaries" sourceSignature
+            batch <- expectRight $ runDjinnTypedQuery session request
+            stream <- expectRight (runDjinnTypedQueryStream session request) >>= mapM expectRight
+            forM [("batch", batchCandidates $ resultSearch batch),
+                  ("stream", concatMap (batchCandidates . resultSearch) stream)] $ \(mode, candidates) -> do
+              assertBool "selected evidence refilled the raw candidate bound" $ length candidates <= 32
+              rendered <- forM candidates $ \candidate -> do
+                graph <- expectRight $ typedCandidateTermGraph candidate
+                expectRight $ H.renderHaskellTermGraphAtSignatureWithMetavariables
+                  (defaultRenderOptions id) signatureType graph
+              pure (mode, rendered)
+          ExferenceEngine -> do
+            environment <- expectRight $ mkEnvironment $
+              map (mapDeclarationTypeVariables $ const $ FlexibleVariable 0) inventoryDeclarations
+            session <- expectRight $ mkExferenceSession environment
+            request <- expectRight $ parseExferenceRequest session defaultExferenceOptions
+              { exferenceMaximumSteps = 20000, exferenceMaximumQueueSize = Just 256
+              , exferenceConstraintDeferralSteps = 0, exferenceAllowUnused = True }
+              target "selected-dictionaries" sourceSignature
+            batches <- expectRight $ runExferenceTypedQuery session request
+            rendered <- forM (take 32 $ concatMap (batchCandidates . resultSearch) batches) $ \candidate -> do
+              graph <- expectRight $ typedCandidateTermGraph candidate
+              expectRight $ H.renderHaskellTermGraphAtSignatureWithMetavariables
+                (defaultRenderOptions $ \v -> "v" ++ show v) signatureType graph
+            pure [("stream", rendered)]
+        forM_ renderedModes $ \(mode, renderedCandidates) -> do
+          replayObservations <- forM renderedCandidates $ \rendered -> do
             let call a b = "observe (candidate @" ++ a ++ " @" ++ b ++
                   (if local then " (\\ @p -> provider @p)" else "") ++ ")"
                 fixture = unlines
@@ -159,7 +178,7 @@ selectedDictionaryTests = testGroup "Proof-selected dictionaries survive public 
               other -> fail $ "selected-dictionary GHC replay failed: " ++ show other ++ "\n" ++ fixture
           assertEqual (mode ++ " lost a checked dictionary selection after source erasure")
             [(37, 91), (91, 37)] $ sort $ nub replayObservations
-  | local <- [False, True]
+  | engine <- [DjinnEngine, ExferenceEngine], local <- [False, True]
   ]
 
 -- These providers have no value argument or result occurrence from which to

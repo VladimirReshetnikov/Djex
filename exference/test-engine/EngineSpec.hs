@@ -17,7 +17,7 @@ import Test.Tasty.HUnit
 
 import Language.Haskell.Exference.Core.Candidate
   ( ExferenceCandidateDetails (..), emptyExferenceSourceTypeVariableHints )
-import Language.Haskell.Exference.Core.ConstraintSolver (filterUnresolved, uniqueGivenInstantiation)
+import Language.Haskell.Exference.Core.ConstraintSolver (filterUnresolved, uniqueGivenInstantiation, givenInstantiations)
 import Language.Haskell.Exference.Core.Expression
   ( Expression (..), toGeneratedExpression )
 import Language.Haskell.Exference.Core.ExferenceStats (ExferenceStats (..))
@@ -194,7 +194,22 @@ tests = testGroup "Exference private engine boundaries"
       singleOptionValidationStrictnessForTesting
         target sourceHints environment query @?= Right ()
   , testGroup "constraint-only lexical instantiation"
-      [ testCase "only fresh provider variables can be solved" $ do
+      [ testCase "two lexical selections survive global method search" $
+          assertTwoLexicalSelections False
+      , testCase "two lexical selections survive local callback search" $
+          assertTwoLexicalSelections True
+      , testCase "explicit selections do not authorize missing or sibling evidence" $
+          assertSelectedProviderChecking
+      , testCase "search alternatives retain ambiguity and matching guards" $ do
+          let c ty = HsConstraint (name "C") [ty]
+              obligations = [([c $ TypeConstant 0, c $ TypeConstant 1], c $ TypeVar 9)]
+          givenInstantiations 20 (IntSet.singleton 9) obligations @?=
+            [IntMap.singleton 9 $ TypeConstant 0, IntMap.singleton 9 $ TypeConstant 1]
+          uniqueGivenInstantiation 20 (IntSet.singleton 9) obligations @?= Nothing
+          givenInstantiations 1 (IntSet.singleton 9) obligations @?=
+            [IntMap.singleton 9 $ TypeConstant 0]
+          givenInstantiations 20 IntSet.empty obligations @?= []
+      , testCase "only fresh provider variables can be solved" $ do
           let c ty = HsConstraint (name "C") [ty]
               request = [([c $ TypeVar 0], c $ TypeVar 9)]
           uniqueGivenInstantiation 20 (IntSet.singleton 9) request @?=
@@ -2684,6 +2699,95 @@ checkedIdentifierTarget spelling = do
 
 name :: String -> QualifiedName
 name spelling = either (error . show) id $ mkQualifiedName [] spelling
+
+assertSelectedProviderChecking :: IO ()
+assertSelectedProviderChecking = do
+  let c ty = HsConstraint (name "C") [ty]
+      d ty = HsConstraint (name "D") [ty]
+      integer = TypeCons $ name "Int"
+      boolean = TypeCons $ name "Bool"
+      character = TypeCons $ name "Char"
+      token = TypeCons $ name "Token"
+      providerName = name "method"
+      provider = TypeForall [3] [c $ TypeVar 3] token
+      selected ty = ExpSelect (ExpName providerName) [c ty]
+      assertRejected label result = case result of
+        Left _ -> pure ()
+        Right _ -> fail $ "independent checker accepted " ++ label
+  classes <- expectRight $ mkStaticClassEnv
+    [HsTypeClass (name "C") [0] [], HsTypeClass (name "D") [0] []] []
+  (bindings, schemes) <- preparedValueEnvironment providerName provider
+  let checker goal givens = do
+        plan <- expectRight $ planRigidInstantiation
+          (mkRigidInstantiationContext $ EnvDictionary bindings [] classes) [] goal
+        context <- expectRight $ prepareExpressionCheckContextWithSchemes plan
+          (mkQueryClassEnv classes givens) bindings [] schemes goal
+        pure $ checkExpressionInContextWithNestedRigidProvenanceEvidence
+          context (nestedRigidProvenance emptyRigidScope) []
+  check <- checker token [c integer, c boolean]
+  _ <- expectRight $ check $ selected integer
+  _ <- expectRight $ check $ selected boolean
+  _ <- expectRight $ check $ ExpSelect
+    (ExpTypeApply (ExpName providerName) Generated.inferredVisibleTypeArgument) [c integer]
+  integerArgument <- expectRight $ Generated.specifiedVisibleTypeArgument integer
+  assertRejected "selection contradicting an explicit type argument" $ check $
+    ExpSelect (ExpTypeApply (ExpName providerName) integerArgument) [c boolean]
+  toGeneratedExpression (selected integer) @?= toGeneratedExpression (selected boolean)
+  assertRejected "erased ambiguous selection" $ check $ ExpName providerName
+  assertRejected "missing dictionary" $ check $ selected character
+  assertRejected "unselected ambient variable" $ check $ selected $ TypeVar 0
+  assertRejected "changed provider class" $ check $ ExpSelect (ExpName providerName) [d integer]
+  assertRejected "extra provider constraint" $ check $ ExpSelect (ExpName providerName) [c integer, c boolean]
+  assertRejected "empty selection" $ check $ ExpSelect (ExpName providerName) []
+  localCheck <- checker (TypeForall [] [c integer] token) []
+  _ <- expectRight $ localCheck $ selected integer
+  siblingCheck <- checker (TypeTuple Boxed [TypeForall [] [c integer] token, token]) []
+  assertRejected "sibling dictionary leakage" $ siblingCheck $
+    ExpTuple [selected integer, selected integer]
+
+assertTwoLexicalSelections :: Bool -> IO ()
+assertTwoLexicalSelections local = do
+  let c ty = HsConstraint (name "C") [ty]
+      token = TypeCons $ name "Token"
+      providerName = name "method"
+      provider = TypeForall [3] [c $ TypeVar 3] token
+      goal = TypeForall [0, 1] [c $ TypeVar 0, c $ TypeVar 1] $
+        if local then TypeArrow provider token else token
+      input = identityInput { E.input_goalType = goal, E.input_maxSteps = 20000 }
+  classes <- expectRight $ mkStaticClassEnv [HsTypeClass (name "C") [0] []] []
+  (bindings, schemes) <- preparedValueEnvironment providerName provider
+  environment <- expectRight $ E.mkExferenceEnvironmentWithSchemes
+    (EnvDictionary (if local then [] else bindings) [] classes)
+    (if local then Map.empty else schemes)
+  target <- checkedIdentifierTarget "twoLexicalSelections"
+  options <- expectRight $ E.checkExferenceOptions $
+    E.querySearchOptions $ legacyInputQuery input
+  results <- expectRight $
+    E.findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments Map.empty
+      target (emptyExferenceSourceTypeVariableHints goal) environment
+      (legacyInputQuery input) options
+  let candidates = take 32 $ concatMap
+        (SharedSearch.batchCandidates . SharedQuery.resultSearch) results
+  selections <- mapM (\candidate -> do
+      graph <- TypedCandidate.foldTypedCandidateGraph
+        (\_ reason -> fail $ "selection candidate has no graph: " ++ show reason)
+        (\_ owned -> pure owned)
+        (\_ associated -> pure $ Association.checkedTypeApplicationCertificateGraph associated)
+        candidate
+      let introductions =
+            [ Typed.contextEvidenceBinder $ Typed.givenContextEvidence occurrence slot
+            | (_, Typed.TermNode _ (Typed.TypedContextIntroduction occurrence _ witness)) <- Typed.termGraphNodes graph
+            , (slot, _) <- zip [0 ..] $ Typed.contextIntroductionConstraints witness ]
+          applications =
+            [ Typed.contextEvidenceBinder proof
+            | (_, Typed.TermNode _ (Typed.TypedContextApplication _ _ witness)) <- Typed.termGraphNodes graph
+            , proof <- Typed.contextApplicationEvidence witness ]
+      length introductions @?= 2
+      length applications @?= 1
+      assertBool "selection escaped the root lexical evidence" $
+        all (`elem` introductions) applications
+      pure $ map Typed.evidenceBinderSlot applications) candidates
+  Set.fromList selections @?= Set.fromList [[0], [1]]
 
 expectRight :: Show problem => Either problem result -> IO result
 expectRight = either (fail . show) pure

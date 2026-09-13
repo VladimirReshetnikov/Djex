@@ -17,6 +17,7 @@ module Language.Haskell.Exference.Core.Expression
       , ExpLambda
       , ExpApply
       , ExpTypeApply
+      , ExpSelect
       , ExpTuple
       , ExpHole
       , ExpLetMatch
@@ -28,6 +29,8 @@ module Language.Haskell.Exference.Core.Expression
   , expressionQualityCost
   , enableExpressionQualityCache
   , expressionTypedLocals
+  , expressionSelectedConstraints
+  , expressionAnnotationTypes
   , expressionNameHints
   , renderExpression
   , qualificationFromLevel
@@ -55,7 +58,9 @@ import qualified Language.Haskell.Synthesis.Generated as Generated
 
 -- | A shared local identity annotated for Exference's search and checker.
 -- Holes carry no type because their expected type remains in the goal queue.
-data AnnotatedLocal = AnnotatedLocal TVarId (Maybe HsType)
+data AnnotatedLocal
+  = AnnotatedLocal TVarId (Maybe HsType)
+  | ProviderSelection [HsConstraint]
   deriving (Eq, Generic)
 
 instance NFData AnnotatedLocal
@@ -103,7 +108,7 @@ summarizeExpression expression = ExpressionQualitySummary
  where
   -- Reuse the shared metric as the sole definition of structural size and
   -- elimination costs. Only occurrence counts need a separate small fold.
-  quality = Quality.candidateQuality (const 0) expression
+  quality = Quality.candidateQuality (const 0) $ eraseSelections expression
   (providers, holes) = occurrences expression (StrictMap.empty, IntMap.empty)
   occurrences node counts = case node of
     Generated.Local _ -> counts
@@ -176,6 +181,17 @@ pattern ExpTypeApply function argument <-
   ExpTypeApply (Expression function) argument = Expression
     $ Generated.VisibleTypeApplication function argument
 
+-- | Explicit per-use choices for a provider's direct class parameters.
+-- These are search annotations, not supplied dictionaries or certificates.
+-- The independent checker matches them against the exact source obligations
+-- and still resolves each dictionary in its original lexical scope. The
+-- private marker occupies a separate identity domain from real locals.
+pattern ExpSelect :: Expression -> [HsConstraint] -> Expression
+pattern ExpSelect function constraints <- (matchSelection -> Just (function, constraints))
+ where
+  ExpSelect (Expression function) constraints = Expression $
+    Generated.Apply (Generated.Local $ ProviderSelection constraints) function
+
 -- | A structural boxed tuple.  Keeping saturated tuple introduction in the
 -- shared generated tree avoids pretending that syntax-level constructors
 -- must have been declared as ordinary environment bindings.
@@ -229,7 +245,7 @@ pattern ExpCaseMatch scrutinee alternatives <-
   ExpCaseMatch (Expression scrutinee) alternatives = Expression
     $ Generated.Case scrutinee $ map generatedAlternative alternatives
 
-{-# COMPLETE ExpVar, ExpName, ExpLambda, ExpApply, ExpTypeApply, ExpTuple,
+{-# COMPLETE ExpVar, ExpName, ExpLambda, ExpApply, ExpTypeApply, ExpSelect, ExpTuple,
              ExpHole, ExpLetMatch, ExpLet, ExpCaseMatch #-}
 
 annotated :: TVarId -> HsType -> AnnotatedLocal
@@ -256,8 +272,15 @@ matchLambda (Expression expression) = case expression of
 
 matchApply :: Expression -> Maybe (Expression, Expression)
 matchApply (Expression expression) = case expression of
+  Generated.Apply (Generated.Local ProviderSelection{}) _ -> Nothing
   Generated.Apply function argument ->
     Just (Expression function, Expression argument)
+  _ -> Nothing
+
+matchSelection :: Expression -> Maybe (Expression, [HsConstraint])
+matchSelection (Expression expression) = case expression of
+  Generated.Apply (Generated.Local (ProviderSelection constraints)) function ->
+    Just (Expression function, constraints)
   _ -> Nothing
 
 matchTypeApply
@@ -332,12 +355,23 @@ data ExpressionRenderError
   | ExpressionSyntaxError Generated.RenderError
   deriving (Eq, Show)
 
--- | Erase search-only type annotations while retaining stable local identity.
--- This is now a functor projection over the canonical shared tree rather than
--- a second recursive syntax conversion.
+-- | Erase search-only annotations, including provider selections, while
+-- retaining the exact value expression and stable local identities.
 toGeneratedExpression :: Expression -> Generated.Expression TVarId
-toGeneratedExpression (Expression expression) =
-  annotatedIdentity <$> expression
+toGeneratedExpression (Expression expression) = erasedIdentity <$> eraseSelections expression
+ where
+  -- Do not match the compatibility views of let/case patterns here: those
+  -- views validate a complete binder list. This functor projection keeps
+  -- malformed cyclic lists lazy for the independent bounded arity preflight.
+  erasedIdentity (AnnotatedLocal variable _) = variable
+  erasedIdentity ProviderSelection{} =
+    error "Exference internal provider-selection marker escaped erasure"
+
+eraseSelections :: Generated.Expression AnnotatedLocal -> Generated.Expression AnnotatedLocal
+eraseSelections = Generated.rewriteExpressionBottomUp erase
+ where
+  erase (Generated.Apply (Generated.Local ProviderSelection{}) function) = function
+  erase original = original
 
 -- | Score the exact immutable summary retained with the annotated tree.
 -- Hole filling updates it from only the inserted fragment and its occurrence
@@ -354,7 +388,7 @@ expressionQualityCost
 expressionQualityCost Quality.LegacyCandidateRanking _ _ = 0
 expressionQualityCost ranking@(Quality.StructuralCandidateRanking weights) providerCost
     (MeasuredExpression expression cache) = case cache of
-  Nothing -> Quality.candidateQualityCost ranking providerCost expression
+  Nothing -> Quality.candidateQualityCost ranking providerCost $ eraseSelections expression
   Just summary ->
     Quality.candidateSizeWeight weights * summarySize summary
       + Quality.candidateEliminationWeight weights * summaryEliminations summary
@@ -371,8 +405,9 @@ enableExpressionQualityCache original@(MeasuredExpression expression cache) = ca
   Nothing -> let !summary = summarizeExpression expression
              in MeasuredExpression expression $ Just summary
 
-annotatedIdentity :: AnnotatedLocal -> TVarId
-annotatedIdentity (AnnotatedLocal variable _) = variable
+annotatedIdentity :: AnnotatedLocal -> Either [HsConstraint] TVarId
+annotatedIdentity (AnnotatedLocal variable _) = Right variable
+annotatedIdentity (ProviderSelection constraints) = Left constraints
 
 -- | Render a closed expression as Haskell source under the given name
 -- qualification policy.  Local-variable scope is validated first, then the
@@ -452,6 +487,14 @@ expressionTypedLocals (Expression expression) =
   | AnnotatedLocal variable (Just annotation) <- toList expression
   ]
 
+expressionSelectedConstraints :: Expression -> [HsConstraint]
+expressionSelectedConstraints (Expression expression) =
+  concat [constraints | ProviderSelection constraints <- toList expression]
+
+expressionAnnotationTypes :: Expression -> [HsType]
+expressionAnnotationTypes expression = map snd (expressionTypedLocals expression)
+  ++ concatMap constraint_params (expressionSelectedConstraints expression)
+
 -- | @fillExprHole hole replacement expression@ replaces every 'ExpHole' with
 -- identity @hole@ in @expression@ by @replacement@.  The replacement is
 -- inserted as a whole and not itself searched, so fresh holes it introduces
@@ -473,8 +516,16 @@ fillExprHole variable (MeasuredExpression replacement replacementCache)
 -- | Apply the shared capture-safe generated-term simplifier while comparing
 -- annotated locals solely by Exference's stable numeric identity.
 simplifyExpression :: Expression -> Expression
-simplifyExpression (Expression expression) = Expression
-  $ Generated.simplifyExpressionBy annotatedIdentity expression
+simplifyExpression original@(Expression expression) = Expression $
+  if not $ hasSelections original
+    then Generated.simplifyExpressionBy annotatedIdentity expression
+    else Generated.simplifyExpressionWithoutEtaBy annotatedIdentity expression
+
+hasSelections :: Expression -> Bool
+hasSelections (Expression expression) = any selected $ toList expression
+ where
+  selected ProviderSelection{} = True
+  selected _ = False
 
 -- | Reduce constructor matches using checked, non-strict constructor arities.
 -- Expose single-use constructor aliases before reduction, retaining repeated

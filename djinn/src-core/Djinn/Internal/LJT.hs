@@ -33,7 +33,8 @@ module Djinn.Internal.LJT (
     defaultSearchMode, proveWithMode, proveWithModeChecked,
     proveFirstWithModeChecked,
     ProofSearchCursor, ProofSearchObservation(..),
-    startProofSearchChecked, startProofSearchWithNormalPriorityChecked, observeProofSearch
+    startProofSearchChecked, startProofSearchWithNormalPriorityChecked,
+    startProofSearchWithAssumptionUseChecked, observeProofSearch
     ) where
 
 import Control.Applicative (Alternative(empty, (<|>)))
@@ -204,6 +205,32 @@ startProofSearchWithNormalPriorityChecked
     -> Either String ProofSearchCursor
 startProofSearchWithNormalPriorityChecked = startProofSearchCheckedBy $
     proofSearchComputationBy $ interleaveProofWorkWeighted 64 4096
+
+-- Retain the historical first proof and its complete continuation. For an
+-- explicit alternative request, also enumerate normal terms that use one of
+-- the supplied assumptions. The required occurrence is built into the grammar,
+-- not a post-hoc filter that refunds raw proofs or changes source authority.
+startProofSearchWithAssumptionUseChecked
+    :: Set.Set Symbol -> SearchMode -> [(Symbol, Formula)] -> Formula
+    -> Either String ProofSearchCursor
+startProofSearchWithAssumptionUseChecked required = startProofSearchCheckedBy computation
+  where
+    computation mode environment goal
+        | not (Set.null required) && required `Set.isSubsetOf` Set.fromList (map fst environment)
+        , searchAlternatives mode && searchTermAlternatives mode
+        , searchStrategy mode == Interleave
+        , all (normalFormula . snd) environment && normalFormula goal =
+            P $ \strategy state sk fk ->
+                let focused = reify strategy state $ chargeNormalAttempt $ do
+                        maximumSize <- normalMaximumSize (Set.fromList $ map snd environment) goal
+                        normalRequiredLayers required maximumSize (normalContext environment) goal 1
+                    afterFirst Done = Done
+                    afterFirst (Step rest) = Step (afterFirst rest)
+                    afterFirst (Yield result rest) = Yield result $
+                        interleaveProofWorkWeighted 4096 64 focused rest
+                in replay sk fk $ afterFirst $ reify strategy state $
+                    proofSearchComputation mode environment goal
+        | otherwise = proofSearchComputation mode environment goal
 
 startProofSearchCheckedBy
     :: (SearchMode -> [(Symbol, Formula)] -> Formula -> P Proof)
@@ -440,6 +467,54 @@ chargeNormalAttempt attempt = P $ \strategy state sk fk ->
 -- one head use. No type- or syntax-specific construction rule is involved.
 -- The stored minimum is exactly the previous scan's neutral minimum; this
 -- lookup does not instantiate, unify, or identify merely similar formulae.
+-- A distinguished assumption can occur at the neutral head or in one of
+-- its arguments. Each recursive argument has strictly smaller head-use size;
+-- lambda binders are fresh and cannot impersonate a required free assumption.
+-- Unrestricted siblings use the existing normal grammar and exact type index.
+normalRequiredLayers :: Set.Set Symbol -> NormalMaximum -> NormalContext -> Formula -> Integer -> P Proof
+normalRequiredLayers _ NormalImpossible _ _ _ = mzero
+normalRequiredLayers required maximumSize context goal size = P $ \strategy state sk fk ->
+    let continue = case maximumSize of
+            NormalFinite limit | size >= limit -> fk
+            _ -> Step $ unP (normalRequiredLayers required maximumSize context goal (size + 1))
+                    strategy state sk fk
+    in unP (normalRequiredAtSize required context goal size) strategy state sk continue
+
+normalRequiredAtSize :: Set.Set Symbol -> NormalContext -> Formula -> Integer -> P Proof
+normalRequiredAtSize required context goal size = chargeNormalAttempt $
+    case normalLowerBound context goal of
+        Nothing -> mzero
+        Just minimumSize | size < minimumSize -> mzero
+        _ -> case goal of
+            argument :-> result -> normalChoices
+                [ neutral
+                , do
+                    binder <- newSym "n"
+                    Lam binder <$> normalRequiredAtSize required
+                        (extendNormalContext binder argument context) result size
+                ]
+            PVar _ -> neutral
+            _ -> mzero
+  where
+    neutral = normalChoices
+        [ applyHead name arguments
+        | (name, arguments) <- Map.findWithDefault [] goal $ normalCompatibleHeads context ]
+    applyHead name arguments = case traverse (normalLowerBound context) arguments of
+        Nothing -> mzero
+        Just minima -> bindInterleaved (normalSizePartitions minima (size - 1)) $ \sizes ->
+            if name `Set.member` required then
+                applys (Var name) <$> argumentsWithRequired Nothing (zip arguments sizes)
+            else normalChoices
+                [applys (Var name) <$> argumentsWithRequired (Just position) (zip arguments sizes)
+                | position <- [0 .. length arguments - 1]]
+    argumentsWithRequired :: Maybe Int -> [(Formula, Integer)] -> P [Proof]
+    argumentsWithRequired _ [] = return []
+    argumentsWithRequired selected ((argument, argumentSize) : rest) =
+        let search | selected == Just 0 = normalRequiredAtSize required
+                   | otherwise = normalProofAtSize
+        in bindInterleaved (search context argument argumentSize) $ \proof ->
+            (proof :) <$> argumentsWithRequired (fmap (subtract 1) selected) rest
+
 normalLowerBound :: NormalContext -> Formula -> Maybe Integer
 normalLowerBound context = lowerBound $ normalMinimumHeadCosts context
   where

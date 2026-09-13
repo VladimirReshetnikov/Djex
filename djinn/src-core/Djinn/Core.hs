@@ -1772,21 +1772,35 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     contextualTypeCheck = checkPreparedSynthesisTypesKindsWithRigids prepared
         (Set.fromList goalVariables) . (: []) . (,) KStar
     contextualPlans helpers introductions erasure =
-        [ ((basePremises ++ [(symbol, form) | (symbol, _, form) <- selected],
-            [], Set.fromList [symbol | (symbol, _, _) <- selected], Map.empty,
+        [ ((basePremises ++ [(symbol, form) | (symbol, _, form) <- selected] ++
+                [premise | specialized, premise <- instantiationAxiomPremises loaded],
+            [], Set.fromList [symbol | (symbol, _, _) <- selected] `Set.union`
+                (if specialized then instantiationAxiomSymbols loaded else Set.empty),
+            if specialized then instantiationVisibleApplications loaded else Map.empty,
             Map.fromList [(symbol, (source, [])) | (symbol, source, _) <- selected],
             goal, False), erasure)
-        | selected <- if null helpers && null introductions
-            then [constructors | not $ null constructors]
-            else if null constructors then [[]] else [[], constructors]
+        | specialized <- False : [True | not $ null $ instantiationAxiomPremises loaded]
+        , selected <- if null constructors then [[]] else [[], constructors]
+        , specialized || not (null helpers && null introductions && null selected)
         ]
       where
         goal = SourceEvidence.rootGivenErasureGoal erasure
-        basePremises = contextualExactPremises ++
+        basePremises =
             [(Contextual.contextualInstantiationSymbol helper,
                 Contextual.contextualInstantiationFormula helper) | helper <- helpers] ++
             [(Contextual.contextualIntroductionSymbol helper,
-                Contextual.contextualIntroductionFormula helper) | helper <- introductions]
+                Contextual.contextualIntroductionFormula helper) | helper <- introductions] ++
+            contextualExactPremises
+        -- Contextual helpers must compose with retained polymorphic values,
+        -- including constructor functions of abstract native datatypes. The
+        -- ordinary loaded plans do not carry lexical dictionary erasure, so
+        -- specialization in those separate plans cannot supply this proof.
+        -- Reuse the bounded, checked instantiation axioms in an additive
+        -- contextual plan, retaining visible selections and the common budget.
+        loaded = loadedInstantiationAxioms structuralTranslator visibleArgument
+            (goalVariables ++ polarizedFormulaPlanSkolems formulaPlans ++ premiseSpellings)
+            closedCandidates [goal] (map snd basePremises)
+            (map snd activeLoadedSchemePremises)
         -- Contextual plans keep datatypes nominal so dictionary identities do
         -- not drift during structural translation. Offer their checked source
         -- constructors through the existing provider-rewrite boundary instead.
@@ -3636,7 +3650,14 @@ startFormulaPlanStreamWithContextual
     -> Either DjinnQueryError FormulaPlanStream
 startFormulaPlanStreamWithContextual contextual prioritize introduce sourceContext options target
         (premises, diagnostics, symbols, visible, providers, form, negativeSound) = do
-    let (_, internalEnv, mode) = formulaPlanSearchContext options target premises providers
+    let (proofEnv, internalEnv, mode) = formulaPlanSearchContext options target premises providers
+        requiredContextual = Set.fromList
+            [ internal
+            | Just _ <- [contextual]
+            , (internal, _) <- internalEnv
+            , Var external <- [restoreProofTerm proofEnv $ Var internal]
+            , "$djinn$context-instantiation$" `isPrefixOf` symbolSpelling external
+            ]
         reserved = Set.fromList $
             Symbol (SharedGenerated.definitionSpelling target) :
             map fst (internalEnv ++ premises ++ diagnostics) ++
@@ -3660,7 +3681,9 @@ startFormulaPlanStreamWithContextual contextual prioritize introduce sourceConte
                 options 1 target premises symbols visible providers diagnostics form negativeSound
     cursor <- first (DjinnInternalQueryFailure .
         ("invalid proof-search environment: " ++)) $
-        (if prioritize then startProofSearchWithNormalPriorityChecked else startProofSearchChecked)
+        (if not $ Set.null requiredContextual
+            then startProofSearchWithAssumptionUseChecked requiredContextual
+            else if prioritize then startProofSearchWithNormalPriorityChecked else startProofSearchChecked)
             mode searchEnv searchGoal
     return FormulaPlanStream
         { formulaStreamCursor = cursor

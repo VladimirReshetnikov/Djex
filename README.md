@@ -19,67 +19,32 @@ Both engines, their compatibility frontends, and a shared parser-independent
 synthesis foundation compile into one Cabal package with a single library,
 version, and dependency contract.
 
-The [Church behavior ledger](test-church/behavior-ledger.md) now enumerates all
-160 operation/mode cells. Its selected pinned receipts record 92 historical
-acceptances, 15 cells with attempts but no indexed acceptance, and 53 cells
-without indexed evidence. These counts do not establish current-revision
-acceptance or prove that an unindexed cell was never attempted.
-The [supplied-default selector acceptance](docs/reports/2026-09-13-native-supplied-default-selectors.md)
-now covers `head`, `fromJust`, `fromLeft` and `fromRight` in both Haskell engines
-and all three Lean modes: 20 cells with exact replay and actual False controls.
-The twelve Lean replays preserve the full types and have empty axiom inventories.
-The [isolated trailing-type renderer acceptance](docs/reports/2026-09-13-trailing-type-witness-acceptance.md)
-closes Lean Djinn's supplied-default `last` miss at unchanged limits. The strict
-build, all 707 isolated unit tests, all six `last`/`atKey` behavior cells, all
-three False controls, and both 350-signature kernel replay corpora pass.
-Established variants precede the bounded `Unit` fallbacks within each universe
-lane, and every candidate still requires Lean verification. The
-[current re-triage](docs/reports/2026-09-13-synthesis-delivery-retriage.md)
-now prioritizes the exact Djinn method/tail failure, then reduction term
-construction, the eight independent Church misses, and extrema batches. The
-[bounded constructor closure](docs/reports/2026-09-13-constructor-closure-after-selections.md)
-passes all three previously failing nested-context cases with exact Lean replay;
-Djinn method/tail and its canonical regression still miss at 32 candidates, so
-the constructor patch remains unaccepted. The
-[Exference lexical-selection repair](docs/reports/2026-09-13-exference-scoped-selections.md)
-and its native integration are delivered. Checked type and
-dictionary selections now survive source lowering and occurrence-sensitive
-duplicate comparison. Public batch/stream replay covers global providers and
-local rank-N callbacks. The Exference increment passes all 97 private engine,
-515 Exference, and 156 integration tests. Both engines also pass all 350 Church
-signature checks and 50 scope probes each.
-The [complete native acceptance](docs/reports/2026-09-13-exference-native-acceptance.md)
-passes all 12 selection positives, all six actual False controls, all 707 unit
-tests, and both 350-signature kernel replay corpora, with unchanged inputs.
-Every positive has independent exact Lean replay, including the formerly
-failing Exference cases. Leant now pins the accepted Djex commit `ebadbefd`.
-Reductions and extrema
-account for 60 of the 68 cells without indexed acceptance; shared support still
-requires per-cell behavioral validation. The
-[provider-admission experiment](docs/reports/2026-09-13-behavioral-provider-admission.md)
-admitted both numeric providers but did not fix Djinn `length`; further scheduling
-changes require a derivation trace. Its scheduling patch remains unaccepted.
-The [reduction carrier trace and experiment](docs/reports/2026-09-13-reduction-carrier-boundary.md)
-identify a missing witness carrier in the inspected root routes. A bounded
-continuation-carrier rule passes strict builds and 97 private Exference tests,
-but neither the focused Djinn regression nor native Exference `foldl1` passes.
-The rule remains unreleased; the smaller method/tail reproducer is the next
-bounded investigation, while reductions and extrema remain required.
+The latest [contextual constructor release](docs/reports/2026-09-13-contextual-constructor-use-acceptance.md)
+combines polymorphic constructors with caller-supplied class methods, including
+the previously failing method/tail and nested-context cases. Its complete
+native matrix passes 21 positives and six actual False controls, all 711 native
+unit tests pass, and both 350-signature corpora pass independent Lean replay.
+Djinn's additional search branch constructs a use of an existing contextual
+helper while retaining the original search, first proof and shared bounds.
+The detailed report records the canonical release checks and source limits.
 
-The [native reduction baseline](docs/reports/2026-09-13-native-reductions-baseline.md)
-now records all nine Lean `foldl1`/`foldr1`/`reduce` misses at the original
-deadlines, with passing oracle and False controls. No reduction acceptance
-is claimed. The function-carrier witnesses now compile in both Haskell and
-Lean, with axiom-free Lean definitions; synthesis reachability remains to be
-established. See the [selection and carrier report](docs/reports/2026-09-13-exference-scoped-selections.md).
-The [matching extended-operation batch](docs/reports/2026-09-13-matching-extended-native-six.md)
-adds live acceptance for `fromMaybe`, `maybeToList`, `isLeft`, `either`,
-`numeralSuccessor` and `numeralAdd` in Lean Djinn and Both: twelve exact replays,
-280 finite observations and two actual False controls, with empty candidate
-axiom inventories. The [remaining extended matrix](docs/reports/2026-09-13-matching-extended-native-frontier.md)
-adds twelve more accepted cells while retaining two Djinn misses: `length`
-reaches its deadline before provider discovery, and `maybeEither` reaches the
-choice-point limit. Both mode passes all seven operations in that matrix.
+Earlier accepted improvements preserve [lexical type and dictionary selections](docs/reports/2026-09-13-exference-native-acceptance.md)
+through rank-N source reconstruction and duplicate comparison, and repair
+[trailing type-witness rendering](docs/reports/2026-09-13-trailing-type-witness-acceptance.md)
+for supplied-default selectors. These have separate compiler/replay receipts.
+
+The [Church behavior ledger](test-church/behavior-ledger.md) contains 160
+operation/mode cells: 92 historical acceptances, 15 attempted cells without
+indexed acceptance and 53 without indexed evidence. These are historical
+receipt counts, not a current-revision pass rate; missing indexed evidence does
+not establish that a case was never attempted. Constructor acceptance adds no
+Church behavior cells by association.
+
+The [current delivery plan](docs/reports/2026-09-13-synthesis-delivery-retriage.md)
+next targets reduction term construction, the eight independent Church cases
+and extrema batches. The [carrier-only reduction experiment](docs/reports/2026-09-13-reduction-carrier-boundary.md)
+remains unreleased after failing its behavioral gates. General source-language,
+universe and public-query obligations remain part of the practical goal.
 
 ## Start here
 
@@ -171,9 +136,8 @@ passes nine native ordinary/behavioral/False cells across all three engine
 modes: six exact full-type replays, 24 observations and 16 empty axiom
 inventories. Its strict build and all 686 unfiltered tests pass. The
 [updated re-triage](docs/reports/2026-09-13-synthesis-delivery-retriage.md) prioritizes
-a complete Church behavior ledger and missing behavior batches, with bounded
-constructor acceptance, scoped dictionary evidence and remaining public query
-forms tracked separately. The accepted
+reduction construction, the eight independent Church cases and extrema batches,
+with broader source and public-query obligations tracked separately. The accepted
 global-method and loaded-provider increments are described below.
 The new [constraint-only provider increment](docs/reports/2026-09-08-constraint-only-provider-inference.md)
 infers a unique coherent selection from lexical class assumptions in both
@@ -268,21 +232,13 @@ source-scoped when nested binders are alpha-renamed. Both Haskell signature
 corpora pass 350/350 and extended Exference retains 13/13 behaviors.
 The [fresh native integration](docs/reports/2026-09-12-contextual-list-native-integration.md) now passes
 **705 unit tests and all ten native gates**, including both 350-signature
-kernel replays. Leant pins the tested canonical revision `c1ad560e`.
-Applicable named-`where` one-shot commands and broader binder/provider forms
-remain open. The [current re-triage](docs/reports/2026-09-13-synthesis-delivery-retriage.md)
-records this canonical acceptance and the subsequent working repair: all six
-Lean contextual-list probes now synthesize terms that pass exact kernel replay,
-and six existing method-discovery cases pass. These are uncommitted development
-results. The [expanded constructor diagnostic](docs/reports/2026-09-13-contextual-constructor-frontier.md)
-completes 17/21 positive replays and 6/6 actual False controls. Djinn's
-method-with-tail case and nested-dictionary behavior in all three modes remain
-open; an ineffective ordering experiment was reverted. The repair still needs
-full regression acceptance before publication. The latest captured-core
-experiments still miss the required tail behavior at the original bound. The
-revised order starts with the 160-cell coverage ledger and missing Church
-behaviors; bounded constructor acceptance and scoped dictionary-selection repair
-remain separate deliveries. The tree investigation remains bounded.
+kernel replays. That integration used canonical revision `c1ad560e`; the newer constructor release is recorded above.
+The [constructor release](docs/reports/2026-09-13-contextual-constructor-use-acceptance.md)
+subsequently closes the method/tail and nested-context failures with a complete
+21-positive/six-control matrix and 711 passing native unit tests. Its source
+selection, universe metadata and bounded search rules retain independent
+checking. Remaining named-`where` entrances and broader binder/provider forms
+stay on the [delivery plan](docs/reports/2026-09-13-synthesis-delivery-retriage.md).
 Tree and Haskell `foldl1` transfer checks
 still miss at their original limits. One native tree debug expression passes
 the full type and all 16 observations independently; live acceptance remains

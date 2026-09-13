@@ -104,6 +104,7 @@ tests =
     , ("retain an ordinary first result at the one-proof carrier cutoff", testCarrierFirstResult)
     , ("retain exact choice fuel after the first proof prefix", testFirstProofPrefixBudget)
     , ("resume raw proof cursors without repeating proofs or refunding choices", testProofSearchCursor)
+    , ("focus exact assumption uses without losing proofs or choice accounting", testRequiredAssumptionSearch)
     , ("retain nested proof products and branch-local freshness", testNestedProofProduct)
     , ("enumerate reusable heads and exact partial-function spines", testNormalTermAlternatives)
     , ("finish proved finite normal layers while retaining recursive alternatives", testFiniteNormalLayers)
@@ -118,6 +119,7 @@ tests =
     , ("retain streaming source graph ownership and distinct graph keys", testCandidateStreamGraphs)
     , ("separate streaming terminal logical evidence from truncation", testCandidateStreamEvidence)
     , ("retain contextual streaming identity with exact unused Given authority", testCandidateStreamContext)
+    , ("compose contextual methods with polymorphic values of abstract datatypes", testContextualPolymorphicConstructors)
     , ("validate streaming requests before observing their search", testCandidateStreamValidation)
     , ("stream a demanded singleton bridge reused by alpha-equivalent quantified inputs", testCandidateStreamDemandedSingleton)
     , ("stream cooperating quantified bridges at the exact demanded result", testCandidateStreamDemandedGroup)
@@ -1958,6 +1960,62 @@ testStreamingNormalPriorityAccounting = do
             let (proofs, charged, continuation) = consume allowance rest
             in (proof : proofs, charged, continuation)
 
+testRequiredAssumptionSearch :: IO ()
+testRequiredAssumptionSearch = do
+    let atom name = PVar $ Symbol name
+        a = atom "A"
+        b = atom "B"
+        method = Symbol "method"
+        firstValue = Symbol "firstValue"
+        secondValue = Symbol "n1"
+        environment = [(method, a :-> b), (firstValue, a), (secondValue, a)]
+        mode = (defaultSearchMode True)
+            {searchTermAlternatives = True, searchStrategy = Interleave}
+        demanded = Set.singleton secondValue
+        focused goal = expectRight $ startProofSearchWithAssumptionUseChecked demanded mode environment goal
+    ordinary <- expectRight $ startProofSearchChecked mode environment b
+    cursor <- focused b
+    let (original, _, _) = consume 10000 ordinary
+        (complete, choices, rest) = consume 10000 cursor
+        (prefix, prefixChoices, paused) = consume 7 cursor
+        (suffix, suffixChoices, resumed) = maybe ([], 0, Nothing)
+            (consume (10000 - prefixChoices)) paused
+    assertEqual "assumption focus changed the historical first proof" (take 1 original) (take 1 complete)
+    assertBool "assumption focus discarded a historical alternative" $ all (`elem` complete) original
+    assertBool "same-typed assumption identity was lost" $
+        Apply (Var method) (Var secondValue) `elem` complete
+    assertBool "finite focused search did not finish" $ finished rest && finished resumed
+    assertEqual "resuming focus repeated or lost a proof" complete (prefix ++ suffix)
+    assertEqual "resuming focus refunded or duplicated choices" choices (prefixChoices + suffixChoices)
+    assertEqual "zero fuel forced focused search" [] $ firstOf $ consume 0 cursor
+    mapM_ (expectRight . checkProof environment b) complete
+    arrowCursor <- focused (a :-> b)
+    let (arrowProofs, _, _) = consume 10000 arrowCursor
+    mapM_ (expectRight . checkProof environment (a :-> b)) arrowProofs
+    assertBool "lambda search lost the required free occurrence" $
+        any (isInfixOf "n1" . show) arrowProofs
+    absent <- focused $ atom "Unavailable"
+    assertEqual "focusing invented an inhabitant" [] $ firstOf $ consume 10000 absent
+    forM_ [mode {searchStrategy = DepthFirst}, mode {searchTermAlternatives = False}] $ \ordinaryMode -> do
+        left <- expectRight $ startProofSearchChecked ordinaryMode environment b
+        right <- expectRight $ startProofSearchWithAssumptionUseChecked demanded ordinaryMode environment b
+        assertEqual "focus changed an unrequested search mode"
+            (firstOf $ consume 10000 left) (firstOf $ consume 10000 right)
+  where
+    firstOf (proofs, _, _) = proofs
+    finished Nothing = True
+    finished Just{} = False
+    consume :: Integer -> ProofSearchCursor -> ([Proof], Integer, Maybe ProofSearchCursor)
+    consume allowance cursor | allowance <= 0 = ([], 0, Just cursor)
+    consume allowance cursor = case observeProofSearch cursor of
+        ProofSearchFinished -> ([], 0, Nothing)
+        ProofSearchChoice continuation ->
+            let (proofs, charged, rest) = consume (allowance - 1) continuation
+            in (proofs, charged + 1, rest)
+        ProofSearchResult proof continuation ->
+            let (proofs, charged, rest) = consume allowance continuation
+            in (proof : proofs, charged, rest)
+
 testCandidateStreamBudgets :: IO ()
 testCandidateStreamBudgets = do
     source <- expectRight (parseHType "(a -> a) -> (a -> a) -> a -> a") >>= expectShownRight . toSynthesisType
@@ -2225,6 +2283,119 @@ testCandidateStreamContext = do
     assertUnusedGivenIdentityGraphs target source (sharedName "StreamContext") batch
     forM_ observations $ assertUnusedGivenIdentityGraphs target source (sharedName "StreamContext")
 
+-- Native constructors arrive as closed polymorphic value schemes while their
+-- datatypes remain nominal. Structural DataTypeDeclaration expansion would
+-- conceal the missing composition between loaded instantiation and Given plans.
+testContextualPolymorphicConstructors :: IO ()
+testContextualPolymorphicConstructors = forM_ [False, True] $ \withTail -> do
+    environment <- mkNeutralDjinnEnvironment declarations
+    prepared <- expectShownRight $ RawEnvironment.prepareGroundSynthesisEnvironment environment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $ sharedName "leantSynth"
+    let source = SharedType.ForallType ["v0"]
+            [Constraint (sharedName "LeantContext0") [SharedType.TypeVariable "v0"]] $
+            if withTail then SharedType.FunctionType (chain tokenType) (chain tokenType)
+            else chain tokenType
+    (implicit, _) <- expectShownRight $ SharedType.implicitizeLeadingForalls
+        (const (Nothing :: Maybe ())) freshSourceVariable Set.empty source
+    let (_, contexts, goal) = SharedType.splitLeadingForalls implicit
+        configured = defaultQueryOptions
+            { optionAlternatives = True, optionSorted = True, optionStrategy = Interleave
+            , optionCutoff = 32, optionBudget = Just 20000 }
+        batch options = inhabitTypedSynthesisResultPreparedWithSourceGoal
+            options prepared source contexts (DjinnSourceInstantiationCandidates []) target goal
+        stream = inhabitTypedSynthesisStreamPreparedWithSourceGoal
+            configured prepared source contexts (DjinnSourceInstantiationCandidates []) target goal
+        checkResults requireComposition label results = do
+            let candidates = concatMap (SharedSearch.batchCandidates . SharedQuery.resultSearch) results
+            assertBool (label ++ " exceeded its raw candidate allowance") $ length candidates <= 32
+            forM_ results $ \result ->
+                if null $ SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+                then pure () else assertTypedCoreGraphs target source result
+            graphs <- mapM (expectShownRight . SharedTypedCandidate.typedCandidateTermGraph) candidates
+            let compositions = [graph | graph <- graphs,
+                    all (`elem` SharedGenerated.expressionGlobals (SharedTypedGenerated.eraseTermGraph graph))
+                        [sharedName "leantProvider2", sharedName "leantProvider0"],
+                    all (\(payload, tailValues) -> observe withTail payload tailValues graph ==
+                        Right (payload : if withTail then tailValues else []))
+                        [(7, [3, 5]), (11, [])]]
+            if requireComposition then
+                assertBool (label ++ " did not compose the caller's method with polymorphic constructors; " ++
+                    show (map (SharedTypedGenerated.eraseTermGraphToFunctionClause target) graphs) ++ "; " ++
+                    show (map (SharedSearch.batchProgress . SharedQuery.resultSearch) results)) $
+                    not $ null compositions
+                else assertBool "ordinary batch produced no valid type inhabitant" $ not $ null graphs
+            forM_ compositions $ \graph -> do
+                let forms = map (SharedTypedGenerated.termNodeForm . snd) $
+                        SharedTypedGenerated.termGraphNodes graph
+                    evidence = concat [SharedTypedGenerated.contextApplicationEvidence witness
+                        | SharedTypedGenerated.TypedContextApplication _ _ witness <- forms]
+                    introduced = [SharedTypedGenerated.contextEvidenceBinder $
+                            SharedTypedGenerated.givenContextEvidence occurrence slot
+                        | SharedTypedGenerated.TypedContextIntroduction occurrence _ witness <- forms
+                        , (slot, _) <- zip [0 ..] $ SharedTypedGenerated.contextIntroductionConstraints witness]
+                assertBool "method composition lost lexical dictionary use" $ not $ null evidence
+                forM_ evidence $ \givenEvidence -> assertBool "method borrowed another dictionary's authority" $
+                    SharedTypedGenerated.contextEvidenceBinder givenEvidence `elem` introduced
+    observations <- expectShownRight stream >>= mapM expectShownRight
+    checkResults True "stream" observations
+    result <- expectShownRight $ batch configured
+    -- Ordinary type-only batch selection may prefer the empty constructor.
+    -- The behavioral stream must expose the dictionary-dependent alternative.
+    checkResults False "batch" [result]
+    zero <- expectShownRight $ batch configured { optionBudget = Just 0 }
+    assertEqual "contextual specialization bypassed zero choice fuel" [] $
+        SharedSearch.batchCandidates $ SharedQuery.resultSearch zero
+    assertEqual "bounded contextual specialization acquired negative evidence" SharedQuery.NoEvidence $
+        SharedQuery.resultEvidence zero
+  where
+    freshSourceVariable unavailable variable = Just $ choose $ variable ++ "'"
+      where
+        choose candidate
+            | candidate `Set.member` unavailable = choose $ candidate ++ "'"
+            | otherwise = candidate
+    proper = SharedKind.ProperTypeKind
+    element = SharedType.TypeVariable "v0"
+    tokenType = SharedType.TypeConstructor $ sharedName "LeantType0"
+    chain = SharedType.TypeApplication $ SharedType.TypeConstructor $ sharedName "LeantType1"
+    value name scheme = SharedDeclaration.ValueDeclaration $
+        SharedDeclaration.ValueSignature () (sharedName name) scheme
+    -- Native discovery supplies the method as a complete qualified value.
+    -- Automatic synthesis from class-declared methods is a separate adapter
+    -- capability; Core deliberately does not add those methods as premises.
+    declarations =
+        [ SharedDeclaration.ClassDeclaration () (sharedName "LeantContext0")
+            [SharedDeclaration.TypeParameter "leantContextParameter0_0" $ Just proper] [] []
+        , SharedDeclaration.AbstractTypeDeclaration () (sharedName "LeantType0") proper
+        , SharedDeclaration.AbstractTypeDeclaration () (sharedName "LeantType1") $
+            SharedKind.FunctionKind proper proper
+        , value "leantProvider0" $ SharedType.ForallType ["v0"]
+            [Constraint (sharedName "LeantContext0") [SharedType.TypeVariable "v0"]] tokenType
+        , value "leantProvider1" $ SharedType.ForallType ["v0"] [] $ chain element
+        , value "leantProvider2" $ SharedType.ForallType ["v0"] [] $
+            SharedType.FunctionType element $ SharedType.FunctionType (chain element) $ chain element
+        , value "leantProvider3" tokenType
+        , value "leantProvider4" $ SharedType.FunctionType tokenType tokenType
+        ]
+    observe withTail payload tailValues graph = do
+        let globals = Map.fromList
+                [ (sharedName "leantProvider0", CarrierTestElement payload)
+                , (sharedName "leantProvider3", CarrierTestElement 0)
+                , (sharedName "leantProvider4", CarrierTestFunction $ \x -> case x of
+                    CarrierTestElement n -> Right $ CarrierTestElement $ n + 1
+                    _ -> Left "successor received a non-element")
+                , (sharedName "leantProvider1", CarrierTestList [])
+                , (sharedName "leantProvider2", CarrierTestFunction $ \x -> Right $ CarrierTestFunction $ \xs ->
+                    case (x, xs) of
+                        (CarrierTestElement n, CarrierTestList ns) -> Right $ CarrierTestList $ n : ns
+                        _ -> Left "constructor received a non-element or non-list")
+                ]
+        candidate <- evaluateCarrierExpressionWithGlobals globals 1000 Map.empty $
+            SharedTypedGenerated.eraseTermGraph graph
+        result <- if withTail then carrierTestApply candidate $ CarrierTestList tailValues else pure candidate
+        case result of
+            CarrierTestList values -> Right values
+            _ -> Left "contextual constructor returned a non-list"
+
 testFoldBridgeReuse :: IO ()
 testFoldBridgeReuse = do
     source <- expectRight $ parseHType
@@ -2416,9 +2587,16 @@ carrierListEncode inputs = CarrierTestFunction $ \step -> Right $ CarrierTestFun
         carrierTestApply applied rest
 evaluateCarrierExpression :: Int -> Map.Map String CarrierTestValue
     -> SharedGenerated.Expression String -> Either String CarrierTestValue
-evaluateCarrierExpression fuel environment expression'
+evaluateCarrierExpression = evaluateCarrierExpressionWithGlobals Map.empty
+
+evaluateCarrierExpressionWithGlobals :: Map.Map SharedName.Name CarrierTestValue
+    -> Int -> Map.Map String CarrierTestValue
+    -> SharedGenerated.Expression String -> Either String CarrierTestValue
+evaluateCarrierExpressionWithGlobals globals fuel environment expression'
     | fuel <= 0 = Left "the test interpreter exhausted its reduction depth"
     | otherwise = case expression' of
+        SharedGenerated.Global name -> maybe
+            (Left $ "unbound generated global: " ++ show name) Right $ Map.lookup name globals
         SharedGenerated.Local name -> maybe
             (Left $ "unbound generated variable: " ++ name) Right $
             Map.lookup name environment
@@ -2426,7 +2604,7 @@ evaluateCarrierExpression fuel environment expression'
         SharedGenerated.Lambda (pattern' : rest) body ->
             Right $ CarrierTestFunction $ \argument -> do
                 nested <- bind pattern' argument environment
-                evaluateCarrierExpression (fuel - 1) nested $
+                evaluateCarrierExpressionWithGlobals globals (fuel - 1) nested $
                     SharedGenerated.Lambda rest body
         SharedGenerated.Apply function argument -> do
             callable <- descend function
@@ -2436,10 +2614,10 @@ evaluateCarrierExpression fuel environment expression'
         SharedGenerated.Let pattern' value body -> do
             result <- descend value
             nested <- bind pattern' result environment
-            evaluateCarrierExpression (fuel - 1) nested body
+            evaluateCarrierExpressionWithGlobals globals (fuel - 1) nested body
         _ -> Left "the generated term left the test's pure lambda fragment"
   where
-    descend = evaluateCarrierExpression (fuel - 1) environment
+    descend = evaluateCarrierExpressionWithGlobals globals (fuel - 1) environment
     bind pattern' value bindings = case pattern' of
         SharedGenerated.Bind name -> Right $ Map.insert name value bindings
         SharedGenerated.Wildcard -> Right bindings

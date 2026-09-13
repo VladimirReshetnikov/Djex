@@ -30,8 +30,12 @@ and all three Lean modes: 20 cells with exact replay and actual False controls.
 The twelve Lean replays preserve the full types and have empty axiom inventories.
 The [remaining-selector follow-up](docs/reports/2026-09-13-trailing-type-witness-frontier.md)
 records Haskell `last`/`atKey` acceptance and a working Lean renderer repair that
-closes the native `last` miss at unchanged limits. Isolated validation of that
-renderer change is still required before code publication.
+closes the native `last` miss at unchanged limits. Its isolated strict build
+passes, but two of 707 unit tests fail on rendering compatibility and variant
+counts; the later isolated behavior/signature gates have not run. The
+[current re-triage](docs/reports/2026-09-13-synthesis-delivery-retriage.md)
+prioritizes renderer compatibility, the 92 cells without indexed acceptance,
+and preservation of scoped dictionary selections.
 
 ## Start here
 

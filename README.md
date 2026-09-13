@@ -39,7 +39,7 @@ version, and dependency contract.
 - For better first results and useful alternatives under bounded search, see
   [candidate quality, checked normalization, and ranking policies](docs/candidate-quality.md).
 - For the next improvements and their acceptance requirements, see the
-  [current synthesis re-triage](docs/reports/2026-09-12-synthesis-after-contextual-constructor-probes.md).
+  [current synthesis re-triage](docs/reports/2026-09-13-synthesis-delivery-retriage.md).
 
 New library code should start with `Language.Haskell.Djex`, a narrower checked
 backend adapter, or a focused `Language.Haskell.Synthesis.*` import. The package
@@ -108,10 +108,10 @@ The matching [Leant integration](https://github.com/VladimirReshetnikov/Leant/bl
 passes nine native ordinary/behavioral/False cells across all three engine
 modes: six exact full-type replays, 24 observations and 16 empty axiom
 inventories. Its strict build and all 686 unfiltered tests pass. The
-[updated re-triage](docs/reports/2026-09-12-synthesis-after-contextual-constructor-probes.md) orders
-Lean contextual list admission after accepted native compatibility
-integration, then missing Church behavior batches and remaining public query
-forms, with a bounded tree investigation. The accepted
+[updated re-triage](docs/reports/2026-09-13-synthesis-delivery-retriage.md) prioritizes
+a complete Church behavior ledger and missing behavior batches, with bounded
+constructor acceptance, scoped dictionary evidence and remaining public query
+forms tracked separately. The accepted
 global-method and loaded-provider increments are described below.
 The new [constraint-only provider increment](docs/reports/2026-09-08-constraint-only-provider-inference.md)
 infers a unique coherent selection from lexical class assumptions in both
@@ -131,7 +131,7 @@ replay, with 48 empty axiom inventories and three actual false controls.
 Its earlier full configured 647-test integration run passes in 343.79 seconds, with
 unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
 retain source graphs as checked wildcards, preserving exact compatibility
-erasure. The [current re-triage](docs/reports/2026-09-12-synthesis-after-contextual-constructor-probes.md) records
+erasure. The [current re-triage](docs/reports/2026-09-13-synthesis-delivery-retriage.md) records
 the now-passing native recursor matrix after the accepted
 [combined verification increment](docs/reports/2026-09-08-combined-behavioral-verification.md).
 All ten native integration gates passed at that recorded revision, which Leant pins;
@@ -208,7 +208,7 @@ The [fresh native integration](docs/reports/2026-09-12-contextual-list-native-in
 **705 unit tests and all ten native gates**, including both 350-signature
 kernel replays. Leant pins the tested canonical revision `c1ad560e`.
 Applicable named-`where` one-shot commands and broader binder/provider forms
-remain open. The [current re-triage](docs/reports/2026-09-12-synthesis-after-contextual-constructor-probes.md)
+remain open. The [current re-triage](docs/reports/2026-09-13-synthesis-delivery-retriage.md)
 records this canonical acceptance and the subsequent working repair: all six
 Lean contextual-list probes now synthesize terms that pass exact kernel replay,
 and six existing method-discovery cases pass. These are uncommitted development
@@ -216,9 +216,11 @@ results. The [expanded constructor diagnostic](docs/reports/2026-09-13-contextua
 completes 17/21 positive replays and 6/6 actual False controls. Djinn's
 method-with-tail case and nested-dictionary behavior in all three modes remain
 open; an ineffective ordering experiment was reverted. The repair still needs
-full regression acceptance before publication. Finish that gate first, then
-missing Church behaviors and public query forms. The tree investigation remains
-bounded.
+full regression acceptance before publication. The latest captured-core
+experiments still miss the required tail behavior at the original bound. The
+revised order starts with the 160-cell coverage ledger and missing Church
+behaviors; bounded constructor acceptance and scoped dictionary-selection repair
+remain separate deliveries. The tree investigation remains bounded.
 Tree and Haskell `foldl1` transfer checks
 still miss at their original limits. One native tree debug expression passes
 the full type and all 16 observations independently; live acceptance remains
@@ -731,7 +733,7 @@ and worked `:djinn`/`:exference`/`:compare` examples. The
 signatures and compiler-checks the generated terms under its documented
 environment and partiality assumptions.
 
-The [current re-triage](docs/reports/2026-09-12-synthesis-after-contextual-constructor-probes.md) records
+The [current re-triage](docs/reports/2026-09-13-synthesis-delivery-retriage.md) records
 accepted elaboration, contextual inference and the Exference tree carrier,
 with the later combined verification increment passing 702 native unit tests
 and the original Exference append/False queries. Remaining exact-output and

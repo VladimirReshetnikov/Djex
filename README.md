@@ -19,7 +19,14 @@ Both engines, their compatibility frontends, and a shared parser-independent
 synthesis foundation compile into one Cabal package with a single library,
 version, and dependency contract.
 
-The latest [nested Church composition release](docs/reports/2026-09-13-maybe-either-head-use-acceptance.md)
+The [strict-implicit Lean binder release](docs/reports/2026-09-13-strict-implicit-source-acceptance.md)
+preserves `⦃α : Type⦄` binders through contextual synthesis, including nested
+callbacks and selected dictionaries. All 719 native unit tests pass, along with
+nine new exact Lean replays and six rejection controls; the existing contextual
+constructor matrix also passes. General universe and dependent-binder support
+remain separate obligations.
+
+The [nested Church composition release](docs/reports/2026-09-13-maybe-either-head-use-acceptance.md)
 repairs Djinn's Church-encoded `maybeEither` synthesis in both Haskell and Lean.
 Both Haskell engines pass all 13 extended operations in fresh runs, with exact
 independent GHC execution. Native Djinn, Exference and Both pass `maybeEither`
@@ -42,14 +49,11 @@ not a current-revision pass rate or a completeness theorem. Missing indexed
 evidence does not establish that a case was never attempted.
 
 The [revised delivery plan](docs/reports/2026-09-13-synthesis-delivery-retriage.md)
-prioritizes finishing Lean strict-implicit source support, a bounded reduction
-construction experiment, and an independent public-query/binder coverage milestone.
-The strict-implicit prototype has passed its strict build, eight focused unit
-tests, nine live synthesis/replay cases and six rejection controls; broader
-release validation remains pending at this triage snapshot. Reduction
-carrier admission now passes in an isolated experiment, but synthesis still misses.
-Lean Djinn length, integer indexing, extrema, broader universe/contextual evidence
-and supplied-fold tree synthesis remain open obligations.
+next tests a bounded reduction construction change, followed by an independent
+public-query and broader binder milestone. Reduction carrier admission passes
+in an isolated experiment, but synthesis still misses. Lean Djinn length,
+integer indexing, extrema, broader universe/contextual evidence and supplied-fold
+tree synthesis remain open obligations.
 
 ## Start here
 
@@ -141,8 +145,8 @@ passes nine native ordinary/behavioral/False cells across all three engine
 modes: six exact full-type replays, 24 observations and 16 empty axiom
 inventories. Its strict build and all 686 unfiltered tests pass. The
 [updated re-triage](docs/reports/2026-09-13-synthesis-delivery-retriage.md) prioritizes
-strict-implicit source support, bounded reduction experiments and an independent
-public-query/source coverage milestone, followed by remaining Church families. The accepted
+bounded reduction experiments and an independent public-query/source coverage
+milestone after the strict-implicit release, followed by remaining Church families. The accepted
 global-method and loaded-provider increments are described below.
 The new [constraint-only provider increment](docs/reports/2026-09-08-constraint-only-provider-inference.md)
 infers a unique coherent selection from lexical class assumptions in both

@@ -299,6 +299,25 @@
         "sources": "/source_hashes",
         "controls": "/oracle_controls"
       }
+    },
+    {
+      "id": "lean-matching-extended-seven-2026-09-13",
+      "source": {
+        "repo": "Leant",
+        "path": "test-church/receipts/matching-extended-native-seven-2026-09-13.zip",
+        "sha256": "001133f85dd1902b5ed4c81fac3646203a95dce67836b3fead5448462856d87d",
+        "member": "run/results.json",
+        "member_sha256": "bfa98aad42e3795e00e729938c05bf6b12e4981717e2c47869047db7136a8d68"
+      },
+      "rows": "/cells",
+      "group": "extended",
+      "language": "lean",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      }
     }
   ]
 }

@@ -25,6 +25,7 @@ module Language.Haskell.Synthesis.KindInference
   , checkClassApplicationKinds
   , inferTypeKind
   , inferSharedVariableKinds
+  , inferVariableKindsForObligations
   , inferAcyclicTypeConstructorKinds
   , inferDeclarationKinds
   , inferDeclarationKindsWith
@@ -183,6 +184,29 @@ checkTypesKinds assumptions obligations = do
       [freeVariables typeExpression | (_, typeExpression) <- obligations]
     mapM_ (checkObligation (toInferenceAssumptions assumptions) variables)
       obligations
+
+-- | Solve exact kind obligations in one shared variable scope and return
+-- the kinds of the requested variables. Unreferenced requested variables
+-- retain the ordinary proper-type default. This is useful when lexical
+-- source binders have been opened to distinct, caller-owned identities:
+-- annotations and uses must constrain the same inference variable.
+inferVariableKindsForObligations
+  :: Ord variable
+  => KindAssumptions
+  -> [variable]
+  -> [(GroundKind, Type variable)]
+  -> Either (KindInferenceError variable) [(variable, GroundKind)]
+inferVariableKindsForObligations assumptions requested obligations = do
+  case firstDuplicate requested of
+    Just duplicate -> Left $ DuplicateSharedVariable duplicate
+    Nothing -> pure ()
+  mapM_ (preflightInferenceType assumptions . snd) obligations
+  mapM_ (validateInferenceType . snd) obligations
+  flip evalStateT initialState $ do
+    variables <- allocateVariables $ Set.toAscList $ Set.unions $
+      Set.fromList requested : [freeVariables ty | (_, ty) <- obligations]
+    mapM_ (checkObligation (toInferenceAssumptions assumptions) variables) obligations
+    mapM (groundBinding variables) requested
 
 -- | Validate the supplied prefix of a class application and return its
 -- unapplied parameter kinds.

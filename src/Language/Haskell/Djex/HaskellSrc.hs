@@ -8,6 +8,7 @@ module Language.Haskell.Djex.HaskellSrc
   ( ExferenceQueryScope (..)
   , ParsedSourceType
   , parsedSourceType
+  , parsedSourceKinds
   , parsedSourceTypeVariableNames
   , parsedSourceTypeLocation
   , parseSourceType
@@ -40,7 +41,7 @@ import Language.Haskell.Synthesis.Diagnostic
   , withCode
   , withSourceLocation
   )
-import Language.Haskell.Synthesis.Inventory (Inventory)
+import Language.Haskell.Synthesis.Inventory (Inventory, inventoryKindAssumptions)
 import Language.Haskell.Synthesis.Name
   ( ModuleName
   , Name
@@ -48,6 +49,8 @@ import Language.Haskell.Synthesis.Name
   )
 import Language.Haskell.Synthesis.Type (Type, Variable)
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import Language.Haskell.Synthesis.SourceKind
+  ( SourceTypeKinds, prepareSourceTypeKinds, sourceKindsType )
 import Language.Haskell.Djex.HaskellSrc.Scope (hasExplicitOuterForall)
 
 -- | GHCi-style name-resolution state for one interactive query.
@@ -67,13 +70,26 @@ data ExferenceQueryScope = ExferenceQueryScope
 -- order. An explicit outer forall cannot leave unbound type variables.
 --
 -- Variable spellings and source location are detached presentation and
--- diagnostic metadata. The type itself is the sole semantic query value.
+-- diagnostic metadata. The type and its lexical kind information are kept
+-- together; ordinary projections cannot replace one half of that checked
+-- pair through record updates.
 data ParsedSourceType = ParsedSourceType
-  { parsedSourceType :: Type (Variable Int)
-  , parsedSourceTypeVariableNames :: TypeVarIndex
-  , parsedSourceTypeLocation :: SourceLocation
-  }
+  (SourceTypeKinds (Variable Int))
+  TypeVarIndex
+  SourceLocation
   deriving (Eq, Show)
+
+parsedSourceType :: ParsedSourceType -> Type (Variable Int)
+parsedSourceType = sourceKindsType . parsedSourceKinds
+
+parsedSourceKinds :: ParsedSourceType -> SourceTypeKinds (Variable Int)
+parsedSourceKinds (ParsedSourceType kinds _ _) = kinds
+
+parsedSourceTypeVariableNames :: ParsedSourceType -> TypeVarIndex
+parsedSourceTypeVariableNames (ParsedSourceType _ variables _) = variables
+
+parsedSourceTypeLocation :: ParsedSourceType -> SourceLocation
+parsedSourceTypeLocation (ParsedSourceType _ _ location) = location
 
 -- | Parse against the complete namespace of one sealed source inventory.
 parseSourceType
@@ -143,11 +159,11 @@ parseSourceTypeWithScope inventory maybeScope sourceName source = do
       "DJEX_TYPE_PARSE" "implicit source quantification failed shared validation")
     Right $ toSynthesisType $ if null free then sharedType
       else SharedType.ForallType free [] sharedType
-  pure ParsedSourceType
-    { parsedSourceType = closedType
-    , parsedSourceTypeVariableNames = sourceVariables
-    , parsedSourceTypeLocation = location
-    }
+  sourceKinds <- either
+    (Left . withSourceLocation location . shownErrorDiagnostic
+      "DJEX_TYPE_PARSE" "source binder kind validation failed")
+    Right $ prepareSourceTypeKinds (inventoryKindAssumptions inventory) closedType []
+  pure $ ParsedSourceType sourceKinds sourceVariables location
  where
   toHseModuleName moduleName = HSES.ModuleName HSEL.noSrcSpan
     $ renderModuleName moduleName

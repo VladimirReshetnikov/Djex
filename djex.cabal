@@ -148,6 +148,7 @@ Library
     Language.Haskell.Djex
     Language.Haskell.Djex.CLI
     Language.Haskell.Djex.HaskellSrc
+    Language.Haskell.Djex.HaskellSrc.Kinded
     Language.Haskell.Djex.REPL
     Language.Haskell.Djex.Djinn
     Language.Haskell.Djex.Exference
@@ -165,6 +166,8 @@ Library
     Language.Haskell.Synthesis.Generated
     Language.Haskell.Synthesis.Kind
     Language.Haskell.Synthesis.KindInference
+    Language.Haskell.Synthesis.SourceKind
+    Language.Haskell.Synthesis.SourceKind.Expansion
     Language.Haskell.Synthesis.Inventory
     Language.Haskell.Synthesis.Name
     Language.Haskell.Synthesis.Observability
@@ -391,7 +394,7 @@ Executable djex-fake-z3
     filepath >= 1.4 && < 1.6
 
 Test-Suite djex-tests
-  import:         tasty-hunit-test, containers-dep, directory-dep
+  import:         tasty-hunit-test, containers-dep, directory-dep, haskell-src-exts-dep, transformers-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test-integration
@@ -400,6 +403,8 @@ Test-Suite djex-tests
     ContextHaskellReplaySpec
     ContextEvidenceSpec
     ContextBudgetSpec
+    SourceKindParserSpec
+    KindedSourceConversionSpec
   -- This integration suite deliberately crosses the stable facade, both raw
   -- search APIs, and the HSE compatibility API.
   Build-Depends:
@@ -452,6 +457,8 @@ Test-Suite synthesis-tests
     synthesis/internal
   Other-Modules:
     ClassResolutionSpec
+    SourceKindSpec
+    SourceKindExpansionSpec
     ContextHaskellSpec
     CandidateQualitySpec
     BehavioralSpec

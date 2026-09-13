@@ -27,6 +27,8 @@ import Language.Haskell.Synthesis.Name
 import qualified Language.Haskell.Synthesis.Observability as Observability
 import qualified Language.Haskell.Synthesis.Kind as Kind
 import qualified Language.Haskell.Synthesis.KindInference as KindInference
+import SourceKindSpec (sourceKindTests)
+import SourceKindExpansionSpec (sourceKindExpansionTests)
 import qualified Language.Haskell.Synthesis.Inventory as Inventory
 import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Search
@@ -99,6 +101,8 @@ tests = testGroup "Djex synthesis foundation"
   , typeInstantiationTests
   , synonymTests
   , kindInferenceTests
+  , sourceKindTests
+  , sourceKindExpansionTests
   , moduleTests
   , ordinaryTests
   , specialTests

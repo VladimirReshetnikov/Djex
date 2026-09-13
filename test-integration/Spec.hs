@@ -73,6 +73,8 @@ import qualified RecursorSpec
 import qualified ContextHaskellReplaySpec
 import qualified ContextEvidenceSpec
 import qualified ContextBudgetSpec
+import qualified SourceKindParserSpec
+import qualified KindedSourceConversionSpec
 
 main :: IO ()
 main = defaultMain tests
@@ -83,6 +85,8 @@ tests = testGroup "Djex facade"
   , ContextHaskellReplaySpec.tests
   , ContextEvidenceSpec.targetTests
   , ContextBudgetSpec.tests
+  , SourceKindParserSpec.tests
+  , KindedSourceConversionSpec.tests
   , testCase "synthesize and execute ordinary list and tree observations" $ do
       listName' <- expectRight $ parseName "[]"
       consName' <- expectRight $ parseName ":"

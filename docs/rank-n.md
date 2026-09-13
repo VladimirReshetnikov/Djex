@@ -1,5 +1,17 @@
 # Rank-N and impredicative types
 
+The latest [nested Church composition improvement](reports/2026-09-13-maybe-either-head-use-acceptance.md) gives
+Djinn's existing common-result bridge plans an additional term-construction
+branch. It avoids repeating an exact function head along an application path,
+while allowing independent reuse across sibling arguments. The original first
+proof, complete original continuation and shared raw/choice accounting remain.
+The policy applies to explicitly requested interleaved alternatives in the
+checked atomic/arrow fragment; it does not add type instantiations or providers.
+It closes the original Haskell and Lean Djinn `maybeEither` behavioral queries.
+The linked report gives the compiler/kernel replay and complete release checks;
+the [delivery plan](reports/2026-09-13-synthesis-delivery-retriage.md) records the
+remaining reduction and source-language obligations.
+
 For structural ranking and checked normalization before result selection, see
 the [candidate-quality guide](candidate-quality.md). Its policies retain these
 typing and scope rules, required eta expansion, and raw search-work accounting.
@@ -18,8 +30,9 @@ terms passed exact kernel replay, and all 30 goldens matched the preserved
 captures after that one reviewed update. The original live exit 1 remains
 distinct from the successful offline comparison.
 
-Canonical Djex code and its recorded 19-component aggregate, including all
-700 Haskell Church queries and 100 scope queries, are unchanged. The earlier
+At that earlier quality checkpoint, canonical Djex code and its recorded
+19-component aggregate, including all
+700 Haskell Church queries and 100 scope queries, were unchanged. The earlier
 E0 Lean Church runs passed 350/350 cases per engine, with all 700 exact terms
 kernel-accepted and axiom-free; they were not rerun for the Leant-only
 deduplication repair. The [Church guide](../test-church/README.md) preserves
@@ -59,7 +72,10 @@ scheme and exact dictionary checks still apply; ambiguity does not acquire
 dictionary evidence. The [constraint-only inference report](reports/2026-09-08-constraint-only-provider-inference.md)
 describes the engine/API tests and explicit-signature Haskell rendering.
 Loaded Haskell provider metadata, implicit-root behavioral scoping, and Leant's
-global-method integration remain separate frontend acceptance gates.
+global-method integration required separate frontend acceptance. The later
+[lexical selection integration](reports/2026-09-13-exference-native-acceptance.md)
+and [contextual constructor release](reports/2026-09-13-contextual-constructor-use-acceptance.md)
+record those production checks; their precise source fragments remain documented.
 
 The comprehensive account includes derivations, implementation paths, realistic
 examples, and the distinction between practical coverage and a decision

@@ -100,11 +100,13 @@ tests =
     [ ("structural provider quality precedes the raw proof cutoff", testCandidateQuality)
     , ("demand-directed rank-N instantiation", testDirectedRankN)
     , ("enumerate scoped residual carriers within explicit raw bounds", testResidualFunctionCarriers)
+    , ("construct both nested maybeEither branches", testMaybeEitherConstruction)
     , ("enumerate both endomorphism compositions within the original raw bounds", testEndomorphismCompositionAlternatives)
     , ("retain an ordinary first result at the one-proof carrier cutoff", testCarrierFirstResult)
     , ("retain exact choice fuel after the first proof prefix", testFirstProofPrefixBudget)
     , ("resume raw proof cursors without repeating proofs or refunding choices", testProofSearchCursor)
     , ("focus exact assumption uses without losing proofs or choice accounting", testRequiredAssumptionSearch)
+    , ("retain sibling reuse and original continuations in path-sensitive search", testAcyclicHeadSearch)
     , ("retain nested proof products and branch-local freshness", testNestedProofProduct)
     , ("enumerate reusable heads and exact partial-function spines", testNormalTermAlternatives)
     , ("finish proved finite normal layers while retaining recursive alternatives", testFiniteNormalLayers)
@@ -1407,6 +1409,45 @@ testResidualFunctionCarriers = do
     assertEqual "a residual carrier invented an unowned result inhabitant" 0 $
         length $ generatedReportCandidates negative
 
+testMaybeEitherConstruction :: IO ()
+testMaybeEitherConstruction = do
+    source <- expectRight $ parseHType "(forall church0 church1. ((forall church4. (((forall church2. (church2 -> ((church0 -> church2) -> church2))) -> church4) -> (((forall church3. (church3 -> ((church1 -> church3) -> church3))) -> church4) -> church4))) -> (forall church6. (church6 -> (((forall church5. ((church0 -> church5) -> ((church1 -> church5) -> church5))) -> church6) -> church6)))))"
+    let options = defaultQueryOptions
+            { optionAlternatives = True, optionStrategy = Interleave
+            , optionCutoff = 65536, optionBudget = Just 500000 }
+    report <- expectRight $ inhabitGenerated options emptyEnvironment [] "maybeEitherResult" source
+    let expressions = map (SharedGenerated.functionClauseExpression . SharedCandidate.candidateOutput) $
+            generatedReportCandidates report
+        inputs = [(False, Nothing), (False, Just 8), (False, Just 3),
+                  (True, Nothing), (True, Just 7), (True, Just 1), (True, Just 5)]
+        expected (right, payload) = Right $ maybe [] (\x -> [if right then 1 else 0, x]) payload
+        observations expression = [observe expression input | input <- inputs]
+        found = findIndex (\expression -> observations expression == map expected inputs) expressions
+    assertBool ("maybeEither missing; found=" ++ show found ++
+        "; candidates=" ++ show (length expressions) ++
+        "; completion=" ++ show (generatedReportCompletion report) ++
+        "; first observations=" ++ show (map observations $ take 8 expressions)) $ found /= Nothing
+  where
+    observe expression (right, payload) = do
+        candidate <- evaluateCarrierExpression 10000 Map.empty expression
+        result <- carrierTestApply candidate $ CarrierTestFunction $ \onLeft ->
+            Right $ CarrierTestFunction $ \onRight -> carrierTestApply
+                (if right then onRight else onLeft) $ encodeMaybe payload
+        without <- carrierTestApply result $ CarrierTestList []
+        decoded <- carrierTestApply without $ CarrierTestFunction $ \eitherValue -> do
+            left <- carrierTestApply eitherValue $ tagged 0
+            carrierTestApply left $ tagged 1
+        case decoded of
+            CarrierTestList values -> Right values
+            _ -> Left "maybeEither did not return the observation result type"
+    encodeMaybe payload = CarrierTestFunction $ \zero ->
+        Right $ CarrierTestFunction $ \some -> case payload of
+            Nothing -> Right zero
+            Just value -> carrierTestApply some $ CarrierTestElement value
+    tagged tag = CarrierTestFunction $ \element -> case element of
+        CarrierTestElement value -> Right $ CarrierTestList [tag, value]
+        _ -> Left "Either branch received the wrong element type"
+
 testCarrierFirstResult :: IO ()
 testCarrierFirstResult = do
     source <- expectRight $ parseHType
@@ -2000,6 +2041,68 @@ testRequiredAssumptionSearch = do
         left <- expectRight $ startProofSearchChecked ordinaryMode environment b
         right <- expectRight $ startProofSearchWithAssumptionUseChecked demanded ordinaryMode environment b
         assertEqual "focus changed an unrequested search mode"
+            (firstOf $ consume 10000 left) (firstOf $ consume 10000 right)
+  where
+    firstOf (proofs, _, _) = proofs
+    finished Nothing = True
+    finished Just{} = False
+    consume :: Integer -> ProofSearchCursor -> ([Proof], Integer, Maybe ProofSearchCursor)
+    consume allowance cursor | allowance <= 0 = ([], 0, Just cursor)
+    consume allowance cursor = case observeProofSearch cursor of
+        ProofSearchFinished -> ([], 0, Nothing)
+        ProofSearchChoice continuation ->
+            let (proofs, charged, rest) = consume (allowance - 1) continuation
+            in (proofs, charged + 1, rest)
+        ProofSearchResult proof continuation ->
+            let (proofs, charged, rest) = consume allowance continuation
+            in (proof : proofs, charged, rest)
+
+
+testAcyclicHeadSearch :: IO ()
+testAcyclicHeadSearch = do
+    let atom name = PVar $ Symbol name
+        a = atom "pathA"
+        b = atom "pathB"
+        c = atom "pathC"
+        f = Symbol "pathF"
+        x = Symbol "n1"
+        pair = Symbol "pathPair"
+        environment = [(pair, b :-> b :-> c), (f, a :-> b), (x, a)]
+        mode = (defaultSearchMode True)
+            {searchTermAlternatives = True, searchStrategy = Interleave}
+        expected = Apply (Apply (Var pair) (Apply (Var f) (Var x))) $
+            Apply (Var f) (Var x)
+        start = startProofSearchWithAcyclicHeadsChecked
+    original <- expectRight $ startProofSearchChecked mode environment c
+    focused <- expectRight $ start mode environment c
+    let (baseline, _, _) = consume 10000 original
+        (proofs, charged, rest) = consume 10000 focused
+        (prefix, firstCharges, paused) = consume 13 focused
+        (suffix, finalCharges, resumed) = maybe ([], 0, Nothing)
+            (consume (10000 - firstCharges)) paused
+    assertEqual "path search changed the original first proof" (take 1 baseline) (take 1 proofs)
+    assertBool "path search lost an original proof" $ all (`elem` proofs) baseline
+    assertBool "path search incorrectly consumed a head across siblings" $ expected `elem` proofs
+    assertBool "finite path search failed to finish" $ finished rest && finished resumed
+    assertEqual "resumption changed the proof sequence" proofs (prefix ++ suffix)
+    assertEqual "resumption changed charged choices" charged (firstCharges + finalCharges)
+    assertEqual "zero fuel forced a branch" [] $ firstOf $ consume 0 focused
+    mapM_ (expectRight . checkProof environment c) proofs
+    arrow <- expectRight $ start mode environment (a :-> b)
+    mapM_ (expectRight . checkProof environment (a :-> b)) $ firstOf $ consume 10000 arrow
+    let repeatedEnvironment = [(f, a :-> a), (x, a)]
+        twice = Apply (Var f) $ Apply (Var f) (Var x)
+    repeated <- expectRight $ start mode repeatedEnvironment a
+    let repeatedProofs = firstOf $ consume 10000 repeated
+    assertBool "the original continuation lost nested head reuse" $ twice `elem` repeatedProofs
+    mapM_ (expectRight . checkProof repeatedEnvironment a) repeatedProofs
+    absent <- expectRight $ start mode [] a
+    assertEqual "path search invented an inhabitant" [] $ firstOf $ consume 10000 absent
+    forM_ [mode {searchStrategy = DepthFirst}, mode {searchTermAlternatives = False},
+           mode {searchAlternatives = False}] $ \ordinaryMode -> do
+        left <- expectRight $ startProofSearchChecked ordinaryMode environment c
+        right <- expectRight $ start ordinaryMode environment c
+        assertEqual "path search changed an unrequested mode"
             (firstOf $ consume 10000 left) (firstOf $ consume 10000 right)
   where
     firstOf (proofs, _, _) = proofs

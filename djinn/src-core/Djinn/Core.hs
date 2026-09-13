@@ -3683,6 +3683,12 @@ startFormulaPlanStreamWithContextual contextual prioritize introduce sourceConte
         ("invalid proof-search environment: " ++)) $
         (if not $ Set.null requiredContextual
             then startProofSearchWithAssumptionUseChecked requiredContextual
+            -- Common-result bridges can cooperate across distinct argument
+            -- branches. Try paths without repeated heads before unrestricted
+            -- recursive compositions; every original continuation remains.
+            else if any (isPrefixOf "$djinn$carrier-focused$common$" . symbolSpelling) $
+                    Set.toList symbols
+                then startProofSearchWithAcyclicHeadsChecked
             else if prioritize then startProofSearchWithNormalPriorityChecked else startProofSearchChecked)
             mode searchEnv searchGoal
     return FormulaPlanStream

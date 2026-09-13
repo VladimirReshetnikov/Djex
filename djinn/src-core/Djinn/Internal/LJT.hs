@@ -34,7 +34,7 @@ module Djinn.Internal.LJT (
     proveFirstWithModeChecked,
     ProofSearchCursor, ProofSearchObservation(..),
     startProofSearchChecked, startProofSearchWithNormalPriorityChecked,
-    startProofSearchWithAssumptionUseChecked, observeProofSearch
+    startProofSearchWithAssumptionUseChecked, startProofSearchWithAcyclicHeadsChecked, observeProofSearch
     ) where
 
 import Control.Applicative (Alternative(empty, (<|>)))
@@ -231,6 +231,50 @@ startProofSearchWithAssumptionUseChecked required = startProofSearchCheckedBy co
                 in replay sk fk $ afterFirst $ reify strategy state $
                     proofSearchComputation mode environment goal
         | otherwise = proofSearchComputation mode environment goal
+
+-- Explore terms with no repeated exact head along an application path.
+-- Sibling arguments retain independent availability. This is an additional
+-- positive search branch; repeated uses remain in the original continuation.
+startProofSearchWithAcyclicHeadsChecked
+    :: SearchMode -> [(Symbol, Formula)] -> Formula
+    -> Either String ProofSearchCursor
+startProofSearchWithAcyclicHeadsChecked = startProofSearchCheckedBy computation
+  where
+    computation mode environment goal
+        | searchAlternatives mode && searchTermAlternatives mode
+        , searchStrategy mode == Interleave
+        , all (normalFormula . snd) environment && normalFormula goal =
+            P $ \strategy state sk fk ->
+                let focused = reify strategy state $
+                        normalAcyclicHeads Set.empty (normalContext environment) goal
+                    afterFirst Done = Done
+                    afterFirst (Step rest) = Step (afterFirst rest)
+                    afterFirst (Yield result rest) = Yield result $
+                        interleaveProofWorkWeighted 4096 64 focused rest
+                in replay sk fk $ afterFirst $ reify strategy state $
+                    proofSearchComputation mode environment goal
+        | otherwise = proofSearchComputation mode environment goal
+
+normalAcyclicHeads :: Set.Set Symbol -> NormalContext -> Formula -> P Proof
+normalAcyclicHeads used context goal = chargeNormalAttempt $ case goal of
+    argument :-> result -> normalChoices
+        [ neutral
+        , do
+            binder <- newSym "n"
+            Lam binder <$> normalAcyclicHeads used
+                (extendNormalContext binder argument context) result
+        ]
+    PVar _ -> neutral
+    _ -> mzero
+  where
+    neutral = normalChoices
+        [ applys (Var name) <$> arguments (Set.insert name used) domains
+        | (name, domains) <- Map.findWithDefault [] goal $ normalCompatibleHeads context
+        , name `Set.notMember` used ]
+    arguments _ [] = return []
+    arguments unavailable (domain : rest) =
+        bindInterleaved (normalAcyclicHeads unavailable context domain) $ \proof ->
+            (proof :) <$> arguments unavailable rest
 
 startProofSearchCheckedBy
     :: (SearchMode -> [(Symbol, Formula)] -> Formula -> P Proof)

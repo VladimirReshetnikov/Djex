@@ -1,6 +1,6 @@
 {
   "schema": "church-behavior-catalog-v1",
-  "scope": "Selected principal P4 receipts and September 13 selector follow-ups, including the failed native last attempt and its passing working-source renderer follow-up. Not an exhaustive index of all historical experiments. No indexed evidence does not mean never attempted. Collection order is not a timestamp or current-revision validation claim.",
+  "scope": "Selected principal behavior receipts, including supplied-default selectors, reduction misses, and the accepted path-sensitive head-use milestone. Not an exhaustive archive or a current-revision pass rate. No indexed evidence does not mean never attempted.",
   "collections": [
     {
       "id": "haskell-djinn-first-six",
@@ -330,6 +330,63 @@
       },
       "rows": "/cells",
       "group": "supplied_default",
+      "language": "lean",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      }
+    },
+    {
+      "id": "haskell-acyclic-head-extended-2026-09-13",
+      "source": {
+        "repo": "Leant",
+        "path": "test-church/receipts/acyclic-head-maybe-either-2026-09-13.zip",
+        "sha256": "9b2e6b79b32938a584283a8bdcf66b050a231b338c1b0692bfa5a20e56d7d225",
+        "member": "haskell-full/run/results.json",
+        "member_sha256": "9b54b67025f16566d63ec565cff540e9c402cfaeaf8a8e39d0bcae7aad67745d"
+      },
+      "rows": "/cells",
+      "group": "extended",
+      "language": "haskell",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      }
+    },
+    {
+      "id": "lean-acyclic-head-maybe-either-2026-09-13",
+      "source": {
+        "repo": "Leant",
+        "path": "test-church/receipts/acyclic-head-maybe-either-2026-09-13.zip",
+        "sha256": "9b2e6b79b32938a584283a8bdcf66b050a231b338c1b0692bfa5a20e56d7d225",
+        "member": "native-focused/run/results.json",
+        "member_sha256": "56b971655f50856c36995046286bfbc54f2d9880eb80cc0d194b42865714b1af"
+      },
+      "rows": "/cells",
+      "group": "extended",
+      "language": "lean",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      }
+    },
+    {
+      "id": "lean-acyclic-head-length-2026-09-13",
+      "source": {
+        "repo": "Leant",
+        "path": "test-church/receipts/acyclic-head-maybe-either-2026-09-13.zip",
+        "sha256": "9b2e6b79b32938a584283a8bdcf66b050a231b338c1b0692bfa5a20e56d7d225",
+        "member": "native-length/run/results.json",
+        "member_sha256": "b13937780b2ae1eddc7f90f823147ebd1aab0bc007eb7e0f7b2e294477b9510b"
+      },
+      "rows": "/cells",
+      "group": "extended",
       "language": "lean",
       "metadata": {
         "settings": "/settings",

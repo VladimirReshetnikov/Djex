@@ -3,16 +3,17 @@
 The [160-cell table](behavior-ledger.md) and [machine-readable index](behavior-ledger.json)
 cover every extended and supplied-default operation in the canonical specifications,
 across Haskell Djinn/Exference and Lean Djinn/Exference/Both. The current catalog indexes
-68 cells with historical acceptance, four with attempts without indexed acceptance,
-and 88 with no indexed evidence. These are historical index counts, not a current
+94 cells with historical acceptance, 13 with attempts without indexed acceptance,
+and 53 with no indexed evidence. These are historical index counts, not a current
 pass rate. No indexed evidence does not mean a case was never attempted.
 
-The [catalog](behavior-ledger-catalog.json) selects fourteen principal receipt collections:
-the original Haskell batches, native-Int corrections, focused Exference acceptance,
-the latest published native Exference integration, and the Haskell and Lean
-supplied-default selector batches and trailing-type renderer follow-up of September 13. It is not an exhaustive
-archive of all past experiments. An older accepted run and a later failed attempt
-can coexist in one cell's history. Collection order is not a latest-run claim.
+The [catalog](behavior-ledger-catalog.json) selects 21 principal receipt collections,
+including the Haskell and Lean supplied-default selectors, trailing-type renderer
+follow-up, retained reduction misses and the [path-sensitive head-use acceptance](../docs/reports/2026-09-13-maybe-either-head-use-acceptance.md).
+The latter includes fresh complete extended Haskell runs and native `maybeEither`
+results. The catalog is not an exhaustive archive of past experiments. An older
+accepted run and a later failed attempt can coexist in one cell's history;
+collection order is not a latest-run claim.
 
 Each observation has a repository, receipt hash, JSON pointer and replay pointer.
 Archived receipts additionally pin the archive and the exact member bytes. Settings
@@ -42,9 +43,9 @@ python -B -m unittest discover -s test-church -p test_behavior_ledger.py
 ```
 
 The Leant wrapper is `test-church/build_behavior_ledger.py --djex-root C:/Djex`.
-It requires a Djex checkout containing the new generator; the older accepted
-`lib/Djex` pin does not yet include it. This tooling dependency does not promote
-the production synthesis dependency. Both generated outputs should match exactly.
+It requires a Djex checkout containing the catalog and generator. Select a checkout
+whose catalog matches the receipts being indexed. Both generated outputs should
+match exactly; running the index does not change the production dependency pin.
 
 To index another completed run, add an explicitly reviewed collection to the
 catalog, including pinned receipt/member hashes, operation group, language/engine,
@@ -54,8 +55,9 @@ operations, contradictory engine attribution, duplicate observations, missing
 metadata and changed receipt bytes are errors. A passed process or reference-only
 control cannot stand in for a synthesized implementation.
 
-The next behavior work includes Haskell Djinn `maybeEither`, the remaining
-selectors (`last` and `atKey`) and nonempty reductions, followed by extrema and native-Int indexing according
-to diagnosed failures. Newly accepted cells need live synthesis, original limits,
-actual False controls and exact independent replay. The full 160-cell goal remains
-open; this index adds no synthesis acceptance by itself.
+The [delivery plan](../docs/reports/2026-09-13-synthesis-delivery-retriage.md) retains
+nonempty reductions, Lean Djinn `length`, native-integer indexing and extrema, plus separate source-language,
+contextual-evidence, supplied-fold tree and public-query obligations. Newly
+accepted cells need live synthesis, original limits, actual False controls and
+exact independent replay. The full practical goal remains open; this index adds
+no synthesis acceptance by itself.

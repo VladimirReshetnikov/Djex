@@ -212,7 +212,10 @@ remain open. The [current re-triage](docs/reports/2026-09-12-synthesis-after-con
 records this canonical acceptance and the subsequent working repair: all six
 Lean contextual-list probes now synthesize terms that pass exact kernel replay,
 and six existing method-discovery cases pass. These are uncommitted development
-results; the new list probes lack False controls and the repair still needs
+results. The [expanded constructor diagnostic](docs/reports/2026-09-13-contextual-constructor-frontier.md)
+completes 17/21 positive replays and 6/6 actual False controls. Djinn's
+method-with-tail case and nested-dictionary behavior in all three modes remain
+open; an ineffective ordering experiment was reverted. The repair still needs
 full regression acceptance before publication. Finish that gate first, then
 missing Church behaviors and public query forms. The tree investigation remains
 bounded.

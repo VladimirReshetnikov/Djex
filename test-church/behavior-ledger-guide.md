@@ -3,14 +3,14 @@
 The [160-cell table](behavior-ledger.md) and [machine-readable index](behavior-ledger.json)
 cover every extended and supplied-default operation in the canonical specifications,
 across Haskell Djinn/Exference and Lean Djinn/Exference/Both. The current catalog indexes
-48 cells with historical acceptance, four with attempts without indexed acceptance,
-and 108 with no indexed evidence. These are historical index counts, not a current
+60 cells with historical acceptance, four with attempts without indexed acceptance,
+and 96 with no indexed evidence. These are historical index counts, not a current
 pass rate. No indexed evidence does not mean a case was never attempted.
 
-The [catalog](behavior-ledger-catalog.json) selects ten principal receipt collections:
+The [catalog](behavior-ledger-catalog.json) selects eleven principal receipt collections:
 the original Haskell batches, native-Int corrections, focused Exference acceptance,
-the latest published native Exference integration, and the eight-cell Haskell
-supplied-default selector batch of September 13. It is not an exhaustive
+the latest published native Exference integration, and the Haskell and Lean
+supplied-default selector batches of September 13. It is not an exhaustive
 archive of all past experiments. An older accepted run and a later failed attempt
 can coexist in one cell's history. Collection order is not a latest-run claim.
 
@@ -23,7 +23,8 @@ does not reinterpret a receipt's baseline commit as the revision of a dirty buil
 False queries are indexed as control rows outside the operation count.
 
 Historical acceptance requires a recorded passing candidate and successful replay.
-The known Lean adapter checks the recorded axiom inventories: implementations and
+The known Lean adapter handles extended and supplied-default replay namespaces
+and preserves explicit rejection flags. It checks the recorded axiom inventories: implementations and
 numeric primitives are axiom-free; only the named `maybeEither` oracle proof may
 use `propext`. The index does not rerun those compilers, rehash every transitive
 artifact, or certify the historical harness. Its claim is that the pinned receipt
@@ -50,8 +51,8 @@ operations, contradictory engine attribution, duplicate observations, missing
 metadata and changed receipt bytes are errors. A passed process or reference-only
 control cannot stand in for a synthesized implementation.
 
-The next behavior work starts with Haskell Djinn `maybeEither` and supplied-default
-selectors/nonempty reductions, followed by extrema and native-Int indexing according
+The next behavior work includes Haskell Djinn `maybeEither`, the remaining
+selectors (`last` and `atKey`) and nonempty reductions, followed by extrema and native-Int indexing according
 to diagnosed failures. Newly accepted cells need live synthesis, original limits,
 actual False controls and exact independent replay. The full 160-cell goal remains
 open; this index adds no synthesis acceptance by itself.

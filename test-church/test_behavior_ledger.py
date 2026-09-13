@@ -120,6 +120,25 @@ class LedgerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "escapes repository"):
             ledger.inside(self.root, "../outside.json")
 
+    def test_lean_explicit_rejection_survives_passing_individual_replay(self):
+        inventories = {"BehaviorPartialReplay.candidate": [],
+                       "BehaviorPartialReplay.candidate_passes_original_oracle": []}
+        row = {"operation": "head", "expected": "candidate", "status": "passed", "accepted": False,
+               "replay": {"status": "passed", "expected_axiom_inventories": inventories,
+                          "actual_axiom_inventories": inventories}}
+        self.assertEqual("unaccepted_record", ledger.recorded_outcome(row, "lean", "supplied_default"))
+        row["accepted"] = True
+        self.assertEqual("historical_accepted", ledger.recorded_outcome(row, "lean", "supplied_default"))
+
+    def test_partial_replay_cannot_use_extended_oracle_exception(self):
+        inventories = {"BehaviorPartialReplay.candidate": [],
+                       "BehaviorPartialReplay.candidate_passes_original_oracle": ["propext"]}
+        row = {"operation": "head", "expected": "candidate", "status": "passed", "accepted": True,
+               "replay": {"status": "passed", "expected_axiom_inventories": inventories,
+                          "actual_axiom_inventories": inventories}}
+        with self.assertRaisesRegex(ValueError, "axiom policy"):
+            ledger.recorded_outcome(row, "lean", "supplied_default")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 {
   "schema": "church-behavior-catalog-v1",
-  "scope": "Selected principal P4 receipts: original Haskell extended/default batches, native-Int corrections, focused Exference acceptance, the latest published native Exference integration, and the 2026-09-13 eight-cell supplied-default selector batch. Not an exhaustive index of all historical experiments. No indexed evidence does not mean never attempted. Collection order is not a timestamp or latest-run claim.",
+  "scope": "Selected principal P4 receipts: original Haskell extended/default batches, native-Int corrections, focused Exference acceptance, the latest published native Exference integration, and the 2026-09-13 supplied-default selector batches in both languages. Not an exhaustive index of all historical experiments. No indexed evidence does not mean never attempted. Collection order is not a timestamp or latest-run claim.",
   "collections": [
     {
       "id": "haskell-djinn-first-six",
@@ -179,6 +179,25 @@
       "rows": "/cells",
       "group": "supplied_default",
       "language": "haskell",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      }
+    },
+    {
+      "id": "lean-default-selectors-2026-09-13",
+      "source": {
+        "repo": "Leant",
+        "path": "test-church/receipts/supplied-default-selectors-native-2026-09-13.zip",
+        "sha256": "439d3d68b8720882fa6642ca146fe4629e38f29b2c00547a35529767b24a2af7",
+        "member": "run/results.json",
+        "member_sha256": "7ef7ada226ace4708a196c95053a60fa4bb4303a02f0a083bf08d5088b632166"
+      },
+      "rows": "/cells",
+      "group": "supplied_default",
+      "language": "lean",
       "metadata": {
         "settings": "/settings",
         "runtime": "/executable_hashes",

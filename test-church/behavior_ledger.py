@@ -72,12 +72,13 @@ def load_specifications(root):
     return {"extended": extended, "supplied_default": partial}
 
 
-def recorded_outcome(row, language):
+def recorded_outcome(row, language, group="extended"):
     """Classify the receipt's claim, not the present implementation."""
     replay = row.get("replay") or {}
     accepted = row.get("accepted") is True
     if language == "lean":
-        accepted = row.get("expected") == "candidate" and row.get("status") == "passed"
+        accepted = (row.get("expected") == "candidate" and row.get("status") == "passed"
+                    and row.get("accepted") is not False)
     if accepted:
         replay_passed = (replay.get("status") == "passed" or
                          replay.get("exact_full_type_definition_and_predicate_checked") is True)
@@ -86,9 +87,10 @@ def recorded_outcome(row, language):
         if language == "lean":
             expected = replay.get("expected_axiom_inventories")
             actual = replay.get("actual_axiom_inventories")
-            candidate = "BehaviorExtendedReplay.candidate"
-            oracle = "BehaviorExtendedReplay.candidate_passes_original_oracle"
-            permitted = [[], ["propext"]] if row.get("operation") == "maybeEither" else [[]]
+            namespace = "BehaviorPartialReplay" if group == "supplied_default" else "BehaviorExtendedReplay"
+            candidate = namespace + ".candidate"
+            oracle = namespace + ".candidate_passes_original_oracle"
+            permitted = [[], ["propext"]] if group == "extended" and row.get("operation") == "maybeEither" else [[]]
             if (not expected or expected != actual or actual.get(candidate) != []
                     or actual.get(oracle) not in permitted
                     or any(value for name, value in actual.items() if name != oracle)):
@@ -167,7 +169,7 @@ def build_ledger(specifications, catalog, roots):
             used.add(identity)
             cells[key]["history"].append({
                 "collection": source_id, "pointer": path,
-                "recorded_outcome": recorded_outcome(row, language),
+                "recorded_outcome": recorded_outcome(row, language, group),
                 "recorded_status": row.get("status"),
                 "recorded_classification": row.get("classification"),
                 "replay_pointer": path + "/replay" if row.get("replay") else None,

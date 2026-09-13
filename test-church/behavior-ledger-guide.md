@@ -2,14 +2,15 @@
 
 The [160-cell table](behavior-ledger.md) and [machine-readable index](behavior-ledger.json)
 cover every extended and supplied-default operation in the canonical specifications,
-across Haskell Djinn/Exference and Lean Djinn/Exference/Both. The first catalog indexes
-40 cells with historical acceptance, four with attempts without indexed acceptance,
-and 116 with no indexed evidence. These are historical index counts, not a current
+across Haskell Djinn/Exference and Lean Djinn/Exference/Both. The current catalog indexes
+48 cells with historical acceptance, four with attempts without indexed acceptance,
+and 108 with no indexed evidence. These are historical index counts, not a current
 pass rate. No indexed evidence does not mean a case was never attempted.
 
-The [catalog](behavior-ledger-catalog.json) selects nine principal receipt collections:
+The [catalog](behavior-ledger-catalog.json) selects ten principal receipt collections:
 the original Haskell batches, native-Int corrections, focused Exference acceptance,
-and the latest published native Exference integration. It is not an exhaustive
+the latest published native Exference integration, and the eight-cell Haskell
+supplied-default selector batch of September 13. It is not an exhaustive
 archive of all past experiments. An older accepted run and a later failed attempt
 can coexist in one cell's history. Collection order is not a latest-run claim.
 

@@ -1,6 +1,6 @@
 {
   "schema": "church-behavior-catalog-v1",
-  "scope": "Selected principal P4 receipts: original Haskell extended/default batches, native-Int corrections, focused Exference acceptance, and the latest published native Exference integration. Not an exhaustive index of all historical experiments. No indexed evidence does not mean never attempted. Collection order is not a timestamp or latest-run claim.",
+  "scope": "Selected principal P4 receipts: original Haskell extended/default batches, native-Int corrections, focused Exference acceptance, the latest published native Exference integration, and the 2026-09-13 eight-cell supplied-default selector batch. Not an exhaustive index of all historical experiments. No indexed evidence does not mean never attempted. Collection order is not a timestamp or latest-run claim.",
   "collections": [
     {
       "id": "haskell-djinn-first-six",
@@ -166,6 +166,25 @@
         "controls": "/oracle_controls"
       },
       "engine": "exference"
+    },
+    {
+      "id": "haskell-default-selectors-2026-09-13",
+      "source": {
+        "repo": "Djex",
+        "path": "test-church/receipts/supplied-default-selectors-2026-09-13.zip",
+        "sha256": "dcc8320cd93192e74525573887185a41ce71a2fb8657e7d57d092bf23d85fe0d",
+        "member": "run/results.json",
+        "member_sha256": "e80029a34a989b398b180ab0121a3e9402db1e9dbe69a4fdaee2d5e5dfbe22e0"
+      },
+      "rows": "/cells",
+      "group": "supplied_default",
+      "language": "haskell",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      }
     }
   ]
 }

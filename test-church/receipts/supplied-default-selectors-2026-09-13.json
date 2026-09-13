@@ -1,0 +1,54 @@
+{
+  "schema": "church-supplied-default-selectors-v1",
+  "status": "behavior_batch_passed",
+  "production_release_accepted": false,
+  "source_base_commit": "ba049f15900e0578d2acf6ff96c80a1cf25ebf3b",
+  "working_source_diff": "working.diff",
+  "scope": "head, fromJust, fromLeft, fromRight with supplied defaults in Haskell Djinn and Exference",
+  "counts": {
+    "synthesis_cells": 8,
+    "exact_candidate_replays": 8,
+    "finite_observations_per_cell": 24,
+    "actual_false_queries": 2,
+    "actual_falsified_control_candidates": 257,
+    "independent_oracle_controls": 9,
+    "owned_processes": 44,
+    "frozen_source_files": 328
+  },
+  "settings": {
+    "djinn": {
+      "window": 65536,
+      "budget": 500000,
+      "djinn_strategy": "interleave",
+      "steps": 100000,
+      "process_timeout": 300.0,
+      "queue": 8192
+    },
+    "exference": {
+      "window": 256,
+      "budget": 100000,
+      "djinn_strategy": "depth-first",
+      "steps": 100000,
+      "process_timeout": 300.0,
+      "queue": 8192
+    }
+  },
+  "sources_and_runtimes_unchanged": true,
+  "all_owned_processes_exit_zero": true,
+  "strict_build": "passed -Werror",
+  "raw_receipt_member": "run/results.json",
+  "archive": {
+    "path": "supplied-default-selectors-2026-09-13.zip",
+    "sha256": "dcc8320cd93192e74525573887185a41ce71a2fb8657e7d57d092bf23d85fe0d",
+    "bytes": 2274627,
+    "artifact_count": 477,
+    "all_members_rehashed": true
+  },
+  "boundaries": [
+    "A fresh behavioral batch against the frozen working implementation, not a full regression release.",
+    "The contextual constructor repair remains uncommitted; the exact base and source diff are archived.",
+    "Defaults are explicit target arguments; no bottom is admitted to these total counterparts.",
+    "Runtime and replay executables are recorded by identity, not redistributed.",
+    "Finite observations do not establish universal extensional equivalence."
+  ]
+}

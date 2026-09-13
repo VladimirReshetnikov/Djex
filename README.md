@@ -39,7 +39,7 @@ version, and dependency contract.
 - For better first results and useful alternatives under bounded search, see
   [candidate quality, checked normalization, and ranking policies](docs/candidate-quality.md).
 - For the next improvements and their acceptance requirements, see the
-  [current synthesis re-triage](docs/reports/2026-09-09-synthesis-after-native-contextual-integration.md).
+  [current synthesis re-triage](docs/reports/2026-09-09-synthesis-after-contextual-list-acceptance.md).
 
 New library code should start with `Language.Haskell.Djex`, a narrower checked
 backend adapter, or a focused `Language.Haskell.Synthesis.*` import. The package
@@ -108,9 +108,10 @@ The matching [Leant integration](https://github.com/VladimirReshetnikov/Leant/bl
 passes nine native ordinary/behavioral/False cells across all three engine
 modes: six exact full-type replays, 24 observations and 16 empty axiom
 inventories. Its strict build and all 686 unfiltered tests pass. The
-[updated re-triage](docs/reports/2026-09-09-synthesis-after-native-contextual-integration.md) orders
-remaining public frontend forms and Church behavior after completed native
-dependency integration, with a bounded tree investigation. The accepted
+[updated re-triage](docs/reports/2026-09-09-synthesis-after-contextual-list-acceptance.md) orders
+native integration of the accepted list revision and Lean contextual list
+admission before missing Church behavior batches and remaining public query
+forms, with a bounded tree investigation. The accepted
 global-method and loaded-provider increments are described below.
 The new [constraint-only provider increment](docs/reports/2026-09-08-constraint-only-provider-inference.md)
 infers a unique coherent selection from lexical class assumptions in both
@@ -130,7 +131,7 @@ replay, with 48 empty axiom inventories and three actual false controls.
 Its earlier full configured 647-test integration run passes in 343.79 seconds, with
 unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
 retain source graphs as checked wildcards, preserving exact compatibility
-erasure. The [current re-triage](docs/reports/2026-09-09-synthesis-after-native-contextual-integration.md) records
+erasure. The [current re-triage](docs/reports/2026-09-09-synthesis-after-contextual-list-acceptance.md) records
 the now-passing native recursor matrix after the accepted
 [combined verification increment](docs/reports/2026-09-08-combined-behavioral-verification.md).
 All ten native integration gates passed at that recorded revision, which Leant pins;
@@ -205,10 +206,13 @@ source-scoped when nested binders are alpha-renamed. Both Haskell signature
 corpora pass 350/350 and extended Exference retains 13/13 behaviors.
 Native integration of this new canonical revision remains pending.
 Applicable named-`where` one-shot commands and broader binder/provider forms
-remain open. The [current re-triage](docs/reports/2026-09-09-synthesis-after-native-contextual-integration.md)
-records this canonical acceptance. Native integration of the list change is next,
-followed by missing Church behaviors, remaining query forms and broader provider
-evidence; the tree investigation remains bounded.
+remain open. The [current re-triage](docs/reports/2026-09-09-synthesis-after-contextual-list-acceptance.md)
+records this canonical acceptance and six fresh Lean contextual list refusals
+before search. The separate reference terms pass kernel checking; the current
+Lean source packet rejects the universe arguments carried by `List`. Native
+compatibility integration and exact list source admission are separate next
+deliveries, followed by missing Church behaviors and public query forms. The
+tree investigation remains bounded.
 Tree and Haskell `foldl1` transfer checks
 still miss at their original limits. One native tree debug expression passes
 the full type and all 16 observations independently; live acceptance remains
@@ -721,7 +725,7 @@ and worked `:djinn`/`:exference`/`:compare` examples. The
 signatures and compiler-checks the generated terms under its documented
 environment and partiality assumptions.
 
-The [current re-triage](docs/reports/2026-09-09-synthesis-after-native-contextual-integration.md) records
+The [current re-triage](docs/reports/2026-09-09-synthesis-after-contextual-list-acceptance.md) records
 accepted elaboration, contextual inference and the Exference tree carrier,
 with the later combined verification increment passing 702 native unit tests
 and the original Exference append/False queries. Remaining exact-output and

@@ -109,8 +109,8 @@ passes nine native ordinary/behavioral/False cells across all three engine
 modes: six exact full-type replays, 24 observations and 16 empty axiom
 inventories. Its strict build and all 686 unfiltered tests pass. The
 [updated re-triage](docs/reports/2026-09-09-synthesis-after-contextual-list-acceptance.md) orders
-native integration of the accepted list revision and Lean contextual list
-admission before missing Church behavior batches and remaining public query
+Lean contextual list admission after accepted native compatibility
+integration, then missing Church behavior batches and remaining public query
 forms, with a bounded tree investigation. The accepted
 global-method and loaded-provider increments are described below.
 The new [constraint-only provider increment](docs/reports/2026-09-08-constraint-only-provider-inference.md)
@@ -204,14 +204,16 @@ tails, polymorphic elements, wrappers, hidden constructors and construction
 from arguments under unused outer/nested contexts. Root binder names remain
 source-scoped when nested binders are alpha-renamed. Both Haskell signature
 corpora pass 350/350 and extended Exference retains 13/13 behaviors.
-Native integration of this new canonical revision remains pending.
+The [fresh native integration](docs/reports/2026-09-12-contextual-list-native-integration.md) now passes
+**705 unit tests and all ten native gates**, including both 350-signature
+kernel replays. Leant pins the tested canonical revision `c1ad560e`.
 Applicable named-`where` one-shot commands and broader binder/provider forms
 remain open. The [current re-triage](docs/reports/2026-09-09-synthesis-after-contextual-list-acceptance.md)
 records this canonical acceptance and six fresh Lean contextual list refusals
 before search. The separate reference terms pass kernel checking; the current
 Lean source packet rejects the universe arguments carried by `List`. Native
-compatibility integration and exact list source admission are separate next
-deliveries, followed by missing Church behaviors and public query forms. The
+compatibility integration is accepted; exact list source admission remains
+next, followed by missing Church behaviors and public query forms. The
 tree investigation remains bounded.
 Tree and Haskell `foldl1` transfer checks
 still miss at their original limits. One native tree debug expression passes

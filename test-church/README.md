@@ -1,5 +1,9 @@
 # Church signature synthesis acceptance
 
+The [complete 160-cell behavior ledger](behavior-ledger.md) indexes historical
+receipt evidence separately from current validation. See the [maintenance guide](behavior-ledger-guide.md)
+for regeneration, pinned inputs and the meaning of unindexed cells.
+
 The [expanded behavioral coverage report](../docs/reports/2026-09-07-priority4-behavioral-coverage.md)
 records a fresh 13/13 extended Haskell Exference run, historical 12/13 Djinn
 acceptance and the separate explicit-default results. The [focused introduction

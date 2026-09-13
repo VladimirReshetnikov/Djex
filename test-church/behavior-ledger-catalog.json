@@ -1,0 +1,171 @@
+{
+  "schema": "church-behavior-catalog-v1",
+  "scope": "Selected principal P4 receipts: original Haskell extended/default batches, native-Int corrections, focused Exference acceptance, and the latest published native Exference integration. Not an exhaustive index of all historical experiments. No indexed evidence does not mean never attempted. Collection order is not a timestamp or latest-run claim.",
+  "collections": [
+    {
+      "id": "haskell-djinn-first-six",
+      "source": {
+        "repo": "Djex",
+        "path": "test-church/receipts/haskell-djinn-first-six.json",
+        "sha256": "8e21cda48c9686598010d170d979872ddac5c50278471cbb3af136f61bc36c21"
+      },
+      "rows": "/cells",
+      "group": "extended",
+      "language": "haskell",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_pins",
+        "sources": "/source_pins",
+        "controls": "/oracle_controls"
+      },
+      "engine": "djinn"
+    },
+    {
+      "id": "haskell-djinn-native-length",
+      "source": {
+        "repo": "Djex",
+        "path": "test-church/receipts/priority4-haskell-coverage.json",
+        "sha256": "7e69c16a58ee380d57237ce4927f78d9f37e46da4f23021d23de107f9826019c"
+      },
+      "rows": "/native_int_repair_runs/0/cells",
+      "group": "extended",
+      "language": "haskell",
+      "metadata": {
+        "settings": "/native_int_repair_runs/0/settings",
+        "runtime": "/executable",
+        "sources": "/native_int_repair_runs/0/source_manifest",
+        "controls": "/native_int_repair_runs/0/oracle_controls"
+      },
+      "engine": "djinn"
+    },
+    {
+      "id": "haskell-djinn-remaining-seven",
+      "source": {
+        "repo": "Djex",
+        "path": "test-church/receipts/priority4-djinn-remaining-seven.json",
+        "sha256": "bebabea500caba125f4348db169e7860b3eae0a52bd77dc62dedd3ff630a07ac"
+      },
+      "rows": "/cells",
+      "group": "extended",
+      "language": "haskell",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      },
+      "engine": "djinn"
+    },
+    {
+      "id": "haskell-exference-historical-0",
+      "source": {
+        "repo": "Djex",
+        "path": "test-church/receipts/haskell-exference-first-13-and-partial-four.json",
+        "sha256": "fc3cdcb7c50f42f4cefdb7f0de4a38c7a7ffb38506a43db6ca468e7a51328900"
+      },
+      "rows": "/runs/0/cells",
+      "group": "extended",
+      "language": "haskell",
+      "metadata": {
+        "settings": "/runs/0/settings",
+        "runtime": "/runs/0/executable_pins",
+        "sources": "/runs/0/source_manifest_sha256",
+        "controls": "/runs/0/oracle_controls"
+      },
+      "engine": "exference"
+    },
+    {
+      "id": "haskell-exference-historical-1",
+      "source": {
+        "repo": "Djex",
+        "path": "test-church/receipts/haskell-exference-first-13-and-partial-four.json",
+        "sha256": "fc3cdcb7c50f42f4cefdb7f0de4a38c7a7ffb38506a43db6ca468e7a51328900"
+      },
+      "rows": "/runs/1/cells",
+      "group": "extended",
+      "language": "haskell",
+      "metadata": {
+        "settings": "/runs/1/settings",
+        "runtime": "/runs/1/executable_pins",
+        "sources": "/runs/1/source_manifest_sha256",
+        "controls": "/runs/1/oracle_controls"
+      },
+      "engine": "exference"
+    },
+    {
+      "id": "haskell-exference-historical-2",
+      "source": {
+        "repo": "Djex",
+        "path": "test-church/receipts/haskell-exference-first-13-and-partial-four.json",
+        "sha256": "fc3cdcb7c50f42f4cefdb7f0de4a38c7a7ffb38506a43db6ca468e7a51328900"
+      },
+      "rows": "/runs/2/cells",
+      "group": "supplied_default",
+      "language": "haskell",
+      "metadata": {
+        "settings": "/runs/2/settings",
+        "runtime": "/runs/2/executable_pins",
+        "sources": "/runs/2/source_manifest_sha256",
+        "controls": "/runs/2/oracle_controls"
+      },
+      "engine": "exference"
+    },
+    {
+      "id": "haskell-exference-focused-forall",
+      "source": {
+        "repo": "Djex",
+        "path": "test-church/receipts/focused-forall-search.zip",
+        "sha256": "3e98ec9c05387dba2aebb5543b4d161ab0ace7ed7c2c3a01f54c9f908ed1b6a6",
+        "member": "dist-newstyle/known-goal-forall-focus-v2/extended-full/results.json",
+        "member_sha256": "a3f89cd79a26de5cdcaef242b1d9a4c816fc0dc4d11c18b1c2455ff4e1b5e50b"
+      },
+      "rows": "/cells",
+      "group": "extended",
+      "language": "haskell",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      },
+      "engine": "exference"
+    },
+    {
+      "id": "haskell-native-int-indexing",
+      "source": {
+        "repo": "Djex",
+        "path": "test-church/receipts/priority4-partial-at-native-int.json",
+        "sha256": "ab58015c2f6fa517ed6e9506f8bf97965caad994fe7a54fde379501a387c133f"
+      },
+      "rows": "/cells",
+      "group": "supplied_default",
+      "language": "haskell",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_pins",
+        "sources": "/source_pins",
+        "controls": "/controls"
+      }
+    },
+    {
+      "id": "lean-exference-native-integration",
+      "source": {
+        "repo": "Leant",
+        "path": "test-recursive/receipts/contextual-list-native-integration.zip",
+        "sha256": "28e9c1c6ca40023174bfdfbf165b27415e7a41573d1d66623883f406ab9b0d27",
+        "member": "gates/extended-exference/results.json",
+        "member_sha256": "6ebf96dc38150269b32d6ed0c95039d10081c0e253065baab0995fd4324a2b59"
+      },
+      "rows": "/cells",
+      "group": "extended",
+      "language": "lean",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      },
+      "engine": "exference"
+    }
+  ]
+}

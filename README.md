@@ -19,6 +19,12 @@ Both engines, their compatibility frontends, and a shared parser-independent
 synthesis foundation compile into one Cabal package with a single library,
 version, and dependency contract.
 
+The [Church behavior ledger](test-church/behavior-ledger.md) now enumerates all
+160 operation/mode cells. Its selected pinned receipts record 40 historical
+acceptances, four cells with attempts but no indexed acceptance, and 116 cells
+without indexed evidence. These counts do not establish current-revision
+acceptance or prove that an unindexed cell was never attempted.
+
 ## Start here
 
 - To try the commands, continue with [Building](#building) and the

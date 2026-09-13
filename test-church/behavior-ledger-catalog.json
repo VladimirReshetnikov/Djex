@@ -1,6 +1,6 @@
 {
   "schema": "church-behavior-catalog-v1",
-  "scope": "Selected principal P4 receipts: original Haskell extended/default batches, native-Int corrections, focused Exference acceptance, the latest published native Exference integration, and the 2026-09-13 supplied-default selector batches in both languages. Not an exhaustive index of all historical experiments. No indexed evidence does not mean never attempted. Collection order is not a timestamp or latest-run claim.",
+  "scope": "Selected principal P4 receipts and September 13 selector follow-ups, including the failed native last attempt and its passing working-source renderer follow-up. Not an exhaustive index of all historical experiments. No indexed evidence does not mean never attempted. Collection order is not a timestamp or current-revision validation claim.",
   "collections": [
     {
       "id": "haskell-djinn-first-six",
@@ -194,6 +194,63 @@
         "sha256": "439d3d68b8720882fa6642ca146fe4629e38f29b2c00547a35529767b24a2af7",
         "member": "run/results.json",
         "member_sha256": "7ef7ada226ace4708a196c95053a60fa4bb4303a02f0a083bf08d5088b632166"
+      },
+      "rows": "/cells",
+      "group": "supplied_default",
+      "language": "lean",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      }
+    },
+    {
+      "id": "haskell-last-atkey-2026-09-13",
+      "source": {
+        "repo": "Djex",
+        "path": "test-church/receipts/supplied-default-last-atkey-haskell-2026-09-13.zip",
+        "sha256": "a6af06e43c00b1bbb3ce2bc7b51776fba64b951b5bebef8e820aa609532b6655",
+        "member": "run/results.json",
+        "member_sha256": "9a345ca92049dda72417e519f25a22879491c519159bd2b9077895bef942d7e1"
+      },
+      "rows": "/cells",
+      "group": "supplied_default",
+      "language": "haskell",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      }
+    },
+    {
+      "id": "lean-last-atkey-before-witness-2026-09-13",
+      "source": {
+        "repo": "Leant",
+        "path": "test-church/receipts/supplied-default-last-atkey-native-2026-09-13.zip",
+        "sha256": "ee69c04a246435d6ee212d5164840b6615a2509c0682f1dcfc700095dd8f9f4f",
+        "member": "run/results.json",
+        "member_sha256": "e65750a7d0b59cb85eb7cade7fc1e4431f8e16266ac2b5ebdd40d275aafa9716"
+      },
+      "rows": "/cells",
+      "group": "supplied_default",
+      "language": "lean",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      }
+    },
+    {
+      "id": "lean-last-atkey-working-witness-2026-09-13",
+      "source": {
+        "repo": "Leant",
+        "path": "test-church/receipts/trailing-type-witness-working-2026-09-13.zip",
+        "sha256": "d5703deead9d93f25848382adfc8162207d295d152138b2a52402a7326b3c121",
+        "member": "run/results.json",
+        "member_sha256": "b01f68369ce677bcb3d23f19a45e3d1e444b40e14531463681cc75654b5218fa"
       },
       "rows": "/cells",
       "group": "supplied_default",

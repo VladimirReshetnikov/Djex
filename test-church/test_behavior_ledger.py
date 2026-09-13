@@ -139,6 +139,22 @@ class LedgerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "axiom policy"):
             ledger.recorded_outcome(row, "lean", "supplied_default")
 
+    def test_atkey_observer_dependencies_are_scoped_to_the_two_named_declarations(self):
+        candidate = "BehaviorPartialReplay.candidate"
+        oracle = "BehaviorPartialReplay.candidate_passes_original_oracle"
+        axioms = ["Classical.choice", "Quot.sound", "propext"]
+        inventories = {candidate: [], oracle: axioms, "BehaviorPartial.check_atKey": axioms}
+        row = {"operation": "atKey", "expected": "candidate", "status": "passed", "accepted": True,
+               "replay": {"status": "passed", "expected_axiom_inventories": inventories,
+                          "actual_axiom_inventories": inventories}}
+        self.assertEqual("historical_accepted", ledger.recorded_outcome(row, "lean", "supplied_default"))
+        for name in (candidate, "BehaviorPartial.unrelated_helper"):
+            changed = copy.deepcopy(row)
+            for field in ("expected_axiom_inventories", "actual_axiom_inventories"):
+                changed["replay"][field][name] = axioms
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "axiom policy"):
+                ledger.recorded_outcome(changed, "lean", "supplied_default")
+
 
 if __name__ == "__main__":
     unittest.main()

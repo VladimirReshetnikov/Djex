@@ -1,0 +1,105 @@
+{
+  "schema": "church-supplied-default-last-atkey-haskell-v1",
+  "status": "behavior_batch_passed",
+  "production_release_accepted": false,
+  "source_base_commit": "511e2001dd651ea012b617d5c124fa67ee5f6932",
+  "scope": "last and atKey with supplied defaults in Haskell Djinn and Exference",
+  "counts": {
+    "synthesis_cells": 4,
+    "exact_candidate_replays": 4,
+    "finite_observations_by_operation": {
+      "last": 24,
+      "atKey": 54
+    },
+    "actual_false_queries": 2,
+    "independent_oracle_controls": 6,
+    "owned_processes": 26,
+    "frozen_source_files": 328
+  },
+  "settings": {
+    "djinn": {
+      "window": 65536,
+      "budget": 500000,
+      "djinn_strategy": "interleave",
+      "steps": 100000,
+      "process_timeout": 300.0,
+      "queue": 8192
+    },
+    "exference": {
+      "window": 256,
+      "budget": 100000,
+      "djinn_strategy": "depth-first",
+      "steps": 100000,
+      "process_timeout": 300.0,
+      "queue": 8192
+    }
+  },
+  "candidate_observations": {
+    "djinn-last": {
+      "checked": 45,
+      "true": 1,
+      "false": 44,
+      "error": 0,
+      "timeout": 0,
+      "window": 65536
+    },
+    "djinn-atKey": {
+      "checked": 500,
+      "true": 1,
+      "false": 484,
+      "error": 15,
+      "timeout": 0,
+      "window": 65536
+    },
+    "djinn-reject-all": {
+      "checked": 1,
+      "true": 0,
+      "false": 1,
+      "error": 0,
+      "timeout": 0,
+      "window": 65536
+    },
+    "exference-last": {
+      "checked": 15,
+      "true": 1,
+      "false": 14,
+      "error": 0,
+      "timeout": 0,
+      "window": 256
+    },
+    "exference-atKey": {
+      "checked": 67,
+      "true": 1,
+      "false": 66,
+      "error": 0,
+      "timeout": 0,
+      "window": 256
+    },
+    "exference-reject-all": {
+      "checked": 256,
+      "true": 0,
+      "false": 256,
+      "error": 0,
+      "timeout": 0,
+      "window": 256
+    }
+  },
+  "sources_and_runtimes_unchanged": true,
+  "all_owned_processes_exit_zero": true,
+  "strict_build": "passed -Werror",
+  "raw_receipt_member": "run/results.json",
+  "archive": {
+    "path": "supplied-default-last-atkey-haskell-2026-09-13.zip",
+    "sha256": "a6af06e43c00b1bbb3ce2bc7b51776fba64b951b5bebef8e820aa609532b6655",
+    "bytes": 2243089,
+    "artifact_count": 420,
+    "all_members_rehashed": true
+  },
+  "boundaries": [
+    "Fresh behavior acceptance against frozen working sources, not a full regression or constructor release.",
+    "Djinn atKey records 15 rejected candidate-check errors before its passing implementation.",
+    "Both Exference cells repeat historically accepted operations; this batch newly indexes the two Djinn cells.",
+    "Defaults are explicit target arguments; no totality of the original partial signatures is claimed.",
+    "Runtime and replay binaries are identified, not redistributed."
+  ]
+}

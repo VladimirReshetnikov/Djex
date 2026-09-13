@@ -3,14 +3,14 @@
 The [160-cell table](behavior-ledger.md) and [machine-readable index](behavior-ledger.json)
 cover every extended and supplied-default operation in the canonical specifications,
 across Haskell Djinn/Exference and Lean Djinn/Exference/Both. The current catalog indexes
-60 cells with historical acceptance, four with attempts without indexed acceptance,
-and 96 with no indexed evidence. These are historical index counts, not a current
+68 cells with historical acceptance, four with attempts without indexed acceptance,
+and 88 with no indexed evidence. These are historical index counts, not a current
 pass rate. No indexed evidence does not mean a case was never attempted.
 
-The [catalog](behavior-ledger-catalog.json) selects eleven principal receipt collections:
+The [catalog](behavior-ledger-catalog.json) selects fourteen principal receipt collections:
 the original Haskell batches, native-Int corrections, focused Exference acceptance,
 the latest published native Exference integration, and the Haskell and Lean
-supplied-default selector batches of September 13. It is not an exhaustive
+supplied-default selector batches and trailing-type renderer follow-up of September 13. It is not an exhaustive
 archive of all past experiments. An older accepted run and a later failed attempt
 can coexist in one cell's history. Collection order is not a latest-run claim.
 
@@ -26,7 +26,10 @@ Historical acceptance requires a recorded passing candidate and successful repla
 The known Lean adapter handles extended and supplied-default replay namespaces
 and preserves explicit rejection flags. It checks the recorded axiom inventories: implementations and
 numeric primitives are axiom-free; only the named `maybeEither` oracle proof may
-use `propext`. The index does not rerun those compilers, rehash every transitive
+use `propext`. In supplied-default `atKey`, only its named observer and oracle
+proof may carry the exact `String.length` dependencies (`Classical.choice`,
+`Quot.sound`, `propext`); candidates and other declarations must remain axiom-free.
+The index does not rerun those compilers, rehash every transitive
 artifact, or certify the historical harness. Its claim is that the pinned receipt
 records the result, with enough references to inspect the original evidence.
 

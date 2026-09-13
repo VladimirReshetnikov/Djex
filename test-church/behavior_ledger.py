@@ -90,10 +90,18 @@ def recorded_outcome(row, language, group="extended"):
             namespace = "BehaviorPartialReplay" if group == "supplied_default" else "BehaviorExtendedReplay"
             candidate = namespace + ".candidate"
             oracle = namespace + ".candidate_passes_original_oracle"
-            permitted = [[], ["propext"]] if group == "extended" and row.get("operation") == "maybeEither" else [[]]
+            def permitted(name, axioms):
+                if not axioms:
+                    return True
+                if group == "extended" and row.get("operation") == "maybeEither":
+                    return name == oracle and axioms == ["propext"]
+                if group == "supplied_default" and row.get("operation") == "atKey":
+                    return (name in {"BehaviorPartial.check_atKey", oracle}
+                            and axioms == ["Classical.choice", "Quot.sound", "propext"])
+                return False
             if (not expected or expected != actual or actual.get(candidate) != []
-                    or actual.get(oracle) not in permitted
-                    or any(value for name, value in actual.items() if name != oracle)):
+                    or oracle not in actual
+                    or any(not permitted(name, value) for name, value in actual.items())):
                 raise ValueError("Lean acceptance violates recorded candidate/oracle axiom policy")
         return "historical_accepted"
     # These classifications are explicit in the indexed audited receipts.

@@ -318,6 +318,25 @@
         "sources": "/source_hashes",
         "controls": "/oracle_controls"
       }
+    },
+    {
+      "id": "lean-native-reductions-baseline-2026-09-13",
+      "source": {
+        "repo": "Leant",
+        "path": "test-church/receipts/native-reductions-baseline-2026-09-13.zip",
+        "sha256": "f839fd4e3d3009fd5dd4e244bf6f3a02c8f2dbc77374a2714d1b005735a547a2",
+        "member": "run/results.json",
+        "member_sha256": "d92a8b3c64db3a78b2937f36eb962956fe02ac950bdd76b3ac2bfe0228692dab"
+      },
+      "rows": "/cells",
+      "group": "supplied_default",
+      "language": "lean",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      }
     }
   ]
 }

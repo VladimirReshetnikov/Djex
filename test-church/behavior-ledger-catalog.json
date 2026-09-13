@@ -261,6 +261,25 @@
         "sources": "/source_hashes",
         "controls": "/oracle_controls"
       }
+    },
+    {
+      "id": "lean-last-atkey-isolated-witness-2026-09-13",
+      "source": {
+        "repo": "Leant",
+        "path": "test-church/receipts/trailing-type-witness-isolated-2026-09-13.zip",
+        "sha256": "d0e00042fe387c52777c1b7a0439a84b8f8ac3d11a0b74f5a509a9782f6f2e10",
+        "member": "last-atkey/results.json",
+        "member_sha256": "aaab262e2e16fd4c12f6cd5620fad37194f8c5213b26c8b6c67c9a1d9e527219"
+      },
+      "rows": "/cells",
+      "group": "supplied_default",
+      "language": "lean",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      }
     }
   ]
 }

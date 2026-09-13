@@ -28,14 +28,15 @@ The [supplied-default selector acceptance](docs/reports/2026-09-13-native-suppli
 now covers `head`, `fromJust`, `fromLeft` and `fromRight` in both Haskell engines
 and all three Lean modes: 20 cells with exact replay and actual False controls.
 The twelve Lean replays preserve the full types and have empty axiom inventories.
-The [remaining-selector follow-up](docs/reports/2026-09-13-trailing-type-witness-frontier.md)
-records Haskell `last`/`atKey` acceptance and a working Lean renderer repair that
-closes the native `last` miss at unchanged limits. Its isolated strict build
-passes, but two of 707 unit tests fail on rendering compatibility and variant
-counts; the later isolated behavior/signature gates have not run. The
+The [isolated trailing-type renderer acceptance](docs/reports/2026-09-13-trailing-type-witness-acceptance.md)
+closes Lean Djinn's supplied-default `last` miss at unchanged limits. The strict
+build, all 707 isolated unit tests, all six `last`/`atKey` behavior cells, all
+three False controls, and both 350-signature kernel replay corpora pass.
+Established variants precede the bounded `Unit` fallbacks within each universe
+lane, and every candidate still requires Lean verification. The
 [current re-triage](docs/reports/2026-09-13-synthesis-delivery-retriage.md)
-prioritizes renderer compatibility, the 92 cells without indexed acceptance,
-and preservation of scoped dictionary selections.
+now prioritizes the 92 cells without indexed acceptance and preservation of
+scoped dictionary selections.
 
 ## Start here
 

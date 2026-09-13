@@ -20,7 +20,7 @@ synthesis foundation compile into one Cabal package with a single library,
 version, and dependency contract.
 
 The [strict-implicit Lean binder release](docs/reports/2026-09-13-strict-implicit-source-acceptance.md)
-preserves `⦃α : Type⦄` binders through contextual synthesis, including nested
+preserves `â¦ƒÎ± : Typeâ¦„` binders through contextual synthesis, including nested
 callbacks and selected dictionaries. All 719 native unit tests pass, along with
 nine new exact Lean replays and six rejection controls; the existing contextual
 constructor matrix also passes. General universe and dependent-binder support
@@ -43,18 +43,21 @@ preserve [lexical type and dictionary selections](docs/reports/2026-09-13-exfere
 and repair [trailing type-witness rendering](docs/reports/2026-09-13-trailing-type-witness-acceptance.md).
 
 The [Church behavior ledger](test-church/behavior-ledger.md) records 94
-historical acceptances, 13 attempted cells without indexed acceptance and 53
+historical acceptances, 23 attempted cells without indexed acceptance and 43
 cells without indexed evidence, out of 160. These are historical receipt counts,
 not a current-revision pass rate or a completeness theorem. Missing indexed
 evidence does not establish that a case was never attempted.
 
 The [revised delivery plan](docs/reports/2026-09-13-synthesis-delivery-retriage.md)
 prioritizes end-to-end [kinded Haskell source support](docs/reports/2026-09-13-public-kinded-source-frontier.md),
-with engine checking and original-signature replay as the next gate. Eight completed
-individual-engine extrema probes missed; two Lean Both-mode cells remain pending.
-A local repair admits the missing carrier, but construction still times out, so
-the next extrema step is a targeted construction trace. Lean universe polymorphism
-remains an independent milestone. These local attempts are not yet indexed in the ledger.
+with engine checking and original-signature replay as the next gate. The
+[ground-kind rendering repair and extrema checkpoint](docs/reports/2026-09-13-kinded-rendering-extrema-baseline.md)
+preserves explicit binder kinds in emitted signatures and passes eight GHC
+rendering fixtures plus rejection checks. All ten representative extrema probes
+miss at their original bounds; these attempts are now indexed in the ledger.
+A diagnostic with globally charged evaluation reaches the full search budget,
+so extrema work now targets the missing construction. Lean universe support
+remains an independent milestone.
 The [checked source-kind transport prerequisite](docs/reports/2026-09-13-source-kind-transport-prerequisite.md)
 preserves ground-kind forall annotations through conversion and synonym expansion,
 with 539 foundation and 171 integration tests passing. Public kinded queries still
@@ -100,7 +103,7 @@ these tiers explicitly.
 
 - [Rank-N and impredicative synthesis](#rank-n-and-impredicative-synthesis)
 - [Components](#components)
-- [The semantic stratum](#the-semantic-stratum) — one paragraph; the
+- [The semantic stratum](#the-semantic-stratum) â€” one paragraph; the
   specification is [docs/semantic-foundations.md](docs/semantic-foundations.md)
 - [Building](#building)
 - [Unified command](#unified-command)
@@ -410,7 +413,7 @@ inhabitation is undecidable, so a higher-rank search miss remains inconclusive;
 Lean synthesis also respects Lean's predicative universe rules. The detailed
 implementation and acceptance report explains the algorithms, examples,
 remaining bounds, and reproducible validation:
-[**PDF**](docs/rank-n-impredicative-synthesis.pdf) ·
+[**PDF**](docs/rank-n-impredicative-synthesis.pdf) Â·
 [LaTeX source](docs/rank-n-impredicative-synthesis.tex).
 
 ## Components
@@ -458,22 +461,22 @@ can skip ahead to [Building](#building).
 
 | Rule family | Engine | Reports (newest first) |
 | --- | --- | --- |
-| Deterministic paired-backend REPL concurrency with an exact serial fallback | both | [timed paired-backend deadlines](docs/reports/2026-08-20-timed-parallel-backend-deadline.md) · [initial parallel backend search](docs/reports/2026-08-20-deterministic-parallel-backend-search.md) |
+| Deterministic paired-backend REPL concurrency with an exact serial fallback | both | [timed paired-backend deadlines](docs/reports/2026-08-20-timed-parallel-backend-deadline.md) Â· [initial parallel backend search](docs/reports/2026-08-20-deterministic-parallel-backend-search.md) |
 | Serial ordered search-step lanes and the evidence gate for any future internal executor | Exference | [ordered StepAction extraction and parallel research checkpoint](docs/reports/2026-08-20-exference-serial-step-actions.md) |
-| Historical bounded binder frontiers: six, five, then four leading binders; current demand matching and exact evidence also admit longer prefixes | both | [six-binder](docs/reports/2026-08-10-six-binder-instantiation.md) · [five-binder](docs/reports/2026-08-09-five-binder-instantiation.md) · [four-binder](docs/reports/2026-08-01-four-binder-instantiation.md) |
+| Historical bounded binder frontiers: six, five, then four leading binders; current demand matching and exact evidence also admit longer prefixes | both | [six-binder](docs/reports/2026-08-10-six-binder-instantiation.md) Â· [five-binder](docs/reports/2026-08-09-five-binder-instantiation.md) Â· [four-binder](docs/reports/2026-08-01-four-binder-instantiation.md) |
 | Per-occurrence instantiation of loaded polymorphic values and closed source monotypes | Djinn | [loaded polymorphic values](docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md) |
 | Positive-only instantiation of query-local hypotheses at closed monotypes already in the request | Djinn | [query-local closed monotypes](docs/reports/2026-08-09-query-local-closed-monotype-instantiation.md) |
 | Query-correlated guarded-impredicative tail, selecting a multi-binder tuple only when its specialized body already occurs in the request | Djinn | [query-correlated guarded impredicativity](docs/reports/2026-08-09-query-correlated-guarded-impredicative-instantiation.md) |
-| Checked provider-local instantiation evidence, its ordered-vector extension, and the kind-aware form retaining attested ground kinds | both | [exact provider assignments](docs/reports/2026-08-05-exact-provider-instantiation-assignments.md) · [provider-local evidence](docs/reports/2026-08-05-provider-local-instantiation-evidence.md) |
-| Finite recursive-pattern elimination, its impredicative-field follow-up, and checked wildcard projection | Exference | [impredicative recursive projection](docs/reports/2026-08-01-impredicative-recursive-projection.md) · [bounded recursive elimination](docs/reports/2026-07-31-bounded-recursive-elimination.md) |
-| Bounded recursive-constructor introduction and the nominal view of reachable parameterized datatypes | Djinn | [bounded recursive introduction](docs/reports/2026-08-01-bounded-djinn-recursive-introduction.md) · [nominal parametric-data transport](docs/reports/2026-08-01-nominal-parametric-data-transport.md) |
-| Rank-N plan family: capped quintic, quartic, triple, and pairwise occurrence frontiers | Djinn | [quintic](docs/reports/2026-08-06-quintic-rank-n-frontiers.md) · [quartic](docs/reports/2026-08-06-quartic-rank-n-frontiers.md) · [triple](docs/reports/2026-08-01-triple-rank-n-frontiers.md) · [pairwise](docs/reports/2026-07-31-pairwise-rank-n-frontiers.md) |
-| Proof enumeration order: oldest-first evidence and repeated-domain fairness | Djinn | [oldest-first evidence](docs/reports/2026-08-05-oldest-first-evidence.md) · [repeated-domain fairness](docs/reports/2026-08-05-repeated-domain-evidence-fairness.md) |
+| Checked provider-local instantiation evidence, its ordered-vector extension, and the kind-aware form retaining attested ground kinds | both | [exact provider assignments](docs/reports/2026-08-05-exact-provider-instantiation-assignments.md) Â· [provider-local evidence](docs/reports/2026-08-05-provider-local-instantiation-evidence.md) |
+| Finite recursive-pattern elimination, its impredicative-field follow-up, and checked wildcard projection | Exference | [impredicative recursive projection](docs/reports/2026-08-01-impredicative-recursive-projection.md) Â· [bounded recursive elimination](docs/reports/2026-07-31-bounded-recursive-elimination.md) |
+| Bounded recursive-constructor introduction and the nominal view of reachable parameterized datatypes | Djinn | [bounded recursive introduction](docs/reports/2026-08-01-bounded-djinn-recursive-introduction.md) Â· [nominal parametric-data transport](docs/reports/2026-08-01-nominal-parametric-data-transport.md) |
+| Rank-N plan family: capped quintic, quartic, triple, and pairwise occurrence frontiers | Djinn | [quintic](docs/reports/2026-08-06-quintic-rank-n-frontiers.md) Â· [quartic](docs/reports/2026-08-06-quartic-rank-n-frontiers.md) Â· [triple](docs/reports/2026-08-01-triple-rank-n-frontiers.md) Â· [pairwise](docs/reports/2026-07-31-pairwise-rank-n-frontiers.md) |
+| Proof enumeration order: oldest-first evidence and repeated-domain fairness | Djinn | [oldest-first evidence](docs/reports/2026-08-05-oldest-first-evidence.md) Â· [repeated-domain fairness](docs/reports/2026-08-05-repeated-domain-evidence-fairness.md) |
 | Contextual goal introduction and its lexical evidence boundary | Exference | [contextual rank-N introduction](docs/reports/2026-07-29-contextual-rank-n-introduction.md) |
-| Visible type application in generated terms and provider use, and its closed-polytype extension to scoped providers | both | [scoped closed-polytype applications](docs/reports/2026-08-01-scoped-closed-polytype-applications.md) · [visible type application](docs/reports/2026-07-29-visible-type-application.md) |
+| Visible type application in generated terms and provider use, and its closed-polytype extension to scoped providers | both | [scoped closed-polytype applications](docs/reports/2026-08-01-scoped-closed-polytype-applications.md) Â· [visible type application](docs/reports/2026-07-29-visible-type-application.md) |
 | Context-free forall introduction and the Djinn quantified-wrapper follow-up | both | [forall introduction](docs/reports/2026-07-29-exference-forall-introduction.md) |
-| Earlier groundwork: hypothesis instantiation, the rank-N inference review, source semantics, unification | both | [hypothesis instantiation](docs/reports/2026-07-29-hypothesis-instantiation.md) · [rank-N inference review](docs/reports/2026-07-28-rank-n-inference-review.md) · [source-semantics follow-up](docs/reports/2026-07-27-source-semantics-follow-up.md) · [unification review](docs/reports/2026-07-27-unification-review.md) |
-| The strictness, compatibility, and raw-checker migrations that preceded all of it | both | [post-merge code review](docs/reports/2026-07-21-post-merge-code-review.md) · [final convergence review](docs/reports/2026-07-17-final-convergence-review.md) · [checker-boundary follow-up](docs/reports/2026-07-17-checker-boundary-follow-up.md) |
+| Earlier groundwork: hypothesis instantiation, the rank-N inference review, source semantics, unification | both | [hypothesis instantiation](docs/reports/2026-07-29-hypothesis-instantiation.md) Â· [rank-N inference review](docs/reports/2026-07-28-rank-n-inference-review.md) Â· [source-semantics follow-up](docs/reports/2026-07-27-source-semantics-follow-up.md) Â· [unification review](docs/reports/2026-07-27-unification-review.md) |
+| The strictness, compatibility, and raw-checker migrations that preceded all of it | both | [post-merge code review](docs/reports/2026-07-21-post-merge-code-review.md) Â· [final convergence review](docs/reports/2026-07-17-final-convergence-review.md) Â· [checker-boundary follow-up](docs/reports/2026-07-17-checker-boundary-follow-up.md) |
 
 ## The semantic stratum
 
@@ -483,7 +486,7 @@ canonical fingerprints, a ground class-resolution foundation, and the finite
 list-spine Length contract dialect -- with an optional bounded ASCII
 where-clause surface syntax onto its passive contract sources -- and its
 SMT-LIB/Z3 live stack. Its
-governing rule is that solver output is never trusted directly — only
+governing rule is that solver output is never trusted directly â€” only
 independent replay of a candidate against the exact checked problem produces
 evidence, and raw solver status has no proof or pruning authority. The
 complete specification is
@@ -804,7 +807,7 @@ forms and diagnostics.
 loaded module scope and neutral declaration inventory. It retains genuinely
 generalized result kinds, prints class applications with a final `Constraint`,
 and is likewise independent of backend selection. Attach the bang to the
-command—`:kind! TYPE` or `:k! TYPE`—to add a second line with saturated type
+commandâ€”`:kind! TYPE` or `:k! TYPE`â€”to add a second line with saturated type
 synonyms normalized. See
 [kind inspection](docs/repl.md#inspecting-type-kinds) for scope rules,
 qualification behavior, and the intentionally supported kind-language subset.
@@ -1069,7 +1072,7 @@ alpha-freshens every alias-introduced binder away from the complete
 original source namespace, including through nested and zero-argument
 aliases, so the adapter can retarget surviving hints to the elaborated goal
 without confusing an erased phantom argument with an unrelated
-same-numbered binder — and core search rejects a hint value paired with any
+same-numbered binder â€” and core search rejects a hint value paired with any
 other query. The hidden
 `Language.Haskell.Djex.Exference.Internal.Request` representation owns that
 metadata; external clients use either the neutral stable adapter or
@@ -1386,7 +1389,7 @@ because Haskell has no corresponding unary tuple constructor.
 The `exference` compatibility executable is a six-line launcher for
 `Language.Haskell.Exference.CLI`, the compatibility orchestrator at this
 boundary: it loads and seals one session, parses every requested type
-through the same `parseExferenceRequest…` entry points as the checked
+through the same `parseExferenceRequestâ€¦` entry points as the checked
 adapter, selects shared candidates, and renders
 their generated expression bodies. The compatibility command,
 `djex exference`, and the shared `djex` REPL obtain their session policy from
@@ -1438,8 +1441,8 @@ core and frontend dependencies: `haskell-src-exts`, `directory`, `filepath`,
 `haskeline`, and `process` share the same versioned component contract as the
 engines and frontends that consume their output.
 
-Both backend trees follow the same layout — `src-core/`, `src-frontend/`,
-`app/`, and one explicit directory per test suite — with `djinn/` adding a
+Both backend trees follow the same layout â€” `src-core/`, `src-frontend/`,
+`app/`, and one explicit directory per test suite â€” with `djinn/` adding a
 `src-internal/` root for package-private implementation modules. The package
 root uses `src/`, `app/`, `synthesis/`, `test-integration/`, `test-api/`,
 `test-cli/`, and `test-support/`, the last holding shared CLI test assertions

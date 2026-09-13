@@ -394,6 +394,42 @@
         "sources": "/source_hashes",
         "controls": "/oracle_controls"
       }
+    },
+    {
+      "id": "haskell-extrema-baseline-2026-09-13",
+      "source": {
+        "repo": "Djex",
+        "path": "test-church/receipts/extrema-baseline-2026-09-13.zip",
+        "sha256": "13441d40ef9a4c7d544c740c6180be82e52f9911134430160f56142194291aba",
+        "member": "baseline-v1/haskell/results.json",
+        "member_sha256": "2b7206985597d16a2d645dfa561d7262fa7953927c1e232e62e9363e39499035"
+      },
+      "rows": "/cells",
+      "group": "supplied_default",
+      "language": "haskell",
+      "metadata": {
+        "settings": "/settings",
+        "runtime": "/executable_hashes",
+        "sources": "/source_hashes",
+        "controls": "/oracle_controls"
+      }
+    },
+    {
+      "id": "lean-extrema-baseline-2026-09-13",
+      "source": {
+        "repo": "Djex",
+        "path": "test-church/receipts/extrema-baseline-2026-09-13.zip",
+        "sha256": "13441d40ef9a4c7d544c740c6180be82e52f9911134430160f56142194291aba",
+        "member": "selected-native.json",
+        "member_sha256": "ddc9669c67d417357ca2c5448acf117af799f2d42a3db8296c711ea8aa91a875"
+      },
+      "rows": "/cells",
+      "group": "supplied_default",
+      "language": "lean",
+      "metadata": {
+        "runs": "/metadata",
+        "interruption": "/interruption_audit"
+      }
     }
   ]
 }

@@ -78,7 +78,11 @@ standaloneSourceExpression source term = case bindingScope source of
     (++) <$> maybe (Right []) (traverse binder) variables <*> leading body
   leading _ = Right []
   binder (HSE.UnkindedVar _ name) = Right $ HSE.prettyPrint name
-  binder HSE.KindedVar{} = Left "standalone expression does not yet support kinded source binders"
+  -- Only the binding pattern uses the name. The complete original AST above
+  -- remains the expected signature, including this binder's explicit kind.
+  binder (HSE.KindedVar _ name kind)
+    | groundKind kind = Right $ HSE.prettyPrint name
+    | otherwise = Left "standalone expression requires a ground source binder kind"
 
 bindingScope :: String -> ([String], [String])
 bindingScope source = case HSE.parseTypeWithMode
@@ -99,7 +103,9 @@ bindingScope source = case HSE.parseTypeWithMode
   outer (HSE.TyParen _ body) = outer body
   outer ty = ty
   binderName (HSE.UnkindedVar _ name) = Just $ HSE.prettyPrint name
-  binderName HSE.KindedVar{} = Nothing
+  binderName (HSE.KindedVar _ name kind)
+    | groundKind kind = Just $ HSE.prettyPrint name
+    | otherwise = Nothing
   leading ty = case outer ty of
     HSE.TyForall _ binders _ body ->
       maybe [] (maybe [] id . traverse binderName) binders ++ leading body
@@ -128,3 +134,13 @@ bindingScope source = case HSE.parseTypeWithMode
     _ -> Nothing
   constraintFree bound (HSE.TypeA _ ty) = free bound ty
   constraintFree _ _ = Nothing
+
+-- Match the checked source converter's admitted kind language. In particular,
+-- do not omit free variables occurring in unsupported polymorphic kinds while
+-- calculating the surrounding implicit type-binding scope.
+groundKind :: HSE.Type l -> Bool
+groundKind kind = case kind of
+  HSE.TyStar{} -> True
+  HSE.TyFun _ parameter result -> groundKind parameter && groundKind result
+  HSE.TyParen _ body -> groundKind body
+  _ -> False

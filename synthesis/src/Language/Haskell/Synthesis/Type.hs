@@ -31,6 +31,7 @@ module Language.Haskell.Synthesis.Type
   , functionSpine
   , quantifyFreeVariables
   , implicitizeLeadingForalls
+  , implicitizeLeadingForallsWithOpenings
   , splitLeadingForalls
   , leadingForallVariables
   , typeBinderVariables
@@ -356,23 +357,46 @@ implicitizeLeadingForalls
   -> Either
       (BinderNormalizationError variable rejection)
       (Type variable, Set variable)
-implicitizeLeadingForalls rejectBinder fresh protected source =
-  go initiallyReserved [] source
+implicitizeLeadingForalls rejectBinder fresh protected source = do
+  (opened, _, reserved) <-
+    implicitizeLeadingForallsWithOpenings rejectBinder fresh protected source
+  pure (opened, reserved)
+
+-- | Retain the fresh identities of the removed binders in telescope order.
+-- Unlike the free variables of the result, this includes vacuous binders and
+-- distinguishes shadowed binders from separate layers. A consumer can pair
+-- these identities with its independently checked forall introductions;
+-- printed names or an unordered free-variable census cannot recover that
+-- correspondence. The opened type and reserved namespace are identical to
+-- 'implicitizeLeadingForalls'. No forall below a non-prenex boundary is opened.
+implicitizeLeadingForallsWithOpenings
+  :: Ord variable
+  => (variable -> Maybe rejection)
+  -> FreshVariableAllocator variable
+  -> Set variable
+  -> Type variable
+  -> Either
+      (BinderNormalizationError variable rejection)
+      (Type variable, [variable], Set variable)
+implicitizeLeadingForallsWithOpenings rejectBinder fresh protected source =
+  go initiallyReserved [] [] source
  where
   initiallyReserved = protected `Set.union` allTypeVariables source
 
-  go reserved contextChunks (ForallType binders embedded body) = do
+  go reserved openingChunks contextChunks (ForallType binders embedded body) = do
     validateBinderList rejectBinder binders
     (renaming, reserved') <- first TypeBinderFresheningError
       $ runStateT (foldM allocateBinder Map.empty binders) reserved
     let renamedEmbedded = map
           (fmap $ renameScopedVariables renaming) embedded
         renamedBody = renameScopedVariables renaming body
-    go reserved' (renamedEmbedded : contextChunks) renamedBody
-  go reserved contextChunks body = Right
+    go reserved' (map (renaming Map.!) binders : openingChunks)
+      (renamedEmbedded : contextChunks) renamedBody
+  go reserved openingChunks contextChunks body = Right
     ( case concat $ reverse contextChunks of
         [] -> body
         contexts -> ForallType [] contexts body
+    , concat $ reverse openingChunks
     , reserved
     )
 

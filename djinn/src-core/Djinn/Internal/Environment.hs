@@ -37,10 +37,10 @@ module Djinn.Internal.Environment (
     preparedEnvironmentNominalPolarizedFunctionPremises,
     preparedEnvironmentLoadedFunctionInstantiation,
     PreparedRootGivenOpening, prepareRootGivenOpening,
-    rootGivenOpeningSource, rootGivenOpeningContexts, rootGivenOpeningBody,
+    rootGivenOpeningSource, rootGivenOpeningVariables, rootGivenOpeningContexts, rootGivenOpeningBody,
     PreparedNestedGivenOpening, prepareNestedGivenOpenings,
     nestedGivenOpeningQuerySource, nestedGivenOpeningQueryBody,
-    nestedGivenOpeningKindScope, nestedGivenOpeningSource,
+    nestedGivenOpeningKindScope, nestedGivenOpeningVariables, nestedGivenOpeningSource,
     nestedGivenOpeningContexts, nestedGivenOpeningBody,
     nestedGivenOpeningAvailableContexts,
     preparedEnvironmentQueryUsesParametricData,
@@ -1290,7 +1290,7 @@ preparedEnvironmentLoadedFunctionInstantiation
 -- | A joint opening of the actual source root. Its private constructor
 -- prevents pairing one context's identities with another search body.
 data PreparedRootGivenOpening = PreparedRootGivenOpening
-    (SharedType.Type HSymbol)
+    (SharedType.Type HSymbol) [HSymbol]
     [Constraint (SharedType.Type HSymbol)]
     (SharedType.Type HSymbol)
 
@@ -1300,7 +1300,7 @@ prepareRootGivenOpening
     -> SharedType.Type HSymbol
     -> Either String (Maybe PreparedRootGivenOpening)
 prepareRootGivenOpening prepared source actualBody = do
-    opened <- first show $ fst <$> SharedType.implicitizeLeadingForalls
+    (opened, variables, _) <- first show $ SharedType.implicitizeLeadingForallsWithOpenings
         (const (Nothing :: Maybe ())) fresh Set.empty source
     let (binders, contexts, body) = SharedType.splitLeadingForalls opened
     if null contexts then Right Nothing else do
@@ -1314,19 +1314,24 @@ prepareRootGivenOpening prepared source actualBody = do
         -- source graph; the pilot never chooses between them silently.
         if not $ unambiguousPositiveGivenScopes prepared opened
             then Right Nothing
-            else Right $ Just $ PreparedRootGivenOpening source contexts body
+            else Right $ Just $ PreparedRootGivenOpening source variables contexts body
   where
     fresh unavailable variable = Just $ fst $ freshPrimedVariable unavailable variable
 
 rootGivenOpeningSource :: PreparedRootGivenOpening -> SharedType.Type HSymbol
-rootGivenOpeningSource (PreparedRootGivenOpening source _ _) = source
+rootGivenOpeningSource (PreparedRootGivenOpening source _ _ _) = source
+
+-- | Source-owned identities in the complete removed prenex telescope order.
+-- Vacuous and shadowed binders are retained for independent reconstruction.
+rootGivenOpeningVariables :: PreparedRootGivenOpening -> [HSymbol]
+rootGivenOpeningVariables (PreparedRootGivenOpening _ variables _ _) = variables
 
 rootGivenOpeningContexts
     :: PreparedRootGivenOpening -> [Constraint (SharedType.Type HSymbol)]
-rootGivenOpeningContexts (PreparedRootGivenOpening _ contexts _) = contexts
+rootGivenOpeningContexts (PreparedRootGivenOpening _ _ contexts _) = contexts
 
 rootGivenOpeningBody :: PreparedRootGivenOpening -> SharedType.Type HSymbol
-rootGivenOpeningBody (PreparedRootGivenOpening _ _ body) = body
+rootGivenOpeningBody (PreparedRootGivenOpening _ _ _ body) = body
 
 -- | A positive, monomorphic qualification at an actual term position of the
 -- jointly opened query. The complete query remains the kind authority for
@@ -1335,7 +1340,7 @@ rootGivenOpeningBody (PreparedRootGivenOpening _ _ body) = body
 data PreparedNestedGivenOpening = PreparedNestedGivenOpening
     (SharedType.Type HSymbol) (SharedType.Type HSymbol)
     (SharedType.Type HSymbol) (SharedType.Type HSymbol)
-    [Constraint (SharedType.Type HSymbol)]
+    [Constraint (SharedType.Type HSymbol)] [HSymbol]
 
 prepareNestedGivenOpenings
     :: PreparedEnvironment
@@ -1343,7 +1348,7 @@ prepareNestedGivenOpenings
     -> SharedType.Type HSymbol
     -> Either String [PreparedNestedGivenOpening]
 prepareNestedGivenOpenings prepared source actualBody = do
-    opened <- first show $ fst <$> SharedType.implicitizeLeadingForalls
+    (opened, variables, _) <- first show $ SharedType.implicitizeLeadingForallsWithOpenings
         (const (Nothing :: Maybe ())) fresh Set.empty source
     let (binders, contexts, body) = SharedType.splitLeadingForalls opened
     if null binders &&
@@ -1353,25 +1358,25 @@ prepareNestedGivenOpenings prepared source actualBody = do
         else Left "nested-Given opening does not match the exact search body"
     checkPreparedSynthesisTypesKinds prepared [(KStar, opened)]
     pure $ if unambiguousPositiveGivenScopes prepared opened
-        then collect opened body contexts True body else []
+        then collect variables opened body contexts True body else []
   where
     fresh unavailable variable = Just $ fst $ freshPrimedVariable unavailable variable
     distinct contexts = length contexts == length
         (SharedCollection.distinctOn dictionarySymbol contexts)
-    collect kindScope queryBody available positive ty = case ty of
+    collect variables kindScope queryBody available positive ty = case ty of
         SharedType.FunctionType domain result ->
-            collect kindScope queryBody available (not positive) domain ++
-            collect kindScope queryBody available positive result
+            collect variables kindScope queryBody available (not positive) domain ++
+            collect variables kindScope queryBody available positive result
         SharedType.TupleType _ fields ->
-            concatMap (collect kindScope queryBody available positive) fields
+            concatMap (collect variables kindScope queryBody available positive) fields
         SharedType.ForallType{}
             | ([], [], body) <- SharedType.splitLeadingForalls ty ->
-                collect kindScope queryBody available positive body
+                collect variables kindScope queryBody available positive body
             | ([], contexts, body) <- SharedType.splitLeadingForalls ty
             , positive && distinct (available ++ contexts) ->
                 PreparedNestedGivenOpening source queryBody kindScope ty
-                    (available ++ contexts) :
-                collect kindScope queryBody (available ++ contexts) positive body
+                    (available ++ contexts) variables :
+                collect variables kindScope queryBody (available ++ contexts) positive body
         -- Quantified callbacks require fresh eigenvariables with their own
         -- source scope receipt. Negative qualifications remain opaque provider
         -- values; nominal type arguments do not establish term-level variance.
@@ -1435,10 +1440,14 @@ unambiguousPositiveGivenScopes
 nestedGivenOpeningQuerySource, nestedGivenOpeningQueryBody,
     nestedGivenOpeningKindScope, nestedGivenOpeningSource
     :: PreparedNestedGivenOpening -> SharedType.Type HSymbol
-nestedGivenOpeningQuerySource (PreparedNestedGivenOpening source _ _ _ _) = source
-nestedGivenOpeningQueryBody (PreparedNestedGivenOpening _ body _ _ _) = body
-nestedGivenOpeningKindScope (PreparedNestedGivenOpening _ _ scope _ _) = scope
-nestedGivenOpeningSource (PreparedNestedGivenOpening _ _ _ source _) = source
+nestedGivenOpeningQuerySource (PreparedNestedGivenOpening source _ _ _ _ _) = source
+nestedGivenOpeningQueryBody (PreparedNestedGivenOpening _ body _ _ _ _) = body
+nestedGivenOpeningKindScope (PreparedNestedGivenOpening _ _ scope _ _ _) = scope
+nestedGivenOpeningSource (PreparedNestedGivenOpening _ _ _ source _ _) = source
+
+-- | The outer query's source-owned prenex identities, including unused ones.
+nestedGivenOpeningVariables :: PreparedNestedGivenOpening -> [HSymbol]
+nestedGivenOpeningVariables (PreparedNestedGivenOpening _ _ _ _ _ variables) = variables
 
 nestedGivenOpeningContexts
     :: PreparedNestedGivenOpening -> [Constraint (SharedType.Type HSymbol)]
@@ -1453,7 +1462,7 @@ nestedGivenOpeningBody opening =
 
 nestedGivenOpeningAvailableContexts
     :: PreparedNestedGivenOpening -> [Constraint (SharedType.Type HSymbol)]
-nestedGivenOpeningAvailableContexts (PreparedNestedGivenOpening _ _ _ _ contexts) = contexts
+nestedGivenOpeningAvailableContexts (PreparedNestedGivenOpening _ _ _ _ contexts _) = contexts
 
 -- | Translate a checked shared type directly. Stable raw and native queries
 -- meet here after raw compatibility validation and use the exact same

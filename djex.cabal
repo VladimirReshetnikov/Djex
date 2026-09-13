@@ -240,6 +240,7 @@ Library
     Djinn.Internal.ContextualInstantiation
     Djinn.Internal.SourceEvidence
     Djinn.Internal.SourceGraph
+    Djinn.Internal.SourceAnnotation
     Djinn.Internal.SourceGraphKinds
     Djinn.Internal.SourceTypingContext
     Djinn.Internal.Declaration
@@ -487,6 +488,7 @@ Test-Suite synthesis-length-tests
   Other-Modules:
     DjinnSourceGraphSpec
     Djinn.Internal.SourceGraph
+    Djinn.Internal.SourceAnnotation
     Djinn.Internal.SourceGraphKinds
     Djinn.Internal.SourceTypingContext
     LengthWhereSpec
@@ -789,7 +791,7 @@ Test-Suite djinn-source-graph-tests
   Build-Depends:  djex
 
 Test-Suite djinn-source-graph-private-tests
-  import:         tasty-hunit-test, containers-dep, transformers-dep
+  import:         tasty-hunit-test, containers-dep, transformers-dep, deepseq-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs:
@@ -800,6 +802,8 @@ Test-Suite djinn-source-graph-private-tests
     ContextualInstantiationSpec
     ContextualErasureSpec
     NestedGivenErasureSpec
+    SourceSelectionSpec
+    Djinn.Internal.GeneratedDeduplication
     Djinn.Internal.ContextualInstantiation
     Djinn.Internal.SourceEvidence
     Djinn.Internal.Instantiation
@@ -809,6 +813,7 @@ Test-Suite djinn-source-graph-private-tests
     Djinn.Internal.ProofCheck.Evidence
     KindGraphCases
     Djinn.Internal.SourceGraph
+    Djinn.Internal.SourceAnnotation
     Djinn.Internal.SourceGraphKinds
     Djinn.Internal.SourceTypingContext
   Build-Depends:  djex

@@ -18,6 +18,7 @@ module Djinn.Internal.LJTFormula (
     freeVars, freshenTermBinders
     ) where
 
+import Control.DeepSeq (NFData(rnf))
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 
@@ -46,6 +47,13 @@ data Symbol
     | OpaqueTypeSymbol !(Type String) !(TypeAtomKey String)
     | DictionarySymbol
         !(Constraint (Type String)) !(Constraint (TypeAtomKey String))
+
+-- Force both the retained source payload and its independent identity key
+-- when a completed contextual candidate enters the streaming comparison set.
+instance NFData Symbol where
+    rnf (Symbol spelling) = rnf spelling
+    rnf (OpaqueTypeSymbol source key) = rnf source `seq` rnf key
+    rnf (DictionarySymbol source key) = rnf source `seq` rnf key
 
 instance Eq Symbol where
     Symbol left == Symbol right = left == right

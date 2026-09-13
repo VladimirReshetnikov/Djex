@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 -- | The source authority and exact lowering history of one checked Djinn
 -- proof.  This module deliberately precedes source graph construction: no
 -- type is recovered from a logical atom or from a rendered Haskell string.
@@ -16,6 +18,8 @@ module Djinn.Internal.SourceEvidence
   , lowerCheckedContextualSourceCandidate
   , ContextualLoweringFailure(..), admitCheckedContextualSourceCandidate
   , sourceCandidateClause
+  , sourceCandidateAnnotatedClause, sourceCandidateAnnotations
+  , sourceCandidateComparisonClause
   , sourceCandidateContext
   , sourceCandidateProofEvidence
   , sourceCandidateRestoredProof
@@ -28,13 +32,15 @@ module Djinn.Internal.SourceEvidence
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Control.Monad (unless, zipWithM_)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Strict (get, put, runStateT)
 import Data.Bifunctor (first)
 import qualified Djinn.Internal.ContextualInstantiation as Contextual
 import Djinn.Internal.Environment
-  ( PreparedRootGivenOpening, rootGivenOpeningSource, rootGivenOpeningContexts
+  ( PreparedRootGivenOpening, rootGivenOpeningSource, rootGivenOpeningVariables, rootGivenOpeningContexts
   , rootGivenOpeningBody, prepareRootGivenOpening
   , nestedGivenOpeningQuerySource, nestedGivenOpeningQueryBody
-  , nestedGivenOpeningKindScope, nestedGivenOpeningSource
+  , nestedGivenOpeningKindScope, nestedGivenOpeningVariables, nestedGivenOpeningSource
   , nestedGivenOpeningContexts, nestedGivenOpeningAvailableContexts
   , preparedEnvironmentSynthesisFormulaTranslator )
 
@@ -42,7 +48,7 @@ import Djinn.Internal.Instantiation
   ( eliminateInstantiationEvidence, rewriteProviderInstantiationEvidence
   , usesInstantiationEvidence )
 import Djinn.Internal.LJTFormula
-  ( Symbol, Formula(..), Term(..), dictionarySymbol, opaqueTypeSymbol, applys )
+  ( Symbol(..), Formula(..), Term(..), dictionarySymbol, opaqueTypeSymbol, applys, symbolSpelling )
 import Djinn.Internal.ProofCheck.Evidence
   ( CheckedProofEvidence, checkedProofEnvironment, checkedProofRoot
   , checkedProofExpectedType, CheckedProofNode, checkedProofNodeTerm
@@ -55,6 +61,11 @@ import Djinn.Internal.SourceTypingContext
   ( SourceTypingContext, sourceTypingContext, sourceTypingContextWithProviderKinds
   , sourceTypingPreparedEnvironment, sourceTypingGoal, sourceTypingProviderKinds
   , sourceTypingTermSchemes, sourceTypingConstructorNames )
+import Djinn.Internal.HIdentifier (generatedGlobalName)
+import Djinn.Internal.SourceAnnotation
+  ( SourceAnnotation(..), SourceAnnotations, SourceSelection, eraseSourceAnnotations
+  , sourceAnnotationComparisonExpression )
+import qualified Language.Haskell.Synthesis.Name as Name
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Type as Type
 
@@ -71,6 +82,8 @@ data SourceCandidate = SourceCandidate
   (Map.Map Symbol (Symbol, [Generated.VisibleTypeArgument]))
   (Maybe RootGivenErasure)
   (Generated.FunctionClause String)
+  (Generated.FunctionClause String)
+  SourceAnnotations
 
 -- | Plan-local authority for the only dictionary erasure supported here.
 -- The full source opening and independently sealed conditional helpers stay
@@ -192,7 +205,7 @@ lowerSourceCandidate contextual context proofEnvironment axiomSymbols visible
       Left "source lowering received evidence for another proof environment"
   | otherwise = do
       contextualProof <- case contextual of
-        Nothing -> Right $ checkedProofNodeTerm $ checkedProofRoot evidence
+        Nothing -> Right (checkedProofNodeTerm $ checkedProofRoot evidence, Map.empty)
         Just receipt -> first contextualFailureMessage $
           eraseRootGivenProof context proofEnvironment receipt evidence
       constructSourceCandidate contextual context proofEnvironment axiomSymbols
@@ -206,10 +219,10 @@ constructSourceCandidate
   :: Maybe RootGivenErasure -> SourceTypingContext -> ProofEnvironment
   -> Set.Set Symbol -> Map.Map Symbol [Generated.VisibleTypeArgument]
   -> Map.Map Symbol (Symbol, [Generated.VisibleTypeArgument])
-  -> Generated.DefinitionName -> CheckedProofEvidence -> Term
-  -> Either String SourceCandidate
+  -> Generated.DefinitionName -> CheckedProofEvidence
+  -> (Term, Map.Map Symbol SourceAnnotation) -> Either String SourceCandidate
 constructSourceCandidate contextual context proofEnvironment axiomSymbols visible
-    providers target evidence contextualProof = do
+    providers target evidence (contextualProof, annotations) = do
       let raw = checkedProofNodeTerm $ checkedProofRoot evidence
           restored = restoreProofTerm proofEnvironment raw
           providerApplied = rewriteProviderInstantiationEvidence providers $
@@ -217,37 +230,78 @@ constructSourceCandidate contextual context proofEnvironment axiomSymbols visibl
           implicitSymbols = axiomSymbols `Set.difference` Map.keysSet visible
           erased = eliminateInstantiationEvidence implicitSymbols providerApplied
           constructors = sourceTypingConstructorNames context
+          -- An annotation is a unary wrapper, not an ordinary source value:
+          -- eta-contracting (\provider -> marker provider) would strand the
+          -- marker and detach the selected evidence from its local provider.
           convert = termToGeneratedClauseWithSourceApplications
-              (not $ usesInstantiationEvidence axiomSymbols restored) visible constructors
-      clause <- convert target erased
-      pure $ SourceCandidate context evidence restored providerApplied erased
-        visible providers contextual clause
+              (Map.null annotations && not (usesInstantiationEvidence axiomSymbols restored))
+              visible constructors
+      namedAnnotations <- Map.fromList <$> mapM
+        (\(symbol, annotation) -> do
+          name <- generatedGlobalName Name.VariableLike "source annotation" $ symbolSpelling symbol
+          pure (name, annotation)) (Map.toList annotations)
+      annotatedClause <- convert target erased
+      expression <- eraseSourceAnnotations namedAnnotations $
+        Generated.functionClauseExpression annotatedClause
+      let clause = Generated.functionClauseFromExpression target expression
+      pure $ SourceCandidate context evidence restored
+        (eraseAnnotationTerms annotations providerApplied) (eraseAnnotationTerms annotations erased)
+        visible providers contextual clause annotatedClause namedAnnotations
 
 sourceCandidateClause :: SourceCandidate -> Generated.FunctionClause String
-sourceCandidateClause (SourceCandidate _ _ _ _ _ _ _ _ clause) = clause
+sourceCandidateClause (SourceCandidate _ _ _ _ _ _ _ _ clause _ _) = clause
 
 sourceCandidateContext :: SourceCandidate -> SourceTypingContext
-sourceCandidateContext (SourceCandidate context _ _ _ _ _ _ _ _) = context
+sourceCandidateContext (SourceCandidate context _ _ _ _ _ _ _ _ _ _) = context
 
 sourceCandidateProofEvidence :: SourceCandidate -> CheckedProofEvidence
-sourceCandidateProofEvidence (SourceCandidate _ evidence _ _ _ _ _ _ _) = evidence
+sourceCandidateProofEvidence (SourceCandidate _ evidence _ _ _ _ _ _ _ _ _) = evidence
 
 sourceCandidateRestoredProof :: SourceCandidate -> Term
-sourceCandidateRestoredProof (SourceCandidate _ _ restored _ _ _ _ _ _) = restored
+sourceCandidateRestoredProof (SourceCandidate _ _ restored _ _ _ _ _ _ _ _) = restored
 
 sourceCandidateProviderProof :: SourceCandidate -> Term
-sourceCandidateProviderProof (SourceCandidate _ _ _ providers _ _ _ _ _) = providers
+sourceCandidateProviderProof (SourceCandidate _ _ _ providers _ _ _ _ _ _ _) = providers
 
 sourceCandidateErasedProof :: SourceCandidate -> Term
-sourceCandidateErasedProof (SourceCandidate _ _ _ _ erased _ _ _ _) = erased
+sourceCandidateErasedProof (SourceCandidate _ _ _ _ erased _ _ _ _ _ _) = erased
 
 sourceCandidateVisibleApplications
   :: SourceCandidate -> Map.Map Symbol [Generated.VisibleTypeArgument]
-sourceCandidateVisibleApplications (SourceCandidate _ _ _ _ _ visible _ _ _) = visible
+sourceCandidateVisibleApplications (SourceCandidate _ _ _ _ _ visible _ _ _ _ _) = visible
 
 sourceCandidateProviderApplications
   :: SourceCandidate -> Map.Map Symbol (Symbol, [Generated.VisibleTypeArgument])
-sourceCandidateProviderApplications (SourceCandidate _ _ _ _ _ _ providers _ _) = providers
+sourceCandidateProviderApplications (SourceCandidate _ _ _ _ _ _ providers _ _ _ _) = providers
+
+
+sourceCandidateAnnotatedClause :: SourceCandidate -> Generated.FunctionClause String
+sourceCandidateAnnotatedClause (SourceCandidate _ _ _ _ _ _ _ _ _ clause _) = clause
+
+sourceCandidateAnnotations :: SourceCandidate -> SourceAnnotations
+sourceCandidateAnnotations (SourceCandidate _ _ _ _ _ _ _ _ _ _ annotations) = annotations
+
+-- Preserve selection positions while ignoring unused markers and proof-local
+-- names. This compact key does not force an independently checked source graph.
+sourceCandidateComparisonClause
+  :: SourceCandidate -> Generated.FunctionClause (Either SourceSelection String)
+sourceCandidateComparisonClause candidate =
+  Generated.functionClauseFromExpression (Generated.clauseName clause) $
+    sourceAnnotationComparisonExpression (sourceCandidateAnnotations candidate) $
+      Generated.functionClauseExpression clause
+ where
+  clause = sourceCandidateAnnotatedClause candidate
+
+-- Preserve the existing inspectable lowering history without exposing private
+-- annotation markers as proof premises or user-visible names.
+eraseAnnotationTerms :: Map.Map Symbol SourceAnnotation -> Term -> Term
+eraseAnnotationTerms annotations = go
+ where
+  go (Apply (Var marker) body) | Map.member marker annotations = go body
+  go (Lam binder body) = Lam binder $ go body
+  go (Apply function argument) = Apply (go function) (go argument)
+  go (Xsel index arity body) = Xsel index arity $ go body
+  go term = term
 
 -- Consume the checked occurrence tree, not a separately supplied raw term.
 -- Every removed lambda is in the actual root dictionary prefix. Every removed
@@ -255,21 +309,50 @@ sourceCandidateProviderApplications (SourceCandidate _ _ _ _ _ _ providers _ _) 
 -- dictionary formula. The remaining ordinary arguments stay in source order.
 eraseRootGivenProof
   :: SourceTypingContext -> ProofEnvironment -> RootGivenErasure
-  -> CheckedProofEvidence -> Either ContextualLoweringFailure Term
+  -> CheckedProofEvidence
+  -> Either ContextualLoweringFailure (Term, Map.Map Symbol SourceAnnotation)
 eraseRootGivenProof context proofEnvironment receipt evidence = do
-  unless (sourceTypingGoal context == source &&
-      checkedProofExpectedType evidence == goal) $
-    invalid "contextual proof does not belong to its root opening"
-  (rootBinders, body) <- peel False Map.empty
-    (map (PVar . dictionarySymbol) rootContexts)
-    $ checkedProofRoot evidence
-  erase rootBinders helperTable body
+  (term, (_, annotations)) <- runStateT eraseRoot (0 :: Int, Map.empty)
+  pure (term, annotations)
  where
-  (source, rootContexts, goal, helpers, introductions) = case receipt of
+  eraseRoot = do
+    unless (sourceTypingGoal context == source &&
+        checkedProofExpectedType evidence == goal) $
+      invalid "contextual proof does not belong to its root opening"
+    (rootBinders, introduced, body) <- peel False Map.empty
+      (map (PVar . dictionarySymbol) rootContexts)
+      $ checkedProofRoot evidence
+    erased <- erase rootBinders helperTable body
+    annotate (RootSourceOpening variables introduced) erased
+  (source, rootContexts, variables, goal, helpers, introductions) = case receipt of
     RootGivenErasure opening form rows ->
-      (rootGivenOpeningSource opening, rootGivenOpeningContexts opening, form, rows, [])
+      (rootGivenOpeningSource opening, rootGivenOpeningContexts opening,
+        rootGivenOpeningVariables opening, form, rows, [])
     NestedGivenErasure original opening form rows nested ->
-      (original, maybe [] rootGivenOpeningContexts opening, form, rows, nested)
+      (original, maybe [] rootGivenOpeningContexts opening,
+        case nested of
+          firstIntroduction : _ -> nestedGivenOpeningVariables $
+            Contextual.contextualIntroductionOpening firstIntroduction
+          [] -> maybe [] rootGivenOpeningVariables opening,
+        form, rows, nested)
+  reserved = Set.fromList $ concatMap termSymbols
+    [ checkedProofNodeTerm $ checkedProofRoot evidence
+    , restoreProofTerm proofEnvironment $ checkedProofNodeTerm $ checkedProofRoot evidence ]
+  termSymbols term = case term of
+    Var symbol -> [symbol]
+    Lam binder body -> binder : termSymbols body
+    Apply function argument -> termSymbols function ++ termSymbols argument
+    Xsel _ _ body -> termSymbols body
+    _ -> []
+  annotate annotation body = do
+    (next, annotations) <- get
+    let choose index =
+          let symbol = Symbol $ "djinnSourceEvidence" ++ show index
+          in if Set.member symbol reserved || Map.member symbol annotations
+               then choose (index + 1) else (index, symbol)
+        (selected, marker) = choose next
+    put (selected + 1, Map.insert marker annotation annotations)
+    pure $ Apply (Var marker) body
   sourceHelpers = Map.fromList
     ([(Contextual.contextualInstantiationSymbol helper, Left helper) | helper <- helpers] ++
      [(Contextual.contextualIntroductionSymbol helper, Right helper) | helper <- introductions])
@@ -284,9 +367,9 @@ eraseRootGivenProof context proofEnvironment receipt evidence = do
     ]
   exact :: CheckedProofNode -> Maybe Formula
   exact node = checkedProofTypeExactFormula $ checkedProofNodeType node
-  invalid = Left . InvalidContextualLowering
-  unsupported = Left . UnsupportedContextualErasure
-  peel _ bindings [] node = Right (bindings, node)
+  invalid = lift . Left . InvalidContextualLowering
+  unsupported = lift . Left . UnsupportedContextualErasure
+  peel _ bindings [] node = pure (bindings, [], node)
   peel nested bindings (dictionary : remaining) node =
     case (checkedProofNodeTerm node, checkedProofNodeChildren node, exact node) of
       (Lam binder _, [child], Just (domain :-> _))
@@ -294,7 +377,10 @@ eraseRootGivenProof context proofEnvironment receipt evidence = do
         | Map.member binder bindings -> unsupported "contextual dictionary introduction shadows an active binder"
         | dictionary `elem` Map.elems bindings ->
             unsupported "contextual dictionary introduction overlaps an equal active Given"
-        | otherwise -> peel nested (Map.insert binder dictionary bindings) remaining child
+        | otherwise -> do
+            (extended, introduced, body) <-
+              peel nested (Map.insert binder dictionary bindings) remaining child
+            pure (extended, binder : introduced, body)
       _ | nested -> unsupported "nested contextual proof lacks its actual dictionary-lambda prefix"
         | otherwise -> invalid "contextual proof lacks its checked root dictionary introduction"
   spine node arguments = case (checkedProofNodeTerm node, checkedProofNodeChildren node) of
@@ -316,7 +402,13 @@ eraseRootGivenProof context proofEnvironment receipt evidence = do
               let (dictionaries, ordinary) = splitAt count supplied
               zipWithM_ (checkDictionary bindings) obligations dictionaries
               appliedProvider <- erase bindings availableHelpers provider
-              applys appliedProvider <$> mapM (erase bindings availableHelpers) ordinary
+              let selectedDictionaries = [binder | dictionary <- dictionaries,
+                    Var binder <- [checkedProofNodeTerm dictionary]]
+              selected <- annotate (SelectedSourceApplication
+                (Contextual.contextualInstantiationSource helper)
+                (Contextual.contextualInstantiationArguments helper) selectedDictionaries)
+                appliedProvider
+              applys selected <$> mapM (erase bindings availableHelpers) ordinary
             _ -> unsupported "unsaturated conditional helper cannot be erased"
     (headNode, arguments)
       | Var name <- checkedProofNodeTerm headNode
@@ -331,24 +423,25 @@ eraseRootGivenProof context proofEnvironment receipt evidence = do
             invalid "nested introduction changed its exact qualified result"
           case arguments of
             [argument] | exact argument == Just expectedArgument -> do
-              (localBindings, body) <- peel True bindings dictionaries argument
-              erase localBindings availableHelpers body
+              (localBindings, introduced, body) <- peel True bindings dictionaries argument
+              erased <- erase localBindings availableHelpers body
+              annotate (NestedSourceOpening (nestedGivenOpeningSource opening) introduced) erased
             _ -> invalid "nested introduction requires its exact checked dictionary-lambda argument"
     _ -> case (checkedProofNodeTerm node, checkedProofNodeChildren node) of
       (Var binder, [])
         | Map.member binder bindings -> unsupported "root dictionary escaped its conditional helper"
-        | otherwise -> Right $ Var binder
+        | otherwise -> pure $ Var binder
       (Lam binder _, [body]) -> Lam binder <$>
         erase (Map.delete binder bindings) (Map.delete binder availableHelpers) body
       (Apply _ _, [function, argument]) ->
         Apply <$> erase bindings availableHelpers function <*> erase bindings availableHelpers argument
       (Xsel index arity _, [body]) -> Xsel index arity <$> erase bindings availableHelpers body
-      (primitive, []) -> Right primitive
+      (primitive, []) -> pure primitive
       _ -> invalid "contextual erasure encountered inconsistent checked children"
   checkDictionary bindings obligation node = do
     let expected = PVar $ dictionarySymbol obligation
     unless (exact node == Just expected) $
       invalid "conditional helper dictionary has another checked constraint"
     case checkedProofNodeTerm node of
-      Var binder | Map.lookup binder bindings == Just expected -> Right ()
+      Var binder | Map.lookup binder bindings == Just expected -> pure ()
       _ -> unsupported "conditional helper dictionary is not its actual root Given"

@@ -3206,8 +3206,8 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
             Right batch -> key `deepseq` (Right batch : emitStreamCandidates result (key : seen)
                 (candidateKey + 1) remaining continue)
       where
-        key = etaNormalClauseExpression $
-            SourceEvidence.sourceCandidateClause $ validatedCandidateOutput candidate
+        source = validatedCandidateOutput candidate
+        key = etaNormalClauseExpression $ SourceEvidence.sourceCandidateComparisonClause source
 
     -- Advance active plans round-robin after one raw proof or a bounded
     -- quantum of choices. Every choice is still observed and charged before
@@ -3476,9 +3476,10 @@ projectValidatedTypedDjinnCandidate candidateKey validated =
                 validatedCandidateDetails validated
             })
         (first (DjinnTermGraphSourceTypingFailure . show) $
-            SourceGraph.checkSourceClauseGraph candidateKey
+            SourceGraph.checkAnnotatedSourceClauseGraph candidateKey
                 (SourceEvidence.sourceCandidateContext sourceCandidate)
-                (SourceEvidence.sourceCandidateClause sourceCandidate))
+                (SourceEvidence.sourceCandidateAnnotations sourceCandidate)
+                (SourceEvidence.sourceCandidateAnnotatedClause sourceCandidate))
 
 data FormulaPlanResult = FormulaPlanResult
     { formulaPlanFormula :: String
@@ -3983,7 +3984,7 @@ mergeFormulaPlanResults options results = Right validatedResult
     -- candidate without rewriting the first, potentially eta-sensitive output
     -- we retain.
     distinctCandidates = deduplicateEtaEquivalentClausesOn
-        (SourceEvidence.sourceCandidateClause . validatedCandidateOutput) mergedCandidates
+        (SourceEvidence.sourceCandidateComparisonClause . validatedCandidateOutput) mergedCandidates
     candidates = SharedQuality.rankCandidatesByQuality (optionRanking options)
         (\name -> Map.findWithDefault (SharedQuality.defaultCandidateProviderCost name) name $ optionProviderCosts options)
         (SharedGenerated.functionClauseExpression . SourceEvidence.sourceCandidateClause . validatedCandidateOutput)

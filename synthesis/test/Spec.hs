@@ -4038,6 +4038,25 @@ typeTests = testGroup "source types"
           ( expected
           , Set.fromList ["a", "a'", "a''", "free", "owner"]
           )
+  , testCase "retain ordered prenex openings including vacuous and shadowed binders" $ do
+      let variable = SharedType.TypeVariable
+          acceptAll _ = Nothing :: Maybe String
+          source = SharedType.ForallType ["unused", "a"] [] $
+            SharedType.ForallType ["a"] [] $
+              SharedType.FunctionType (variable "a") $
+                SharedType.ForallType ["residual"] [] $ variable "residual"
+          protected = Set.singleton "a'"
+      (opened, openings, reserved) <- either (fail . show) pure $
+        SharedType.implicitizeLeadingForallsWithOpenings acceptAll
+          freshStringVariable protected source
+      openings @?= ["unused'", "a''", "a'''"]
+      opened @?= SharedType.FunctionType (variable "a'''")
+        (SharedType.ForallType ["residual"] [] $ variable "residual")
+      assertBool "vacuous binders disappeared from retained openings" $
+        all (`Set.member` reserved) openings &&
+          "unused'" `Set.notMember` SharedType.freeVariables opened
+      SharedType.implicitizeLeadingForalls acceptAll freshStringVariable
+        protected source @?= Right (opened, reserved)
   , testCase "implicitization validates binders and stops at arrows" $ do
       let variable = SharedType.TypeVariable
           acceptAll _ = Nothing :: Maybe String

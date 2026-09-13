@@ -1,0 +1,33 @@
+{
+  "schema": "scoped-source-selections-v1",
+  "status": "canonical_haskell_acceptance",
+  "base_commit": "5dfec69de22898ea5a960083ad3cad369ad74839",
+  "implementation_identity": "validation-v3/results.json source_sha256 and source.patch; changed source files retained",
+  "gates": {
+    "strict_build": "scoped-selections-build-v7.log plus final private test rebuild scoped-selections-build-v9.log",
+    "budgets": 10,
+    "public_dictionary_selections": 2,
+    "private_graph": 120,
+    "shared_synthesis": 514,
+    "djinn_unit": 133,
+    "integration": 154,
+    "public_source_graph": 59,
+    "church_signatures_per_engine": 350,
+    "scope_probes_per_engine": 50,
+    "cli": 138
+  },
+  "prior_failed_runs": [
+    "validation-v1 integration: 2 of 154 failed duplicate controls",
+    "validation-v2 private graph: new rewrite fixture assumed implicit beta cleanup",
+    "diagnostics/scoped-selections-private-v8.log: eta cleanup does not promise beta reduction"
+  ],
+  "native_lean_integration": "pending",
+  "church_behavior_cells_added": 0,
+  "archive": {
+    "path": "scoped-source-selections-2026-09-13.zip",
+    "bytes": 920739,
+    "sha256": "aa9a3d74629b2fbd243ed8a109e4e09642b3068a7daec3b10f9a4877469d20a3",
+    "artifacts": 207,
+    "all_members_rehashed": true
+  }
+}

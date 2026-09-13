@@ -11,7 +11,7 @@ module ContextEvidenceSpec (tests, targetTests) where
 
 import Control.Exception (bracket, try)
 import Control.Monad (forM, forM_)
-import Data.List (intercalate, isInfixOf, nub)
+import Data.List (intercalate, isInfixOf, nub, sort)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Language.Haskell.Djex
@@ -94,7 +94,73 @@ contextualMatrix label rows = testGroup label
        checkSiblingLeakage
    , testCase "GHC independently rejects sibling given leakage" $
        bounded "sibling GHC control" compileSiblingLeakage
-   ] ++ omittedMethodTests ++ [nestedGivenTests, constraintOnlyTests])
+   ] ++ omittedMethodTests ++ [nestedGivenTests, constraintOnlyTests, selectedDictionaryTests])
+
+-- Same erased term, different checked dictionaries. Exercise the public
+-- batch and streaming paths so clause-only duplicate suppression cannot hide
+-- one choice before rendering. Runtime instances exist only in GHC replay.
+selectedDictionaryTests :: TestTree
+selectedDictionaryTests = testGroup "Proof-selected dictionaries survive public synthesis"
+  [ testCase (if local then "rank-N local callback" else "global provider") $
+      bounded "selected dictionaries and independent GHC replay" $ do
+        c <- expectRight $ parseName "C"
+        token <- expectRight $ parseName "Token"
+        provider <- expectRight $ mkIdentifier "provider"
+        target <- expectRight $ mkIdentifier "selectedMethod"
+        let variable = TypeVariable
+            ctx name = Constraint c [variable name]
+            resultType = TypeConstructor token
+            providerType = ForallType ["p"] [ctx "p"] resultType
+            result = if local then FunctionType providerType resultType else resultType
+            signatureType = ForallType ["a", "b"] [ctx "a", ctx "b"] result
+            sourceSignature = "forall a b. (C a, C b) => " ++
+              (if local then "(forall p. C p => Token) -> " else "") ++ "Token"
+            inventoryDeclarations = [ClassDeclaration () c [TypeParameter "p" Nothing] [] [],
+              AbstractTypeDeclaration () token ProperTypeKind] ++
+              [ValueDeclaration $ ValueSignature () provider providerType | not local]
+        environment <- expectRight $ mkEnvironment inventoryDeclarations
+        session <- expectRight $ mkDjinnSession environment
+        request <- expectRight $ parseDjinnRequest session defaultQueryOptions
+          { optionCutoff = 32, optionBudget = Just 20000, optionAlternatives = True
+          , optionSorted = False, optionStrategy = Interleave }
+          target "selected-dictionaries" sourceSignature
+        batch <- expectRight $ runDjinnTypedQuery session request
+        stream <- expectRight (runDjinnTypedQueryStream session request) >>= mapM expectRight
+        forM_ [("batch", batchCandidates $ resultSearch batch),
+               ("stream", concatMap (batchCandidates . resultSearch) stream)] $ \(mode, candidates) -> do
+          assertBool "selected evidence refilled the raw candidate bound" $ length candidates <= 32
+          replayObservations <- forM candidates $ \candidate -> do
+            graph <- expectRight $ typedCandidateTermGraph candidate
+            rendered <- expectRight $ H.renderHaskellTermGraphAtSignatureWithMetavariables
+              (defaultRenderOptions id) signatureType graph
+            let call a b = "observe (candidate @" ++ a ++ " @" ++ b ++
+                  (if local then " (\\ @p -> provider @p)" else "") ++ ")"
+                fixture = unlines
+                  [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications, TypeAbstractions, AllowAmbiguousTypes, FlexibleContexts, KindSignatures #-}"
+                  , "module Main where"
+                  , "import Data.Kind (Type)"
+                  , "data Token = Token Int"
+                  , "class C (a :: Type) where payload :: Int"
+                  , "instance C Int where payload = 37"
+                  , "instance C Bool where payload = 91"
+                  , "provider :: forall p. C p => Token"
+                  , "provider = Token (payload @p)"
+                  , "observe (Token n) = n"
+                  , "candidate :: " ++ sourceSignature
+                  , "candidate = " ++ rendered
+                  , "main :: IO ()"
+                  , "main = print (" ++ call "Int" "Bool" ++ ", " ++ call "Bool" "Int" ++ ")"
+                  ]
+            replay <- executeModule fixture
+            case replay of
+              (ExitSuccess, output, errors) -> case readMaybe output :: Maybe (Int, Int) of
+                Just payloadPair -> pure payloadPair
+                Nothing -> fail $ "invalid selected-dictionary observation: " ++ output ++ errors
+              other -> fail $ "selected-dictionary GHC replay failed: " ++ show other ++ "\n" ++ fixture
+          assertEqual (mode ++ " lost a checked dictionary selection after source erasure")
+            [(37, 91), (91, 37)] $ sort $ nub replayObservations
+  | local <- [False, True]
+  ]
 
 -- These providers have no value argument or result occurrence from which to
 -- infer the class parameter. Search sees only the generic source signature;

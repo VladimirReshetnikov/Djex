@@ -16,7 +16,8 @@ import qualified Djinn.Internal.ContextualInstantiation as I
 import Djinn.Internal.Environment
   ( PreparedEnvironment, prepareGroundSynthesisEnvironment
   , PreparedRootGivenOpening, prepareRootGivenOpening
-  , rootGivenOpeningContexts, rootGivenOpeningBody
+  , rootGivenOpeningContexts, rootGivenOpeningBody, rootGivenOpeningVariables
+  , prepareNestedGivenOpenings, nestedGivenOpeningVariables
   , checkPreparedSynthesisTypesKinds, preparedEnvironmentSynthesisFormulaTranslator )
 import Djinn.Internal.HTypes (HKind(KStar, KArrow))
 import Djinn.Internal.LJTFormula
@@ -274,7 +275,21 @@ kindAndRejectionTests = testGroup "explicit kind and admission boundaries"
 
 productionKindGateTests :: TestTree
 productionKindGateTests = testGroup "production source and root kind gate"
-  [ testCase "the complete correlated vector retains original provider kinds" $ do
+  [ testCase "root and nested receipts preserve vacuous and shadowed query openings" $ do
+      prepared <- authority
+      let source = forallWith ["unused", "a"] [constraint "C" [var "a"]] $
+            forallWith ["a"] [constraint "D" [var "a"]] $
+              arrow token $ forallWith [] [constraint "C" [atomA]] token
+      root <- openRoot prepared source
+      assertEqual "source binder positions were reconstructed from free variables"
+        ["unused'", "a'", "a''"] $ rootGivenOpeningVariables root
+      assertEqual "shadowed source contexts lost their distinct openings"
+        [constraint "C" [var "a'"], constraint "D" [var "a''"]] $
+        rootGivenOpeningContexts root
+      nested <- right $ prepareNestedGivenOpenings prepared source $ rootGivenOpeningBody root
+      assertEqual "qualified residual result lost its root scope association"
+        [rootGivenOpeningVariables root] $ map nestedGivenOpeningVariables nested
+  , testCase "the complete correlated vector retains original provider kinds" $ do
       prepared <- authority
       let source = forallWith ["f", "a"]
             [constraint "C" [T.TypeApplication (var "f") $ var "a"]] token

@@ -7,6 +7,7 @@
 module Djinn.Internal.SourceGraph
   ( SourceGraphError(..)
   , checkSourceClauseGraph
+  , checkAnnotatedSourceClauseGraph
   ) where
 
 import Control.Monad (foldM, unless, when, zipWithM, zipWithM_)
@@ -18,6 +19,10 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
 
+import Djinn.Internal.SourceAnnotation
+  ( SourceAnnotation(..), SourceAnnotations, sourceAnnotationAt
+  , eraseSourceAnnotations, annotatedApplicationSpine )
+import Djinn.Internal.LJTFormula (Symbol)
 import Djinn.Internal.SourceTypingContext
 import Djinn.Internal.Environment (preparedEnvironmentInventory)
 import Djinn.Internal.SourceGraphKinds
@@ -58,6 +63,9 @@ data CheckState = CheckState
   , checkConstructors :: Map.Map Name Type
   , checkEmptyTypes :: Set.Set Name
   , checkGivens :: [(Constraint Type, Q.ContextEvidence)]
+  , checkAnnotations :: SourceAnnotations
+  , checkSourceVariables :: Map.Map String Type
+  , checkSourceGivens :: Map.Map Symbol (Constraint Type, Q.ContextEvidence)
   }
 
 type Check = StateT CheckState (Either SourceGraphError)
@@ -67,7 +75,16 @@ type Check = StateT CheckState (Either SourceGraphError)
 checkSourceClauseGraph
   :: Natural -> SourceTypingContext -> G.FunctionClause String
   -> Either SourceGraphError (Q.TermGraph Type String)
-checkSourceClauseGraph key context clause = do
+checkSourceClauseGraph key context = checkAnnotatedSourceClauseGraph key context Map.empty
+
+checkAnnotatedSourceClauseGraph
+  :: Natural -> SourceTypingContext -> SourceAnnotations -> G.FunctionClause String
+  -> Either SourceGraphError (Q.TermGraph Type String)
+checkAnnotatedSourceClauseGraph key context annotations annotatedClause = do
+  clause <- if Map.null annotations then pure annotatedClause else do
+    expression <- first SourceGraphTypingFailure $ eraseSourceAnnotations annotations $
+      G.functionClauseExpression annotatedClause
+    pure $ G.functionClauseFromExpression (G.clauseName annotatedClause) expression
   rawGlobals <- first SourceGraphTypingFailure $ sourceTypingTermSchemes context
   let globals = Map.map (fmap T.FlexibleVariable) rawGlobals
       declarations = E.environmentDeclarations $ I.inventoryEnvironment $
@@ -86,10 +103,10 @@ checkSourceClauseGraph key context clause = do
         | ty <- goal : Map.elems globals
         ]
       initial = CheckState key 0 100000 0 reserved Map.empty Map.empty
-        Map.empty Map.empty globals constructors emptyTypes []
+        Map.empty Map.empty globals constructors emptyTypes [] annotations Map.empty Map.empty
   first (SourceGraphTypingFailure . show) $ G.validateFunctionClauseScope clause
   (root, state) <- runStateT
-    (checkExpression Map.empty (G.functionClauseExpression clause) goal) initial
+    (checkExpression Map.empty (G.functionClauseExpression annotatedClause) goal) initial
   (provisional, observedState) <- runStateT
     (mapM (resolveNodeWith zonk) $ Map.toAscList $ checkNodes state) state
   unresolvedKinds <- first (SourceGraphTypingFailure . ("before source type completion: " ++)) $
@@ -462,8 +479,153 @@ functionParts source = do
       unify ty $ T.FunctionType domain result
       pure (domain, result)
 
+-- Source identities are substituted only through the currently checked
+-- opening. A vacuous source parameter still has an entry, while a parameter
+-- from a sibling or escaped opening cannot acquire a closed default here.
+sourceAnnotationType :: T.Type String -> Check Type
+sourceAnnotationType source = do
+  variables <- gets checkSourceVariables
+  unless (T.freeVariables source `Set.isSubsetOf` Map.keysSet variables) $
+    failCheck "selected source type refers outside its lexical opening"
+  lift $ substitute
+    (Map.fromList [(T.FlexibleVariable name, ty) | (name, ty) <- Map.toList variables])
+    (fmap T.FlexibleVariable source)
+
+withSourceVariables :: [(String, Type)] -> Check a -> Check a
+withSourceVariables introduced action = do
+  previous <- gets checkSourceVariables
+  unless (all (\(name, _) -> Map.notMember name previous) introduced) $
+    failCheck "source type opening shadows an active source identity"
+  modify $ \state -> state {checkSourceVariables = Map.union (Map.fromList introduced) previous}
+  result <- action
+  modify $ \state -> state {checkSourceVariables = previous}
+  pure result
+
+withSourceGivens :: [(Symbol, (Constraint Type, Q.ContextEvidence))] -> Check a -> Check a
+withSourceGivens introduced action = do
+  previous <- gets checkSourceGivens
+  let names = map fst introduced
+  unless (length names == Set.size (Set.fromList names) &&
+      all (`Map.notMember` previous) names) $
+    failCheck "source dictionary opening shadows an active occurrence"
+  modify $ \state -> state {checkSourceGivens = Map.union (Map.fromList introduced) previous}
+  result <- action
+  modify $ \state -> state {checkSourceGivens = previous}
+  pure result
+
+-- Pair source-owned openings with independently allocated graph identities in
+-- telescope order. Context layers between forall layers remain in their own
+-- graph scopes; flattening the receipt never flattens those actual binders.
+checkSourceOpening
+  :: Locals -> G.Expression String -> Type -> [String] -> [Symbol] -> Check Q.TermNodeId
+checkSourceOpening locals expression expected variables dictionaries = do
+  tick
+  ty <- zonk expected
+  case ty of
+    T.ForallType [] constraints@(_ : _) _ -> do
+      let (selected, remaining) = splitAt (length constraints) dictionaries
+      unless (length selected == length constraints) $
+        failCheck "source opening has too few dictionary occurrences"
+      witness <- maybe (failCheck "source opening lost its qualified layer") pure $
+        Q.contextIntroductionWitness Q.sharedContextTypeStructure ty
+      occurrence <- freshOccurrence
+      let introduced = [(constraint, Q.givenContextEvidence occurrence slot)
+            | (slot, constraint) <- zip [0 ..] $ Q.contextIntroductionConstraints witness]
+      body <- withGivens introduced $ withSourceGivens (zip selected introduced) $
+        checkSourceOpening locals expression (Q.contextIntroductionBody witness) variables remaining
+      emit ty $ Q.TypedContextIntroduction occurrence body witness
+    T.ForallType [] [] body -> checkSourceOpening locals expression body variables dictionaries
+    T.ForallType{} -> case variables of
+      [] -> failCheck "source opening has too few quantified identities"
+      variable : remaining -> underLevel $ do
+        rigid <- freshVariable True
+        opened <- consumeForall ty rigid
+        body <- withSourceVariables [(variable, rigid)] $
+          checkSourceOpening locals expression opened remaining dictionaries
+        occurrence <- freshOccurrence
+        emit ty $ Q.TypedForallIntroduction occurrence body $
+          Q.ForallIntroductionWitness ty rigid opened
+    _ -> do
+      unless (null variables && null dictionaries) $
+        failCheck "source opening has unused type or dictionary occurrences"
+      checkExpression locals expression ty
+
+inferSelectedSourceApplication
+  :: Locals -> G.Expression String -> T.Type String -> [T.Type String] -> [Symbol]
+  -> Check Q.TermNodeId
+inferSelectedSourceApplication locals expression original arguments dictionaries = do
+  let (binders, constraints, _) = T.splitLeadingForalls original
+  unless (length arguments == length binders && length dictionaries == length constraints) $
+    failCheck "source application requires its complete original selection vector"
+  source <- sourceAnnotationType original
+  selected <- mapM sourceAnnotationType arguments
+  provider <- case expression of
+    G.Global{} -> inferExpression locals expression
+    G.Local{} -> inferExpression locals expression
+    _ -> checkExpression locals expression source
+  actual <- nodeType provider
+  unify actual source
+  consume provider source selected dictionaries
+ where
+  -- A selected argument may itself be a forall or qualified type. Once the
+  -- original telescope has been consumed, that resulting type belongs to the
+  -- value; it is not an additional provider parameter or dictionary premise.
+  consume provider _ [] [] = pure provider
+  consume provider source argumentsLeft dictionariesLeft = do
+    tick
+    ty <- zonk source
+    case ty of
+      T.ForallType [] constraints@(_ : _) body -> do
+        let (selected, remaining) = splitAt (length constraints) dictionariesLeft
+        unless (length selected == length constraints) $
+          failCheck "source application has too few selected dictionaries"
+        evidence <- zipWithM selectedGiven constraints selected
+        witness <- maybe (failCheck "source selection lost its qualified layer") pure $
+          Q.contextApplicationWitness Q.sharedContextTypeStructure ty evidence
+        occurrence <- freshOccurrence
+        applied <- emit body $ Q.TypedContextApplication occurrence provider witness
+        consume applied body argumentsLeft remaining
+      T.ForallType [] [] body -> consume provider body argumentsLeft dictionariesLeft
+      T.ForallType{} -> case argumentsLeft of
+        [] -> failCheck "source application lost a selected quantified argument"
+        selected : remaining -> do
+          result <- consumeForall ty selected
+          occurrence <- freshOccurrence
+          applied <- emit result $ Q.TypedImplicitTypeApplication occurrence provider $
+            Q.ImplicitTypeApplicationWitness ty selected result
+          consume applied result remaining dictionariesLeft
+      _ -> do
+        unless (null argumentsLeft && null dictionariesLeft) $
+          failCheck "source application contains surplus selected evidence"
+        pure provider
+
+  selectedGiven required symbol = do
+    entry <- gets (Map.lookup symbol . checkSourceGivens) >>= maybe
+      (failCheck "selected dictionary occurrence is outside its lexical opening") pure
+    active <- gets checkGivens
+    wanted <- traverse zonk required
+    actual <- traverse zonk $ fst entry
+    unless (sameConstraint wanted actual && any ((== snd entry) . snd) active) $
+      failCheck "selected dictionary occurrence does not discharge its exact source constraint"
+    pure $ snd entry
+
+  sameConstraint (Constraint name xs) (Constraint other ys) =
+    name == other && length xs == length ys && and (zipWith A.alphaEquivalentTypes xs ys)
+
 checkExpression :: Locals -> G.Expression String -> Type -> Check Q.TermNodeId
 checkExpression locals expression expected = do
+  annotations <- gets checkAnnotations
+  case sourceAnnotationAt annotations expression of
+    Just (RootSourceOpening variables dictionaries, body) ->
+      checkSourceOpening locals body expected variables dictionaries
+    Just (NestedSourceOpening source dictionaries, body) -> do
+      retained <- sourceAnnotationType source
+      unify retained expected
+      checkSourceOpening locals body expected [] dictionaries
+    _ -> checkUnannotatedExpression locals expression expected
+
+checkUnannotatedExpression :: Locals -> G.Expression String -> Type -> Check Q.TermNodeId
+checkUnannotatedExpression locals expression expected = do
   tick
   ty <- zonk expected
   exactForward <- case expression of
@@ -578,6 +740,19 @@ checkAlternative locals scrutineeType expected (pattern', branch) = do
 
 inferExpression :: Locals -> G.Expression String -> Check Q.TermNodeId
 inferExpression locals expression = do
+  annotations <- gets checkAnnotations
+  case sourceAnnotationAt annotations expression of
+    Just (SelectedSourceApplication source arguments dictionaries, body) ->
+      inferSelectedSourceApplication locals body source arguments dictionaries
+    Just (NestedSourceOpening source dictionaries, body) -> do
+      retained <- sourceAnnotationType source
+      checkSourceOpening locals body retained [] dictionaries
+    Just (RootSourceOpening _ _, _) ->
+      failCheck "root source opening requires its independently expected query type"
+    Nothing -> inferUnannotatedExpression locals expression
+
+inferUnannotatedExpression :: Locals -> G.Expression String -> Check Q.TermNodeId
+inferUnannotatedExpression locals expression = do
   tick
   case expression of
     G.Local local -> do
@@ -607,7 +782,8 @@ data ApplicationStep value
 checkApplication
   :: Locals -> G.Expression String -> Maybe Type -> Check Q.TermNodeId
 checkApplication locals expression expected = do
-  let (headExpression, arguments) = G.expressionFullApplicationSpine expression
+  annotations <- gets checkAnnotations
+  let (headExpression, arguments) = annotatedApplicationSpine annotations expression
   headNode <- inferExpression locals headExpression
   source <- nodeType headNode
   (steps, result) <- planArguments source arguments

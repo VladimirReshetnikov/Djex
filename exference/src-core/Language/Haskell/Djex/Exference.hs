@@ -755,7 +755,7 @@ runExferenceTypedQueryWithProviderEvidence
     $ fromSynthesisType elaboratedGoal
   providerCandidates <- prepareProviderInstantiationCandidates
     session rawCandidates
-  providerAssignments <- prepareProviderInstantiationAssignments
+  (providerAssignments, providerKinds) <- prepareProviderInstantiationAssignments
     session assignmentEvidence
   let sourceHints = retargetExferenceSourceTypeVariableHints
         elaboratedGoal checkedSourceHints
@@ -771,7 +771,7 @@ runExferenceTypedQueryWithProviderEvidence
             "DJEX_EXF_QUERY" "Exference rejected the query" failure
   first searchFailure $ case checkedKinds of
     Just checked -> CoreInternal.findTypedQueryResultsInEnvironmentWithSourceKinds
-      checked providerCandidates providerAssignments target sourceHints
+      checked providerKinds providerCandidates providerAssignments target sourceHints
       (Session.sessionSearchEnvironment session) input checkedOptions
     Nothing | Map.null providerAssignments ->
       CoreInternal.findTypedQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
@@ -833,7 +833,7 @@ prepareProviderInstantiationCandidates session rawCandidates
 prepareProviderInstantiationAssignments
   :: ExferenceSession
   -> ProviderInstantiationAssignmentEvidence
-  -> Either Diagnostic (Map.Map Name [[HsType]])
+  -> Either Diagnostic (Map.Map Name [[HsType]], Map.Map Name [SharedKindInference.GroundKind])
 prepareProviderInstantiationAssignments session evidence
   | observed > maximumProviderInstantiationAssignments =
       Left $ shownErrorDiagnostic
@@ -841,10 +841,10 @@ prepareProviderInstantiationAssignments session evidence
         "too many Exference provider instantiation assignments"
         (maximumProviderInstantiationAssignments, observed)
   | otherwise = do
-      (_, _, retained) <- foldM prepareAssignment
+      (retainedKinds, _, retained) <- foldM prepareAssignment
         (Map.empty, Map.empty, Map.empty) $
         zip [0 :: Int ..] rawAssignments
-      pure retained
+      pure (retained, retainedKinds)
  where
   rawAssignments = case evidence of
     InferredProviderInstantiationAssignments assignments ->

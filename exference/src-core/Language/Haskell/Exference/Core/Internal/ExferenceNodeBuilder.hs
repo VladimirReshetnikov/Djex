@@ -15,6 +15,7 @@ module Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
   , builderTransportKinds
   , builderCheckKindEquality
   , builderFreshenKindValueTypes
+  , builderAcquireKindFields
   )
 where
 
@@ -167,6 +168,27 @@ builderFreshenKindValueTypes types constraints = do
         Right (freshTypes, freshConstraints, updated) -> do
           builderUpdateKinds $ const $ Right updated
           pure (freshTypes, freshConstraints)
+
+-- Pattern fields have already been specialized to the scrutinee. Preserve
+-- those free query identities, but acquire fresh lexical owners for nested
+-- field foralls before they become local providers. Including the scrutinee
+-- keeps the datatype's parameter-kind constraints in the same checked batch.
+builderAcquireKindFields
+  :: HsType -> [HsType] -> StateT SearchNode SearchBranches [HsType]
+builderAcquireKindFields scrutinee fields = do
+  current <- gets nodeKindScope
+  case current of
+    Nothing -> pure fields
+    Just scope -> do
+      reserved <- gets $ reservedIdentifierSet . nodeFlexibleIds
+      let source = SharedType.TupleType Boxed (scrutinee : fields)
+      case KindScope.acquireKindScopeType
+          (Set.fromList $ map SharedType.FlexibleVariable $ IntSet.toList reserved)
+          scope source of
+        Right (SharedType.TupleType Boxed (_ : owned), updated) -> do
+          builderUpdateKinds $ const $ Right updated
+          pure owned
+        _ -> lift $ maybeBranch Nothing
 
 builderUpdateKinds
   :: (KindScope.KindScope -> Either String KindScope.KindScope)

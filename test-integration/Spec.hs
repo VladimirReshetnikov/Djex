@@ -2494,6 +2494,109 @@ tests = testGroup "Djex facade"
         ("the vacuous kinded assignment was absent: " ++ show visibleVectors)
         $ [visibleWrapper] `elem` visibleVectors
 
+  , testCase "compose source kinds with a vacuous Exference provider assignment" $ do
+      tokenName <- expectRight $ mkIdentifier "VacuousKindedToken"
+      wrapperName <- expectRight $ mkIdentifier "VacuousKindedWrapper"
+      providerName <- expectRight $ mkIdentifier "vacuousKindedProvider"
+      targetName <- expectRight $ mkIdentifier "useVacuousKindedProvider"
+      target <- expectRight $ mkDefinitionName targetName
+      let providerVariable = FlexibleVariable 0
+          tokenType = TypeConstructor tokenName
+          wrapperConstructor :: ExferenceType
+          wrapperConstructor = TypeConstructor wrapperName
+          constructorKind =
+            FunctionKind ProperTypeKind ProperTypeKind
+          providerType = ForallType [providerVariable] [] tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , AbstractTypeDeclaration () wrapperName constructorKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          legacyAssignment = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = providerName
+            , providerInstantiationAssignmentArguments = [wrapperConstructor]
+            }
+          kindedAssignment = KindedProviderInstantiationAssignment
+            { kindedProviderInstantiationAssignmentProvider = providerName
+            , kindedProviderInstantiationAssignmentArguments =
+                [(constructorKind, wrapperConstructor)]
+            }
+          visibleSpine expression = case expression of
+            Global name -> Just (name, [])
+            VisibleTypeApplication function argument -> do
+              (name, earlier) <- visibleSpine function
+              pure (name, earlier ++ [argument])
+            _ -> Nothing
+      visibleWrapper <- expectRight $
+        specifiedVisibleTypeArgument wrapperConstructor
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      let visibleUses expression = case expression of
+            Tuple fields -> concatMap visibleUses fields
+            _ -> maybe [] pure $ visibleSpine expression
+      forM_
+          [ ("forall (f :: * -> *). VacuousKindedToken", 1, "VacuousKindedToken")
+          , ("forall (f :: * -> *) (g :: *). (VacuousKindedToken, VacuousKindedToken)",
+              2, "(VacuousKindedToken, VacuousKindedToken)")
+          ] $ \(signature, uses, expected) -> do
+        request <- expectRight $ parseExferenceRequestWithCheckedTarget session
+          defaultExferenceOptions {exferenceMaximumSteps = 512}
+          target "kinded-provider-composition" signature
+        case runExferenceQueryWithInstantiationAssignments
+            session [legacyAssignment] request of
+          Left failure -> diagnosticCode failure @?=
+            Just "DJEX_EXF_ASSIGNMENT_KIND"
+          Right _ -> fail "the legacy assignment API accepted a vacuous higher-kinded choice"
+        results <- expectRight $ runExferenceTypedQueryWithKindedInstantiationAssignments
+          session [kindedAssignment] request
+        let candidates = concatMap (batchCandidates . resultSearch) results
+            selected =
+              [ typed
+              | typed <- candidates
+              , FunctionClause _ [] body <- [candidateOutput $ typedCandidateCompatibility typed]
+              , visibleUses body == replicate uses (providerName, [visibleWrapper])
+              ]
+        typed <- case selected of
+          candidate : _ -> pure candidate
+          [] -> fail $ "the supplied visible assignment was absent for " ++ signature
+        graph <- expectRight $ typedCandidateTermGraph typed
+        kinds <- expectRight $ typedCandidateBinderKinds typed
+        assertBool "candidate lost its supplied provider kind" $ any ((== constructorKind) . snd) kinds
+        let certificates =
+              [ typeApplicationCertificate witness
+              | (_, node) <- termGraphNodes graph
+              , TypedVisibleTypeApplication _ _ _ witness <- [termNodeForm node]
+              ]
+        length certificates @?= uses
+        assertBool "visible provider use lost its checked certificate" $ all isJust certificates
+        expression <- expectRight $ TypedHaskell.renderHaskellTermGraphWithKindsAndMetavariables
+          (defaultRenderOptions $ const "unused") Nothing kinds graph
+        let fixture = unlines
+              [ "{-# LANGUAGE RankNTypes, KindSignatures, TypeApplications, AllowAmbiguousTypes #-}"
+              , "data VacuousKindedToken = VacuousKindedToken deriving Eq"
+              , "data VacuousKindedWrapper a = VacuousKindedWrapper"
+              , "vacuousKindedProvider :: forall (f :: * -> *). VacuousKindedToken"
+              , "vacuousKindedProvider = VacuousKindedToken"
+              , "useVacuousKindedProvider :: " ++ signature
+              , "useVacuousKindedProvider = " ++ expression
+              , "main = print (useVacuousKindedProvider @VacuousKindedWrapper"
+                  ++ (if uses == 2 then " @Int" else "") ++ " == " ++ expected ++ ")"
+              ]
+        withTemporaryHaskellModule fixture $ \sourcePath -> do
+          replay <- timeout 30000000 $ readProcessWithExitCode "runghc" [sourcePath] ""
+          case replay of
+            Nothing -> fail "kinded provider replay exceeded 30 seconds"
+            Just (exitCode, output, errors) -> do
+              assertEqual (errors ++ "\n" ++ fixture) ExitSuccess exitCode
+              output @?= "True\n"
+
+  , testCase "source kinds survive deconstruction and repeated polymorphic field selection" $
+      testKindedFieldTransport False
+  , testCase "source kinds survive alternative polymorphic constructor fields" $
+      testKindedFieldTransport True
+
   , testCase "retain an ordered multi-vacuous Exference assignment" $ do
       tokenName <- expectRight $ mkIdentifier "MultiVacuousKindedToken"
       wrapperName <- expectRight $ mkIdentifier "MultiVacuousKindedWrapper"
@@ -5831,3 +5934,63 @@ withTemporaryHaskellModule source action = do
     removeFile sourcePath
 
   tryClose handle = try (hClose handle) :: IO (Either IOError ())
+
+
+-- The same source contract exercises a let-pattern and distinct case arms.
+testKindedFieldTransport :: Bool -> IO ()
+testKindedFieldTransport multiple = do
+  boxName <- expectRight $ mkIdentifier "KindedFieldBox"
+  boxConstructor <- expectRight $ mkIdentifier "KindedFieldBoxValue"
+  otherConstructor <- expectRight $ mkIdentifier "KindedFieldBoxOther"
+  target <- expectRight . mkDefinitionName =<< expectRight (mkIdentifier "unpackKindedField")
+  let higher = FunctionKind ProperTypeKind ProperTypeKind
+      f = FlexibleVariable 0
+      a = FlexibleVariable 1
+      fields = [ForallType [a] [] $ TypeApplication (TypeVariable f) (TypeVariable a)]
+      declarations =
+        [ DataTypeDeclaration () boxName [TypeParameter f $ Just higher]
+            [ DataConstructor () con fields
+            | con <- boxConstructor : [otherConstructor | multiple] ] ]
+  environment <- expectRight
+    (mkEnvironment declarations :: Either
+      (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+  session <- expectRight $ mkExferenceSession environment
+  forM_
+      [ ("forall f a b. KindedFieldBox f -> (f a, f b)", "f", "a", "b")
+      , ("forall (f :: * -> *) a b. KindedFieldBox f -> (f a, f b)", "f", "a", "b")
+      , ("forall (g :: * -> *) x y. KindedFieldBox g -> (g x, g y)", "g", "x", "y")
+      ] $ \(signature, constructorVariable, firstVariable, secondVariable) -> do
+    request <- expectRight $ parseExferenceRequestWithCheckedTarget session
+      defaultExferenceOptions
+        {exferenceMaximumSteps = 512, exferenceMultiConstructorPatterns = multiple}
+      target "kinded-field-transport" signature
+    results <- expectRight $ runExferenceTypedQuery session request
+    typed <- case concatMap (batchCandidates . resultSearch) results of
+      candidate : _ -> pure candidate
+      [] -> fail $ "no deconstructed polymorphic-field candidate for " ++ signature
+    graph <- expectRight $ typedCandidateTermGraph typed
+    kinds <- expectRight $ typedCandidateBinderKinds typed
+    let fType = TypeVariable constructorVariable
+        signatureType = ForallType [constructorVariable, firstVariable, secondVariable] [] $
+          FunctionType (TypeApplication (TypeConstructor boxName) fType) $
+            TupleType Boxed [TypeApplication fType $ TypeVariable firstVariable,
+                             TypeApplication fType $ TypeVariable secondVariable]
+    expression <- expectRight $ TypedHaskell.renderHaskellTermGraphWithKindsAndMetavariables
+      (defaultRenderOptions $ \local -> "x" ++ show local) (Just signatureType) kinds graph
+    let fixture = unlines
+          [ "{-# LANGUAGE RankNTypes, KindSignatures, ScopedTypeVariables, TypeApplications #-}"
+          , "data KindedFieldBox (f :: * -> *) = KindedFieldBoxValue (forall a. f a)"
+          ++ (if multiple then " | KindedFieldBoxOther (forall a. f a)" else "")
+          , "data K a = K Int deriving Eq"
+          , "unpackKindedField :: " ++ signature
+          , "unpackKindedField = " ++ expression
+          , "main = print (unpackKindedField @K @Int @Bool (KindedFieldBoxValue (K 37)) == (K 37, K 37)"
+          ++ (if multiple then " && unpackKindedField @K @Int @Bool (KindedFieldBoxOther (K 53)) == (K 53, K 53)" else "") ++ ")"
+          ]
+    withTemporaryHaskellModule fixture $ \sourcePath -> do
+      replay <- timeout 30000000 $ readProcessWithExitCode "runghc" [sourcePath] ""
+      case replay of
+        Nothing -> fail "kinded polymorphic-field replay exceeded 30 seconds"
+        Just (exitCode, output, errors) -> do
+          assertEqual (errors ++ "\n" ++ fixture) ExitSuccess exitCode
+          output @?= "True\n"

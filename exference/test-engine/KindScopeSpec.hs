@@ -160,6 +160,45 @@ tests = testGroup "lexical kind scope"
       kindScopeBinderKind extended firstBinder @?= Just higher
       kindScopeBinderKind extended secondBinder @?= Just proper
       left $ checkKindScopeCompatibility extended proper firstType secondType
+  , testCase "named provider kinds remain local across reuse and substitution" $ do
+      let provider = named "provider"
+          unrelated = named "unrelated"
+          source = T.ForallType [v 0] [] unit
+      (_, scope) <- higherSource
+      authority <- right $ retainKindScopeProviderKinds
+        (Map.singleton provider source) (Map.singleton provider [higher]) scope
+      (firstUse, firstScope) <- right $ acquireNamedKindScopeType provider reserved authority source
+      (secondUse, secondScope) <- right $ acquireNamedKindScopeType provider reserved firstScope source
+      firstBinder <- onlyBinder firstUse
+      secondBinder <- onlyBinder secondUse
+      assertBool "independent provider uses shared a binder" $ firstBinder /= secondBinder
+      kindScopeBinderKind secondScope firstBinder @?= Just higher
+      kindScopeBinderKind secondScope secondBinder @?= Just higher
+      (_, substituted) <- right $ substituteKindScope secondScope
+        (Map.singleton (v 200) list) []
+      (laterUse, laterScope) <- right $ acquireNamedKindScopeType provider reserved substituted source
+      laterBinder <- onlyBinder laterUse
+      kindScopeBinderKind laterScope laterBinder @?= Just higher
+      (otherUse, finalScope) <- right $ acquireNamedKindScopeType unrelated reserved laterScope source
+      otherBinder <- onlyBinder otherUse
+      kindScopeBinderKind finalScope otherBinder @?= Just proper
+  , testCase "provider kind authority rejects another scheme, wrong arity and contradictory uses" $ do
+      let provider = named "provider"
+          source = T.ForallType [v 0] [] unit
+      (_, scope) <- higherSource
+      authority <- right $ retainKindScopeProviderKinds
+        (Map.singleton provider source) (Map.singleton provider [higher]) scope
+      left $ acquireNamedKindScopeType provider reserved authority $
+        T.ForallType [v 0] [] $ T.FunctionType unit unit
+      left $ retainKindScopeProviderKinds Map.empty (Map.singleton provider [higher]) scope
+      forM_ [[], [higher, proper]] $ \kinds ->
+        left $ retainKindScopeProviderKinds (Map.singleton provider source)
+          (Map.singleton provider kinds) scope
+      left $ retainKindScopeProviderKinds (Map.singleton provider source)
+        (Map.singleton provider [proper]) authority
+      left $ retainKindScopeProviderKinds
+        (Map.singleton provider $ T.ForallType [v 0] [] $ T.TypeApplication (ty 0) unit)
+        (Map.singleton provider [proper]) scope
   , testCase "repeated declaration batches share parameters only within their own use" $ do
       (_, scope) <- higherSource
       let application = T.TypeApplication (ty 0) unit
@@ -308,7 +347,7 @@ tests = testGroup "lexical kind scope"
             query = Engine.ExferenceQuery source Set.empty options
         checkedOptions <- right $ Engine.checkExferenceOptions options
         results <- right $ Engine.findTypedQueryResultsInEnvironmentWithSourceKinds
-          checked Map.empty Map.empty target (emptyExferenceSourceTypeVariableHints source)
+          checked Map.empty Map.empty Map.empty target (emptyExferenceSourceTypeVariableHints source)
           environment query checkedOptions
         let candidates = concatMap (Search.batchCandidates . Query.resultSearch) results
         assertBool ("no kind-checked candidate for " ++ show source) $ not $ null candidates
@@ -326,7 +365,7 @@ tests = testGroup "lexical kind scope"
       options <- right $ Engine.checkExferenceOptions defaultExferenceOptions
       let different = T.FunctionType unit unit
       case Engine.findTypedQueryResultsInEnvironmentWithSourceKinds
-          checked Map.empty Map.empty target
+          checked Map.empty Map.empty Map.empty target
           (emptyExferenceSourceTypeVariableHints different) environment
           (Engine.ExferenceQuery different Set.empty defaultExferenceOptions) options of
         Left (Engine.InvalidSourceKinds _) -> pure ()

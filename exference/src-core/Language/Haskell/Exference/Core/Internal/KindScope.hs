@@ -10,6 +10,8 @@ module Language.Haskell.Exference.Core.Internal.KindScope
   , prepareKindScope
   , extendKindScope
   , acquireKindScopeType
+  , retainKindScopeProviderKinds
+  , acquireNamedKindScopeType
   , freshenKindScopeTypes
   , kindScopeVariables
   , kindScopeBinderKind
@@ -38,7 +40,7 @@ import Language.Haskell.Exference.Core.Internal.VariableSupply
 import Language.Haskell.Exference.Core.Types (HsType, SynthesisVariable)
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
-import Language.Haskell.Synthesis.Name (Boxity (Boxed))
+import Language.Haskell.Synthesis.Name (Boxity (Boxed), Name)
 import Language.Haskell.Synthesis.KindInference
   ( GroundKind, KindAssumptions, checkTypesKinds
   , inferVariableKindsForObligations )
@@ -49,19 +51,20 @@ data KindScope = KindScope
   KindAssumptions
   (Map.Map SynthesisVariable GroundKind)
   [(GroundKind, HsType)]
+  (Map.Map Name (HsType, [GroundKind]))
   deriving (Eq, Show, Generic)
 
 instance NFData KindScope
 
 kindScopeVariables :: KindScope -> Set.Set SynthesisVariable
-kindScopeVariables (KindScope _ kinds obligations) = Set.unions
+kindScopeVariables (KindScope _ kinds obligations _) = Set.unions
   [Map.keysSet kinds, foldMap (foldMap Set.singleton . snd) obligations]
 
 kindScopeBinderKind :: KindScope -> SynthesisVariable -> Maybe GroundKind
-kindScopeBinderKind (KindScope _ kinds _) variable = Map.lookup variable kinds
+kindScopeBinderKind (KindScope _ kinds _ _) variable = Map.lookup variable kinds
 
 kindScopeAnnotations :: KindScope -> [(HsType, GroundKind)]
-kindScopeAnnotations (KindScope _ kinds _) =
+kindScopeAnnotations (KindScope _ kinds _ _) =
   [(T.TypeVariable variable, kind) | (variable, kind) <- Map.toAscList kinds]
 
 -- Tags travel through the shared capture-avoiding operations. They are
@@ -94,7 +97,7 @@ prepareKindScope reserved checked = do
   kinds <- collect Map.empty unique
   let ty = fmap identity unique
       assumptions = S.sourceKindAssumptions checked
-      scope = KindScope assumptions kinds []
+      scope = KindScope assumptions kinds [] Map.empty
       free = Set.toAscList $ T.freeVariables ty
   -- Source-free variables are source identities too. Infer their ground
   -- kinds jointly with the exact lexical binder facts before sealing them.
@@ -102,7 +105,7 @@ prepareKindScope reserved checked = do
     (map FreeKindVariable free) $ scopeObligations scope [(ProperTypeKind, ty)]
   completed <- foldM retain kinds
     [(variable, kind) | (FreeKindVariable variable, kind) <- inferred]
-  pure (ty, KindScope assumptions completed [])
+  pure (ty, KindScope assumptions completed [] Map.empty)
  where
   attach path scope ty = case ty of
     T.TypeVariable variable -> pure $ T.TypeVariable $
@@ -137,14 +140,14 @@ extendKindScope
   :: Set.Set SynthesisVariable -> KindScope
   -> S.SourceTypeKinds SynthesisVariable
   -> Either String (HsType, KindScope)
-extendKindScope reserved scope@(KindScope assumptions kinds pending) checked
+extendKindScope reserved scope@(KindScope assumptions kinds pending providers) checked
   | assumptions /= S.sourceKindAssumptions checked =
       Left "source kinds belong to a different inventory"
   | otherwise = do
-      (ty, KindScope _ incoming _) <- prepareKindScope
+      (ty, KindScope _ incoming _ _) <- prepareKindScope
         (Set.union reserved $ kindScopeVariables scope) checked
       combined <- foldM retain kinds $ Map.toList incoming
-      let next = KindScope assumptions combined pending
+      let next = KindScope assumptions combined pending providers
       checkKindScopeTypes next [(ProperTypeKind, ty)]
       pure (ty, next)
 
@@ -153,9 +156,60 @@ extendKindScope reserved scope@(KindScope assumptions kinds pending) checked
 acquireKindScopeType
   :: Set.Set SynthesisVariable -> KindScope -> HsType
   -> Either String (HsType, KindScope)
-acquireKindScopeType reserved scope@(KindScope assumptions _ _) source = do
+acquireKindScopeType reserved scope@(KindScope assumptions _ _ _) source = do
   checked <- first show $ S.prepareSourceTypeKinds assumptions source []
   extendKindScope reserved scope checked
+
+-- | Retain checked caller facts by exact declaration identity. In particular,
+-- a vacuous provider binder cannot recover its kind from the selected result.
+-- These declarations stay closed source schemes; branch substitutions must
+-- not rewrite their authority or couple independently acquired occurrences.
+retainKindScopeProviderKinds
+  :: Map.Map Name HsType -> Map.Map Name [GroundKind] -> KindScope
+  -> Either String KindScope
+retainKindScopeProviderKinds schemes supplied (KindScope assumptions kinds pending previous) = do
+  incoming <- Map.traverseWithKey prepare supplied
+  mapM_ consistent $ Map.toList incoming
+  pure $ KindScope assumptions kinds pending $ Map.union incoming previous
+ where
+  prepare name binderKinds = case Map.lookup name schemes of
+    Nothing -> Left "provider kinds name no retained declaration scheme"
+    Just source -> do
+      _ <- sourceWithLeadingKinds assumptions source binderKinds
+      pure (source, binderKinds)
+  consistent (name, facts) = case Map.lookup name previous of
+    Just original | original /= facts -> Left "provider kind authority changed"
+    _ -> Right ()
+
+acquireNamedKindScopeType
+  :: Name -> Set.Set SynthesisVariable -> KindScope -> HsType
+  -> Either String (HsType, KindScope)
+acquireNamedKindScopeType name reserved scope@(KindScope assumptions _ _ providers) source =
+  case Map.lookup name providers of
+    Nothing -> acquireKindScopeType reserved scope source
+    Just (original, binderKinds)
+      | T.canonicalizeType original /= T.canonicalizeType source ->
+          Left "provider kind authority belongs to a different declaration scheme"
+      | otherwise -> do
+          checked <- sourceWithLeadingKinds assumptions source binderKinds
+          extendKindScope reserved scope checked
+
+sourceWithLeadingKinds
+  :: KindAssumptions -> HsType -> [GroundKind]
+  -> Either String (S.SourceTypeKinds SynthesisVariable)
+sourceWithLeadingKinds assumptions source supplied = do
+  annotations <- leading [] source supplied
+  first show $ S.prepareSourceTypeKinds assumptions source annotations
+ where
+  leading path (T.ForallType binders _ body) remaining = do
+    let (here, rest) = splitAt (length binders) remaining
+    if length here /= length binders
+      then Left "provider kind vector is shorter than its source telescope"
+      else do
+        nested <- leading (path ++ [S.ForallBody]) body rest
+        pure $ zipWith (S.SourceKindAnnotation path) [0..] here ++ nested
+  leading _ _ [] = Right []
+  leading _ _ _ = Left "provider kind vector is longer than its source telescope"
 
 -- | Freshen a declaration's value types and class constraints together.
 -- A synthetic telescope binds its implicit flexible parameters; nested
@@ -208,7 +262,7 @@ retainLeadingForallKinds
   :: KindScope -> [LeadingForallOpening] -> Either String KindScope
 retainLeadingForallKinds = foldM opening
  where
-  opening scope@(KindScope assumptions kinds obligations) evidence = do
+  opening scope@(KindScope assumptions kinds obligations providers) evidence = do
     let bindings = leadingForallOpeningBindings evidence
         targets = map (T.FlexibleVariable . snd) bindings
     if length targets /= Set.size (Set.fromList targets)
@@ -221,7 +275,7 @@ retainLeadingForallKinds = foldM opening
       _ -> Left "forall allocation evidence does not identify its source slots"
     selected <- mapM (binding scope) bindings
     updated <- foldM retain kinds selected
-    pure $ KindScope assumptions updated obligations
+    pure $ KindScope assumptions updated obligations providers
   binding scope (old, new) =
     case kindScopeBinderKind scope $ T.FlexibleVariable old of
       Nothing -> Left $ "opened binder has no checked kind: " ++ show old
@@ -236,7 +290,7 @@ substituteKindScope
   -> Map.Map SynthesisVariable HsType
   -> [HsType]
   -> Either String ([HsType], KindScope)
-substituteKindScope scope@(KindScope assumptions kinds obligations) substitutions sources = do
+substituteKindScope scope@(KindScope assumptions kinds obligations providers) substitutions sources = do
   let selections =
         [(kind, image) | (variable, image) <- Map.toAscList substitutions,
           Just kind <- [Map.lookup variable kinds]]
@@ -250,8 +304,9 @@ substituteKindScope scope@(KindScope assumptions kinds obligations) substitution
   updated <- foldM retain transported
     [(variable, kind) | (kind, T.TypeVariable variable) <- selections]
   let (results, pending) = splitAt (length sources) $ map (fmap identity) substituted
-      next = KindScope assumptions updated $ Set.toAscList $ Set.fromList $
-        zip (map fst obligations) pending ++ selections
+      next = KindScope assumptions updated
+        (Set.toAscList $ Set.fromList $ zip (map fst obligations) pending ++ selections)
+        providers
   checkKindScopeTypes next []
   pure (results, next)
 
@@ -265,7 +320,7 @@ data KindVariable
   deriving (Eq, Ord, Show)
 
 checkKindScopeTypes :: KindScope -> [(GroundKind, HsType)] -> Either String ()
-checkKindScopeTypes scope@(KindScope assumptions _ pending) obligations = do
+checkKindScopeTypes scope@(KindScope assumptions _ pending _) obligations = do
   mapM_ (first show . T.validateType . snd) $ obligations ++ pending
   first show $ checkTypesKinds assumptions $ scopeObligations scope obligations
 
@@ -275,7 +330,7 @@ scopeObligations = scopeObligationsFrom 0
 scopeObligationsFrom
   :: Natural -> KindScope -> [(GroundKind, HsType)]
   -> [(GroundKind, T.Type KindVariable)]
-scopeObligationsFrom start (KindScope _ kinds pending) obligations =
+scopeObligationsFrom start (KindScope _ kinds pending _) obligations =
   [(kind, T.TypeVariable $ FreeKindVariable variable) | (variable, kind) <- Map.toList kinds]
   ++ concat
     [ let (opened, exact) = openKinds kinds index [] Map.empty ty
@@ -334,7 +389,7 @@ checkKindScopeCompatibility scope kind left right = do
 -- common kind need not be Type. Infer that common kind jointly with the
 -- retained obligations instead of imposing the expression-result kind.
 checkKindScopeEquality :: KindScope -> HsType -> HsType -> Either String ()
-checkKindScopeEquality scope@(KindScope assumptions kinds _) left right = do
+checkKindScopeEquality scope@(KindScope assumptions kinds _ _) left right = do
   mapM_ (first show . T.validateType) [left, right]
   first show $ checkTypesKinds assumptions $
     scopeObligationsFrom 2 scope [] ++ leftExact ++ rightExact

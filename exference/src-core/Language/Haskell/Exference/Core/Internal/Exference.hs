@@ -1338,6 +1338,7 @@ findTypedQueryResultsWithKindsAndAllocators
 -- expansion before calling this boundary.
 findTypedQueryResultsInEnvironmentWithSourceKinds
   :: SourceKind.SourceTypeKinds SynthesisVariable
+  -> M.Map QualifiedName [GroundKind]
   -> M.Map QualifiedName [HsType]
   -> M.Map QualifiedName [[HsType]]
   -> SharedGenerated.DefinitionName
@@ -1346,7 +1347,7 @@ findTypedQueryResultsInEnvironmentWithSourceKinds
   -> ExferenceQuery
   -> CheckedExferenceOptions
   -> Either ExferenceInputError [ExferenceTypedResult]
-findTypedQueryResultsInEnvironmentWithSourceKinds source candidates assignments
+findTypedQueryResultsInEnvironmentWithSourceKinds source providerKinds candidates assignments
     target hints environment@(ExferenceEnvironment dictionary _ schemes) query options = do
   unless (SharedType.canonicalizeType (SourceKind.sourceKindsType source)
       == SharedType.canonicalizeType (queryGoalType query)) $
@@ -1357,8 +1358,10 @@ findTypedQueryResultsInEnvironmentWithSourceKinds source candidates assignments
         ++ concatMap deconstructorBindingTypes (environmentDeconstructors dictionary)
         ++ concatMap (constraint_params . snd) (environmentConstraints dictionary)
         ++ concat (M.elems candidates) ++ concatMap concat (M.elems assignments)
-  (goal, scope) <- either (Left . InvalidSourceKinds) Right $
+  (goal, queryScope) <- either (Left . InvalidSourceKinds) Right $
     KindScope.prepareKindScope reserved source
+  scope <- either (Left . InvalidSourceKinds) Right $
+    KindScope.retainKindScopeProviderKinds schemes providerKinds queryScope
   findTypedQueryResultsWithKindsAndAllocators defaultSearchAllocators
     candidates assignments (Just scope) target
     (retargetExferenceSourceTypeVariableHints goal hints) environment
@@ -3289,7 +3292,8 @@ addScopePatternQueue allocators casePolicy multiPM goalType vid sid tupleMode gi
           -- datatype head. 'unifyRight' gives that head a temporary tagged
           -- namespace and returns substitutions keyed by its original IDs,
           -- so applying those substitutions directly to the validated fields
-          -- is both capture-safe and allocation-free.
+          -- is capture-safe. Kind-aware search then acquires independent
+          -- lexical owners for nested field foralls, retaining free query IDs.
           mapFunc
             :: DeconstructorBinding
             -> Maybe (StateT SearchNode SearchBranches [TGoal])
@@ -3328,8 +3332,9 @@ addScopePatternQueue allocators casePolicy multiPM goalType vid sid tupleMode gi
               vars <- forM matchRs $ \_ ->
                 builderAllocVar allocators
               builderRecordVarUse v
-              let newProvTypes = map (snd . applySubsts substs) matchRs
-                  newBinds = zipWith
+              newProvTypes <- builderAcquireKindFields vtResult $
+                map (snd . applySubsts substs) matchRs
+              let newBinds = zipWith
                     (\x y -> splitBinding $ VarBinding x y)
                     vars
                     newProvTypes
@@ -3368,8 +3373,9 @@ addScopePatternQueue allocators casePolicy multiPM goalType vid sid tupleMode gi
                 vars <- forM matchRs $ \_ ->
                   builderAllocVar allocators
                 newVid <- builderAllocHole allocators
-                let newProvTypes = map (snd . applySubsts substs) matchRs
-                    newBinds = zipWith
+                newProvTypes <- builderAcquireKindFields vtResult $
+                  map (snd . applySubsts substs) matchRs
+                let newBinds = zipWith
                       (\x y -> splitBinding $ VarBinding x y)
                       vars
                       newProvTypes

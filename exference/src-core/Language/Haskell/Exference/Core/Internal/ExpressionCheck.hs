@@ -1029,12 +1029,12 @@ checkValidatedExpression provenCandidateRigids
       checked <- case Map.lookup name functionSchemes of
         Just scheme | Set.null $ SharedType.freeVariables scheme ->
           do
-            owned <- acquireDeclarationKindScheme scheme
+            owned <- acquireDeclarationKindScheme name scheme
             instantiateImplicitLocalProvider $
               availableCheckedTerm owned $ CheckedGlobal name Nothing
         _ | Just scheme <- implicitConstructorScheme name ->
           do
-            owned <- acquireDeclarationKindScheme scheme
+            owned <- acquireDeclarationKindScheme name scheme
             instantiateImplicitLocalProvider $
               availableCheckedTerm owned $ CheckedGlobal name Nothing
         _ -> do
@@ -1395,7 +1395,7 @@ checkValidatedExpression provenCandidateRigids
       _ : _ -> case Map.lookup name functionSchemes of
         Nothing -> instantiateBinding name
         Just scheme -> do
-          owned <- acquireDeclarationKindScheme scheme
+          owned <- acquireDeclarationKindScheme name scheme
           recordAliveType owned
           pure owned
 
@@ -2794,15 +2794,15 @@ freshenUnkindedTypes types constraints = do
     , map (snd . constraintApplySubsts substitutions) constraints
     )
 
-acquireDeclarationKindScheme :: HsType -> Check HsType
-acquireDeclarationKindScheme source = do
+acquireDeclarationKindScheme :: QualifiedName -> HsType -> Check HsType
+acquireDeclarationKindScheme name source = do
   currentScope <- gets checkKindScope
   case currentScope of
     Nothing -> pure source
     Just scope -> do
       reserved <- gets $ reservedIdentifierSet . checkFlexibleIds
       (owned, updated) <- either (throwCheck . InvalidCheckKind) pure $
-        KindScope.acquireKindScopeType
+        KindScope.acquireNamedKindScopeType name
           (Set.fromList $ map SharedType.FlexibleVariable $ IntSet.toList reserved) scope source
       retainCheckerKindScope updated
       pure owned

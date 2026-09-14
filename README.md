@@ -90,23 +90,22 @@ preserves exact `Type` binder domains, named universes, shadowing and selected
 callback universes through contextual synthesis. All **63 public universe cases,
 746 native tests, and 42 constructor/strict-binder regression cases pass**, with
 exact Lean replay and False controls. Leant integrates the tested source and pins
-Djex `66b3212b`. Higher-universe classes/providers and selected polymorphic types
-remain separate capabilities.
+Djex `66b3212b`. Higher-universe classes/providers remain separate capabilities;
+selected polymorphic types are covered by the later increment below.
+The [selected polymorphic type release](docs/reports/2026-09-14-selected-polymorphic-types-acceptance.md)
+adds exact nominal universe signatures and source-anchored reconstruction of
+polymorphic type selections, including chained selections and qualified payloads.
+It passes 95 focused checks, all 763 native tests, 72 distinct public checks across
+Djinn, Exference and Both, and all 105 existing contextual regression checks.
+One environment-preparation timeout passed a focused retry at unchanged source,
+runtime identities and limits; the original failed attempt remains in the archive.
 The [latest priorities](docs/reports/2026-09-14-synthesis-next-priorities.md)
-put publication of the scoped polymorphic-selection repair first, followed by a
-focused dictionary-application investigation, Exference's explicit Haskell kinds,
-and integer indexing. Uncommitted
-Leant changes now pass 95 focused checks, all 763 native tests, and 18 public checks
-for chained type selections and dictionary-qualified polymorphic payloads across
-Djinn, Exference and Both. Broader current-source public and regression gates remain
-pending, so these working-tree results are not a release claim. The original query
-using two distinct nominal universe selections remains unresolved and needs a
-causal search trace; it is no longer a blanket prerequisite for publishing the
-passing increment or addressing the explicit-kind guard. Broader
-class/provider universes follow unless a concrete dependency promotes a smaller
-part. The [bounded `length` comparison](docs/reports/2026-09-14-selected-polytype-frontier.md)
-did not isolate the proposed defect; further length, reduction and extrema changes
-require a causal trace. Each milestone needs its original public query and exact replay.
+now focus on selection across dictionary applications, Exference's explicit
+Haskell kinds, and integer indexing. The original query using two distinct
+nominal universe selections remains unresolved and requires a causal search trace.
+Broader class/provider universes follow unless a concrete dependency promotes a
+smaller part. Further length, reduction and extrema changes likewise require a
+new causal trace. This release does not establish arbitrary synthesis completeness.
 
 The [ground-kind rendering repair and extrema checkpoint](docs/reports/2026-09-13-kinded-rendering-extrema-baseline.md)
 preserves explicit binder kinds in emitted signatures and passes eight GHC

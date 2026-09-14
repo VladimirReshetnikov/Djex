@@ -648,6 +648,7 @@ Test-Suite djinn-tests
     HCheckCompatibility
     HKindCompatibility
     HTypeCompatibility
+    ProductAlternativeSpec
   Build-Depends:  djex
 
 Test-Suite djinn-property-tests

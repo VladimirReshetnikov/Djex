@@ -65,6 +65,7 @@ import Djinn.Internal.ProofEnv
 import HCheckCompatibility (hCheckCompatibilityTests)
 import HKindCompatibility (hKindCompatibilityTests)
 import HTypeCompatibility (hTypeCompatibilityTests)
+import qualified ProductAlternativeSpec
 import qualified Language.Haskell.Djex.Djinn as Djex
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArguments, constraintArity, constraintClass)
@@ -97,6 +98,7 @@ tests =
     hKindCompatibilityTests ++
     hTypeCompatibilityTests ++
     hCheckCompatibilityTests ++
+    ProductAlternativeSpec.tests ++
     [ ("structural provider quality precedes the raw proof cutoff", testCandidateQuality)
     , ("demand-directed rank-N instantiation", testDirectedRankN)
     , ("enumerate scoped residual carriers within explicit raw bounds", testResidualFunctionCarriers)
@@ -4572,8 +4574,23 @@ testRankNTypeAtoms = do
     -- The historical four combinations of {opaque transport, structural
     -- introduction} per site remain, and the axiom plans add the guarded
     -- impredicative self-applications @a a@ at either or both sites.
-    assertEqual "alpha-equal forall sites were not occurrence-distinct"
-        9 $ length duplicateSiteClauses
+    assertBool "alpha-equal forall sites lost their historical combinations"
+        $ length duplicateSiteClauses >= 9
+    let input = SharedGenerated.Local "input"
+        identity = SharedGenerated.Lambda [SharedGenerated.Bind "value"] $
+            SharedGenerated.Local "value"
+        choices = [input, identity, SharedGenerated.Apply input input]
+        historical =
+            [ SharedGenerated.Lambda [SharedGenerated.Bind "input"] $
+                SharedGenerated.Tuple [left, right]
+            | left <- choices, right <- choices
+            ]
+        actual = map etaNormalClauseExpression $ reportGeneratedClauses duplicateSites
+    forM_ historical $ \expected ->
+        assertBool ("alpha-equal forall sites lost a specific historical combination: " ++ show expected)
+            $ any (SharedGenerated.alphaEquivalentExpression $
+                SharedGenerated.discardUnusedPatternBindingsBy id $
+                    SharedGenerated.simplifyExpressionBy id expected) actual
 
     -- Definition expansion must retain the same occurrence identity. The
     -- synonym rearranges its parameters, and the datatype stores the two

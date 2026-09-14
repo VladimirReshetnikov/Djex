@@ -31,6 +31,7 @@ module Djinn.Internal.LJT (
     module Djinn.Internal.LJTFormula, provable, prove, Proof,
     SearchMode(..), Strategy(..), SearchOutcome(..),
     defaultSearchMode, proveWithMode, proveWithModeChecked,
+    proveNormalAlternativesWithModeChecked, supportsProductTermAlternatives,
     proveFirstWithModeChecked,
     ProofSearchCursor, ProofSearchObservation(..),
     startProofSearchChecked, startProofSearchWithNormalPriorityChecked,
@@ -70,8 +71,9 @@ data Strategy = DepthFirst | Interleave
 data SearchMode = SearchMode {
     -- Retain alternative proofs at local search cuts (multiple solutions).
     searchAlternatives :: Bool,
-    -- Together with searchAlternatives and Interleave, enumerate checked
-    -- normal terms after the exact historical first-proof prefix. This is
+    -- Together with searchAlternatives, enumerate checked normal terms after
+    -- the exact historical first-proof prefix. Interleave admits atoms/arrows;
+    -- a supported fragment containing products also admits DepthFirst. This is
     -- disabled in default raw modes; source queries enable it only through
     -- explicit optionAlternatives, not through sorting alone. A proved finite
     -- maximum ends the extra size ladder; unresolved cycles remain unbounded.
@@ -166,6 +168,30 @@ proveWithModeChecked mode environment goal = do
     checkProofEnvironment environment
     return $ proveWithMode mode environment goal
 
+-- | The additional normal grammar alone, without replaying a historical
+-- proof prefix. A sequential owner can defer this positive search until all
+-- of its historical formula plans have received their original allowance.
+-- An empty result is not an independent source-level refutation.
+proveNormalAlternativesWithModeChecked
+    :: SearchMode -> [(Symbol, Formula)] -> Formula
+    -> Either String SearchOutcome
+proveNormalAlternativesWithModeChecked mode environment goal = do
+    checkProofEnvironment environment
+    let reserved = map fst environment ++ concatMap (formulaSymbols . snd) environment ++ formulaSymbols goal
+        computation
+            | searchAlternatives mode && searchTermAlternatives mode
+            , supportsProductTermAlternatives environment goal =
+                chargeNormalAttempt $ normalProofSearch environment goal
+            | otherwise = mzero
+        (proofs, exhausted, remaining) = runBounded
+            (searchBudget mode) (searchStrategy mode) reserved computation
+    return $ SearchOutcome proofs exhausted remaining
+
+supportsProductTermAlternatives :: [(Symbol, Formula)] -> Formula -> Bool
+supportsProductTermAlternatives environment goal =
+    all (normalFormula . snd) environment && normalFormula goal &&
+        (normalHasProduct goal || any (normalHasProduct . snd) environment)
+
 -- | Search just through the first proof, preserving the exact choice budget
 -- left at that prefix. No later proof or choice is inspected. The ordinary
 -- prover's enumeration policy is unchanged; this entrance supports a charged
@@ -255,7 +281,7 @@ startProofSearchWithAcyclicHeadsChecked = startProofSearchCheckedBy computation
                     proofSearchComputation mode environment goal
         | otherwise = proofSearchComputation mode environment goal
 
-normalAcyclicHeads :: Set.Set Symbol -> NormalContext -> Formula -> P Proof
+normalAcyclicHeads :: Set.Set NormalHeadIdentity -> NormalContext -> Formula -> P Proof
 normalAcyclicHeads used context goal = chargeNormalAttempt $ case goal of
     argument :-> result -> normalChoices
         [ neutral
@@ -265,12 +291,14 @@ normalAcyclicHeads used context goal = chargeNormalAttempt $ case goal of
                 (extendNormalContext binder argument context) result
         ]
     PVar _ -> neutral
+    Conj fields -> normalChoices
+        [neutral, applys (Ctuple $ length fields) <$> arguments used fields]
     _ -> mzero
   where
     neutral = normalChoices
-        [ applys (Var name) <$> arguments (Set.insert name used) domains
-        | (name, domains) <- Map.findWithDefault [] goal $ normalCompatibleHeads context
-        , name `Set.notMember` used ]
+        [ arguments (Set.insert (normalHeadIdentity head') used) domains >>= applyNormalHead head'
+        | (head', domains) <- Map.findWithDefault [] goal $ normalCompatibleHeads context
+        , normalHeadIdentity head' `Set.notMember` used ]
     arguments _ [] = return []
     arguments unavailable (domain : rest) =
         bindInterleaved (normalAcyclicHeads unavailable context domain) $ \proof ->
@@ -298,7 +326,7 @@ observeProofSearch (ProofSearchCursor stream) = case stream of
     Yield (_, proof) rest -> ProofSearchResult proof $ ProofSearchCursor rest
 
 -- Preserve the exact historical first-proof prefix. Only an explicit
--- interleaved term-alternative request can then add normal forms, alongside
+-- term-alternative request can then add normal forms, alongside
 -- the unconsumed LJT tail. Support detection and the additional stream stay
 -- behind that first Yield, so a first-result cut never forces them and an
 -- unsuccessful LJT search keeps its original negative evidence and budget.
@@ -310,10 +338,11 @@ proofSearchComputationBy
     :: (Steps (PS, Proof) -> Steps (PS, Proof) -> Steps (PS, Proof))
     -> SearchMode -> [(Symbol, Formula)] -> Formula -> P Proof
 proofSearchComputationBy schedule mode environment goal
-    | searchAlternatives mode && searchTermAlternatives mode &&
-        searchStrategy mode == Interleave = P $ \strategy state sk fk ->
+    | searchAlternatives mode && searchTermAlternatives mode = P $ \strategy state sk fk ->
             let normalTail
-                    | all (normalFormula . snd) environment && normalFormula goal =
+                    | all (normalFormula . snd) environment && normalFormula goal
+                    , searchStrategy mode == Interleave ||
+                        normalHasProduct goal || any (normalHasProduct . snd) environment =
                         reify strategy state $ chargeNormalAttempt $
                             normalProofSearch environment goal
                     | otherwise = Done
@@ -325,22 +354,67 @@ proofSearchComputationBy schedule mode environment goal
   where
     original = redtop mode (searchAlternatives mode) environment goal
 
--- This additional grammar uses only the exact existing atomic identities and
--- arrows. Structural sums/products and their eliminators remain with LJT.
+-- The extra grammar retains exact atoms, arrows, and product introduction,
+-- forwarding and elimination. Sums and nominal elimination remain with LJT.
+-- Products also enable
+-- this lane for explicit depth-first alternatives: consuming an indexed
+-- implication once can otherwise lose applications to later equal-typed
+-- inputs, even after finite LJT search finishes. Detection stays behind the
+-- historical first proof, and both continuations share the original budget.
 normalFormula :: Formula -> Bool
 normalFormula (PVar _) = True
 normalFormula (argument :-> result) = normalFormula argument && normalFormula result
+normalFormula (Conj fields) = all normalFormula fields
 normalFormula _ = False
 
--- Index every exact residual of an assumption's arrow spine. A residual may
--- itself be an arrow, retaining forwarding and partial application. Each head
--- occurs once per residual; the lists retain association-list encounter order.
+normalHasProduct :: Formula -> Bool
+normalHasProduct Conj{} = True
+normalHasProduct (argument :-> result) = normalHasProduct argument || normalHasProduct result
+normalHasProduct _ = False
+
+-- Index every exact residual along an assumption's applications and product
+-- projections. Arrow residuals retain forwarding and partial application;
+-- equal-typed fields retain their distinct projection paths. The lists keep
+-- association-list encounter order.
 -- The maps are immutable: introducing a lambda prepends only its fresh head
 -- and shares all unrelated residual entries with the enclosing context.
 data NormalContext = NormalContext
-    { normalCompatibleHeads :: Map.Map Formula [(Symbol, [Formula])]
+    { normalCompatibleHeads :: Map.Map Formula [(NormalHead, [Formula])]
     , normalMinimumHeadCosts :: Map.Map Formula Integer
     }
+
+data NormalElimination = NormalApplication | NormalProjection Int Int
+
+data NormalHead = NormalHead
+    { normalHeadOwner :: Symbol
+    , normalHeadEliminations :: [NormalElimination]
+    , normalHeadCost :: Integer
+    }
+
+-- Partial and fully applied occurrences retain one head identity. Distinct
+-- fields are distinct heads, so an acyclic path may compose both functions
+-- from a pair while still forbidding reuse of the same projected function.
+type NormalHeadIdentity = (Symbol, [(Int, Int)])
+
+normalHeadIdentity :: NormalHead -> NormalHeadIdentity
+normalHeadIdentity head' = (normalHeadOwner head',
+    [(width,index) | NormalProjection width index <- normalHeadEliminations head'])
+
+-- Use the independently checked tuple eliminator. Legacy Xsel intentionally
+-- has no proof-checking semantics. Fresh case binders cannot capture an
+-- argument proof or an external head. Each elimination has its own charge.
+applyNormalHead :: NormalHead -> [Proof] -> P Proof
+applyNormalHead head' = apply (Var $ normalHeadOwner head') $ normalHeadEliminations head'
+  where
+    apply proof [] [] = return proof
+    apply proof (NormalApplication : rest) (argument : arguments) =
+        apply (Apply proof argument) rest arguments
+    apply proof (NormalProjection width index : rest) arguments = chargeNormalAttempt $ do
+        variables <- mapM (const $ newSym "p") [1..width]
+        selected <- maybe mzero return $ variables !? index
+        let projected = applys (Csplit width) [foldr Lam (Var selected) variables, proof]
+        apply projected rest arguments
+    apply _ _ _ = mzero
 
 normalContext :: [(Symbol, Formula)] -> NormalContext
 normalContext = foldr (uncurry extendNormalContext) $
@@ -348,14 +422,21 @@ normalContext = foldr (uncurry extendNormalContext) $
 
 extendNormalContext :: Symbol -> Formula -> NormalContext -> NormalContext
 extendNormalContext name source context = NormalContext
-    (insertHead [] source $ normalCompatibleHeads context)
+    (insertHead [] [] 1 source $ normalCompatibleHeads context)
     (extendNormalMinimumCosts source $ normalMinimumHeadCosts context)
   where
-    insertHead reversedArguments residual heads =
+    insertHead reversedArguments reversedEliminations baseCost residual heads =
         let extended = Map.insertWith (++) residual
-                [(name, reverse reversedArguments)] heads
+                [(NormalHead name (reverse reversedEliminations) baseCost,
+                    reverse reversedArguments)] heads
         in case residual of
-            argument :-> result -> insertHead (argument : reversedArguments) result extended
+            argument :-> result -> insertHead (argument : reversedArguments)
+                (NormalApplication : reversedEliminations) baseCost result extended
+            Conj fields -> foldr
+                (\(index,field) -> insertHead reversedArguments
+                    (NormalProjection (length fields) index : reversedEliminations)
+                    (baseCost + 1) field)
+                extended (zip [0..] fields)
             _ -> extended
 
 -- One neutral head plus at least one head use per supplied argument. This
@@ -368,9 +449,11 @@ extendNormalMinimumCosts = insertCost 1
         let extended = Map.insertWith min residual cost costs
         in case residual of
             _ :-> result -> insertCost (cost + 1) result extended
+            Conj fields -> foldr (insertCost (cost + 1)) extended fields
             _ -> extended
 
--- Size counts neutral head uses, including repeated uses of one assumption.
+-- Size counts neutral head uses, tuple constructors and tuple eliminators,
+-- including repeated uses of one assumption. An empty tuple still costs one.
 -- Lambda introduction is free; existing neutral functions can also be
 -- forwarded or partially applied. Each applied head costs one, so
 -- every argument has a strictly smaller positive size. Finite input formulae
@@ -411,12 +494,14 @@ normalMaximumSize assumptions goal =
                 | Set.member key active -> return (NormalUnknown, memo)
                 | otherwise -> do
                     let active' = Set.insert key active
-                    (lambdaMaximum, memo') <- case target of
+                    (introductionMaximum, memo') <- case target of
                         argument :-> result ->
                             inspect active' memo (Set.insert argument available) result
+                        Conj fields -> argumentsMaximum active' available
+                            (NormalFinite 1) memo fields
                         _ -> return (NormalImpossible, memo)
                     (maximumSize, memo'') <- heads active' available target
-                        lambdaMaximum memo' (Set.toList available)
+                        introductionMaximum memo' (Set.toList available)
                     return (maximumSize, Map.insert key maximumSize memo'')
       where
         key = (available, target)
@@ -427,21 +512,26 @@ normalMaximumSize assumptions goal =
     heads _ _ _ accumulated memo [] = return (accumulated, memo)
     heads active available target accumulated memo (source : sources) =
         chargeNormalAttempt $ do
-            matched <- matchingArguments target [] source
-            case matched of
-                Nothing -> heads active available target accumulated memo sources
-                Just arguments -> do
-                    (headMaximum, memo') <- argumentsMaximum active available
-                        (NormalFinite 1) memo arguments
-                    heads active available target
-                        (alternativeMaximum accumulated headMaximum) memo' sources
+            matched <- matchingArguments target [] 1 source
+            (maximumSize, memo') <- matchingHeads matched accumulated memo
+            heads active available target maximumSize memo' sources
+      where
+        matchingHeads [] maximumSize currentMemo = return (maximumSize, currentMemo)
+        matchingHeads ((cost,arguments) : rest) maximumSize currentMemo = do
+            (headMaximum, nextMemo) <- argumentsMaximum active available
+                (NormalFinite cost) currentMemo arguments
+            let combined = alternativeMaximum maximumSize headMaximum
+            if null rest || combined == NormalUnknown then return (combined,nextMemo)
+            else chargeNormalAttempt $ matchingHeads rest combined nextMemo
 
-    matchingArguments target reversedArguments source = chargeNormalAttempt $
-        if source == target then return $ Just $ reverse reversedArguments
+    matchingArguments target reversedArguments cost source = chargeNormalAttempt $
+        if source == target then return [(cost,reverse reversedArguments)]
         else case source of
             argument :-> result ->
-                matchingArguments target (argument : reversedArguments) result
-            _ -> return Nothing
+                matchingArguments target (argument : reversedArguments) cost result
+            Conj fields -> concat <$> mapM
+                (matchingArguments target reversedArguments (cost + 1)) fields
+            _ -> return []
 
     argumentsMaximum _ _ NormalImpossible memo _ = return (NormalImpossible, memo)
     argumentsMaximum _ _ accumulated memo [] = return (accumulated, memo)
@@ -486,16 +576,18 @@ normalProofAtSize context goal size = chargeNormalAttempt $
                     Lam binder <$> normalProofAtSize (extendNormalContext binder argument context) result size
                 ]
             PVar _ -> neutral
+            Conj fields -> normalChoices
+                [neutral, applyArguments 1 (return . applys (Ctuple $ length fields)) fields]
             _ -> mzero
   where
     neutral = normalChoices
-        [applyHead name arguments
-        | (name, arguments) <- Map.findWithDefault [] goal $ normalCompatibleHeads context]
-    applyHead name arguments = case traverse (normalLowerBound context) arguments of
+        [applyArguments (normalHeadCost head') (applyNormalHead head') arguments
+        | (head', arguments) <- Map.findWithDefault [] goal $ normalCompatibleHeads context]
+    applyArguments cost construct arguments = case traverse (normalLowerBound context) arguments of
         Nothing -> mzero
-        Just minima -> bindInterleaved (normalSizePartitions minima (size - 1)) $ \argumentSizes -> do
+        Just minima -> bindInterleaved (normalSizePartitions minima (size - cost)) $ \argumentSizes -> do
             arguments' <- normalArgumentProduct arguments argumentSizes
-            return $ applys (Var name) arguments'
+            construct arguments'
     normalArgumentProduct [] [] = return []
     normalArgumentProduct (argument : arguments) (argumentSize : sizes) =
         bindInterleaved (normalProofAtSize context argument argumentSize) $ \proof ->
@@ -508,7 +600,8 @@ chargeNormalAttempt attempt = P $ \strategy state sk fk ->
 
 -- An admissible cost bound only: required lambdas introduce their domains
 -- before head lookup, and every argument of a matching head needs at least
--- one head use. No type- or syntax-specific construction rule is involved.
+-- one head use. Tuple introduction adds one constructor plus its fields.
+-- No operation-specific construction rule is involved.
 -- The stored minimum is exactly the previous scan's neutral minimum; this
 -- lookup does not instantiate, unify, or identify merely similar formulae.
 -- A distinguished assumption can occur at the neutral head or in one of
@@ -538,18 +631,26 @@ normalRequiredAtSize required context goal size = chargeNormalAttempt $
                         (extendNormalContext binder argument context) result size
                 ]
             PVar _ -> neutral
+            Conj fields -> normalChoices [neutral, tuple fields]
             _ -> mzero
   where
     neutral = normalChoices
-        [ applyHead name arguments
-        | (name, arguments) <- Map.findWithDefault [] goal $ normalCompatibleHeads context ]
-    applyHead name arguments = case traverse (normalLowerBound context) arguments of
+        [ applyHead head' arguments
+        | (head', arguments) <- Map.findWithDefault [] goal $ normalCompatibleHeads context ]
+    tuple fields = case traverse (normalLowerBound context) fields of
         Nothing -> mzero
         Just minima -> bindInterleaved (normalSizePartitions minima (size - 1)) $ \sizes ->
-            if name `Set.member` required then
-                applys (Var name) <$> argumentsWithRequired Nothing (zip arguments sizes)
+            normalChoices
+                [applys (Ctuple $ length fields) <$>
+                    argumentsWithRequired (Just position) (zip fields sizes)
+                | position <- [0 .. length fields - 1]]
+    applyHead head' arguments = case traverse (normalLowerBound context) arguments of
+        Nothing -> mzero
+        Just minima -> bindInterleaved (normalSizePartitions minima (size - normalHeadCost head')) $ \sizes ->
+            if normalHeadOwner head' `Set.member` required then
+                argumentsWithRequired Nothing (zip arguments sizes) >>= applyNormalHead head'
             else normalChoices
-                [applys (Var name) <$> argumentsWithRequired (Just position) (zip arguments sizes)
+                [argumentsWithRequired (Just position) (zip arguments sizes) >>= applyNormalHead head'
                 | position <- [0 .. length arguments - 1]]
     argumentsWithRequired :: Maybe Int -> [(Formula, Integer)] -> P [Proof]
     argumentsWithRequired _ [] = return []
@@ -562,13 +663,15 @@ normalRequiredAtSize required context goal size = chargeNormalAttempt $
 normalLowerBound :: NormalContext -> Formula -> Maybe Integer
 normalLowerBound context = lowerBound $ normalMinimumHeadCosts context
   where
-    lowerBound costs goal = case (Map.lookup goal costs, lambdaBound costs goal) of
+    lowerBound costs goal = case (Map.lookup goal costs, introductionBound costs goal) of
         (Nothing, other) -> other
         (other, Nothing) -> other
-        (Just neutralCost, Just lambdaCost) -> Just $ min neutralCost lambdaCost
-    lambdaBound costs (argument :-> result) =
+        (Just neutralCost, Just introductionCost) -> Just $ min neutralCost introductionCost
+    introductionBound costs (argument :-> result) =
         lowerBound (extendNormalMinimumCosts argument costs) result
-    lambdaBound _ _ = Nothing
+    introductionBound costs (Conj fields) =
+        (1 +) . sum <$> traverse (lowerBound costs) fields
+    introductionBound _ _ = Nothing
 
 normalSizePartitions :: [Integer] -> Integer -> P [Integer]
 normalSizePartitions [] size = chargeNormalAttempt $

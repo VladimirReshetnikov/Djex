@@ -99,14 +99,19 @@ Each formula plan first follows the original LJT proof search. After its exact
 first proof, a second stream enumerates beta-normal terms using the same
 checked assumptions and exact atomic type identities. It can reuse a function
 or a conversion bridge, introduce lambdas, and forward an existing function
-after a partial application. This grammar applies to atomic and function
-formulas; products, sums, and their eliminators continue through LJT. It does
+after a partial application. The grammar also supports product introduction,
+forwarding and checked projection, including nested/unit tuples and projected
+functions. Sums and nominal elimination continue through LJT. It does
 not contain operation names, Church-specific construction rules, or reference
 implementations. Quantified-type instantiations come from the existing checked
 plan machinery.
 
-Normal terms are explored by increasing number of variable or provider uses;
-lambda introduction adds no cost to this size measure. An index selects only
+Explicit product alternatives also apply in depth-first mode. Sequential source
+batches finish historical plans before spending the remaining allowance on
+extra product terms; raw streams preserve the original first proof and tail.
+
+Normal terms are explored by increasing number of variable/provider uses and
+tuple constructors/eliminators; lambda introduction adds no cost to this size measure. An index selects only
 heads whose exact remaining function type matches the current goal. A
 conservative analysis can prove a finite maximum size and stop that plan's
 normal-term stream after its final layer. Recursive or unresolved states keep

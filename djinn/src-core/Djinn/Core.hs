@@ -1747,7 +1747,7 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
         results <- if interleavePlanAlternatives
             then runFairPlans (optionCutoff options) (optionBudget options) []
                 (initialLanes carrierAlternativeSearchPlans) []
-            else runPlans False historicalFamilies
+            else runPlans False [] False historicalFamilies
                 collectAcrossPlans options (optionCutoff options) [] transportSearchPlans
         mergeFormulaPlanResults options results
     , preparedFormulaCandidateStream = streamPlans (optionCutoff options)
@@ -3446,24 +3446,32 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     -- has found an inhabitant. Looking at a fallback's symbol set already
     -- forces axiom preparation, so deciding this from individual plan tuples
     -- would defeat the intended laziness.
-    runPlans firstProofOnly ((inhabitationOnly, nextFamily) : remainingFamilies)
+    runPlans normalOnly deferred firstProofOnly ((inhabitationOnly, nextFamily) : remainingFamilies)
             collect currentOptions candidateLimit completed []
         | inhabitationOnly
         , any (not . null . formulaPlanCandidates) completed ||
             any ((/= SharedQuery.NoEvidence) . formulaPlanEvidence) completed =
-            runPlans firstProofOnly remainingFamilies collect currentOptions candidateLimit completed []
+            runPlans normalOnly deferred firstProofOnly remainingFamilies collect currentOptions candidateLimit completed []
         | otherwise =
-            runPlans firstProofOnly remainingFamilies collect currentOptions candidateLimit completed nextFamily
-    runPlans _ _ _ _ _ completed [] = Right $ reverse completed
+            runPlans normalOnly deferred firstProofOnly remainingFamilies collect currentOptions candidateLimit completed nextFamily
+    -- Product normal terms must not spend an earlier sequential plan's raw
+    -- cutoff before later historical plans get their original turn. Remember
+    -- only already-visited productive plans, then enumerate their extra grammar
+    -- with the remaining global allowance. No historical cursor is restarted.
+    runPlans False deferred False [] collect currentOptions candidateLimit completed []
+        | optionAlternatives currentOptions && collect && not (null deferred) =
+            runPlans True [] False [] collect currentOptions candidateLimit completed (reverse deferred)
+    runPlans _ _ _ _ _ _ _ completed [] = Right $ reverse completed
     -- Focused contexts are a first-inhabitant accelerator. Once another plan
     -- has produced a term, enumerating that term again in singleton contexts
     -- would spend the raw-proof cutoff and starve later alternative families.
-    runPlans firstProofOnly remainingFamilies collect currentOptions candidateLimit completed
+    runPlans normalOnly deferred firstProofOnly remainingFamilies collect currentOptions candidateLimit completed
             ((_, _, symbols, _, _, _, _) : remaining)
-        | any (not . null . formulaPlanCandidates) completed
+        | not normalOnly
+        , any (not . null . formulaPlanCandidates) completed
         , any isInhabitationFallbackSymbol $ Set.toList symbols =
-            runPlans firstProofOnly remainingFamilies collect currentOptions candidateLimit completed remaining
-    runPlans firstProofOnly remainingFamilies collect currentOptions candidateLimit completed
+            runPlans normalOnly deferred firstProofOnly remainingFamilies collect currentOptions candidateLimit completed remaining
+    runPlans normalOnly deferred firstProofOnly remainingFamilies collect currentOptions candidateLimit completed
             (plan@( planPremises
               , diagnosticOnlyPremises
               , axiomSymbols
@@ -3474,13 +3482,19 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
               )
                 : remaining) = do
         result <- case contextualPlanErasure plan of
-            Nothing -> searchPreparedFormulaPlan sourceContext firstProofOnly
+            Nothing -> searchPreparedFormulaPlan sourceContext normalOnly firstProofOnly
                 currentOptions candidateLimit target planPremises axiomSymbols
                 visibleApplications providerApplications diagnosticOnlyPremises form
-                negativeEvidenceSound
-            Just receipt -> searchContextualFormulaPlan receipt sourceContext firstProofOnly
+                (negativeEvidenceSound && not normalOnly)
+            Just receipt -> searchContextualFormulaPlan receipt sourceContext normalOnly firstProofOnly
                 currentOptions candidateLimit target plan
         let completed' = result : completed
+            deferred'
+                | not normalOnly && optionAlternatives currentOptions
+                , formulaPlanProofCount result > 0
+                , let (_, searchEnv, _) = formulaPlanSearchContext currentOptions target planPremises providerApplications
+                , supportsProductTermAlternatives searchEnv form = plan : deferred
+                | otherwise = deferred
             nextLimit = candidateLimit - formulaPlanProofCount result
             continue =
                 formulaPlanFinished result &&
@@ -3488,7 +3502,7 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
                 (collect || null (formulaPlanCandidates result)) &&
                 evidenceCanBenefitFromAnotherPlan result
         if continue
-            then runPlans firstProofOnly remainingFamilies collect
+            then runPlans normalOnly deferred' firstProofOnly remainingFamilies collect
                 currentOptions {
                     optionBudget = formulaPlanRemainingBudget result
                     }
@@ -3806,9 +3820,9 @@ freshInput used next =
 -- fuel. Both independent checks still see the complete original goal.
 searchContextualFormulaPlan
     :: SourceEvidence.RootGivenErasure -> SourceEvidence.SourceTypingContext
-    -> Bool -> QueryOptions -> Int -> SharedGenerated.DefinitionName
+    -> Bool -> Bool -> QueryOptions -> Int -> SharedGenerated.DefinitionName
     -> FormulaSearchPlan -> Either DjinnQueryError FormulaPlanResult
-searchContextualFormulaPlan receipt sourceContext firstOnly options candidateLimit target
+searchContextualFormulaPlan receipt sourceContext normalOnly firstOnly options candidateLimit target
         (premises, diagnostics, symbols, visible, providers, form, _) =
     searchPreparedFormulaPlanByWithContextual (Just receipt) sourceContext False run
         options candidateLimit target premises symbols visible providers diagnostics form False
@@ -3827,8 +3841,10 @@ searchContextualFormulaPlan receipt sourceContext firstOnly options candidateLim
         case searchBudget mode of
             Just fuel | fuel < count -> Right $ SearchOutcome [] True $ Just 0
             _ -> do
-                outcome <- (if firstOnly then proveFirstWithModeChecked else proveWithModeChecked)
-                    mode {searchBudget = fmap (subtract count) $ searchBudget mode}
+                outcome <- (if normalOnly then proveNormalAlternativesWithModeChecked
+                    else if firstOnly then proveFirstWithModeChecked else proveWithModeChecked)
+                    mode {searchBudget = fmap (subtract count) $ searchBudget mode,
+                        searchTermAlternatives = normalOnly && searchTermAlternatives mode}
                     openedEnvironment opened
                 mapM_ (void . checkProofWithEvidence openedEnvironment opened) $ searchProofs outcome
                 pure outcome {searchProofs = map restore $ searchProofs outcome}
@@ -3876,6 +3892,7 @@ formulaPlanSearchContext options target externalEnv providerApplications =
 searchPreparedFormulaPlan
     :: SourceEvidence.SourceTypingContext
     -> Bool
+    -> Bool
     -> QueryOptions
     -> Int
     -> SharedGenerated.DefinitionName
@@ -3888,8 +3905,11 @@ searchPreparedFormulaPlan
     -> Formula
     -> Bool
     -> Either DjinnQueryError FormulaPlanResult
-searchPreparedFormulaPlan sourceContext firstProofOnly = searchPreparedFormulaPlanBy sourceContext False $
-    if firstProofOnly then proveFirstWithModeChecked else proveWithModeChecked
+searchPreparedFormulaPlan sourceContext normalOnly firstProofOnly =
+    searchPreparedFormulaPlanBy sourceContext False $ \mode ->
+        if normalOnly then proveNormalAlternativesWithModeChecked mode
+        else (if firstProofOnly then proveFirstWithModeChecked else proveWithModeChecked)
+            mode {searchTermAlternatives = False}
 
 searchPreparedFormulaPlanBy
     :: SourceEvidence.SourceTypingContext

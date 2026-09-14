@@ -1,5 +1,14 @@
 # Rank-N and impredicative types
 
+The [product-construction release](reports/2026-09-13-product-alternatives-acceptance.md)
+extends checked normal-term alternatives to products: introduction, forwarding,
+projection, nested/unit tuples and projected functions. Explicit alternatives
+admit this product fragment in both depth-first and interleaved modes. Raw
+cursors preserve the exact historical first proof and continuation; sequential
+source batches defer extra product terms until historical plans finish, using
+only the remaining shared cutoff and choice budget. Sums and nominal elimination
+retain the LJT route. Native Leant integration is recorded separately.
+
 The latest [nested Church composition improvement](reports/2026-09-13-maybe-either-head-use-acceptance.md) gives
 Djinn's existing common-result bridge plans an additional term-construction
 branch. It avoids repeating an exact function head along an application path,

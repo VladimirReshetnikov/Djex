@@ -268,6 +268,14 @@ preference adds no premises, type assignments, or search allowance; ordinary
 batch scheduling is unchanged. See the
 [behavioral search guide](behavioral-synthesis.md#djinns-explicit-alternative-search).
 
+For explicitly enabled product alternatives, depth-first raw cursors also add
+checked tuple construction and projection after their historical first proof.
+Sequential source batches retain their historical plan phase and then enumerate
+extra product terms from productive plans with the remaining shared allowance.
+The extra phase is positive search and supplies no independent source refutation.
+First-inhabitant cuts do not force it. See the [product release](reports/2026-09-13-product-alternatives-acceptance.md)
+for the original public query and cutoff-regression checks.
+
 ## Supply provider-local instantiation evidence
 
 A frontend whose source environment proves otherwise erased type choices can

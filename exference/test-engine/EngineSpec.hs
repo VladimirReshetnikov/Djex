@@ -11,6 +11,7 @@ import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Set as Set
 import Data.Void (Void)
 import Numeric.Natural (Natural)
+import System.Environment (getArgs)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
   ((@?=), assertBool, assertEqual, assertFailure, testCase)
@@ -19,7 +20,7 @@ import Language.Haskell.Exference.Core.Candidate
   ( ExferenceCandidateDetails (..), emptyExferenceSourceTypeVariableHints )
 import Language.Haskell.Exference.Core.ConstraintSolver (filterUnresolved, uniqueGivenInstantiation, givenInstantiations)
 import Language.Haskell.Exference.Core.Expression
-  ( Expression (..), toGeneratedExpression )
+  ( Expression (..), toGeneratedExpression, showExpression )
 import Language.Haskell.Exference.Core.ExferenceStats (ExferenceStats (..))
 import Language.Haskell.Exference.Core.Internal.ExpressionCheck
   ( CheckedExpressionEvidence
@@ -114,11 +115,16 @@ import qualified ImplicitConstructorGraphSpec
 import qualified GivenEvidenceSpec
 
 main :: IO ()
-main = defaultMain tests
+main = do
+  arguments <- getArgs
+  case arguments of
+    ["--emit-unit-prefix"] -> emitUnitPrefix
+    _ -> defaultMain tests
 
 tests :: TestTree
 tests = testGroup "Exference private engine boundaries"
-  [ NestedForallGraphSpec.tests
+  [ testCase "intrinsic-unit alternatives preserve the maybeEither prefix" unitPrefixRegression
+  , NestedForallGraphSpec.tests
   , ImplicitConstructorGraphSpec.tests
   , GivenEvidenceSpec.tests
   , testCase "rigid scopes reject direct and propagated skolem escapes" $ do
@@ -639,6 +645,46 @@ tests = testGroup "Exference private engine boundaries"
           residual @?= []
           checkExpression (mkQueryClassEnv emptyStaticClassEnv []) [] []
             requested [] expression @?= Right ()
+  , testCase "intrinsic unit introduction needs no declaration and cannot inhabit a rigid type" $ do
+      environment <- expectRight $ E.mkExferenceEnvironment $ EnvDictionary [] [] emptyStaticClassEnv
+      forM_ [TypeTuple Boxed [], TypeForall [0] [] $ TypeVar 0] $ \goal -> do
+        checked <- expectRight $ E.prepareExferenceQuery environment $
+          E.ExferenceQuery goal Set.empty defaultExferenceOptions
+            { exferenceMaximumSteps = 64, exferenceMaximumQueueSize = Just 64
+            , exferenceAllowUnused = True }
+        let candidates = concatMap E.chunkElements $ E.findExpressions checked
+        case goal of
+          TypeTuple Boxed [] -> case candidates of
+            (expression, residual, _) : _ -> do
+              toGeneratedExpression expression @?= Generated.Tuple []
+              residual @?= []
+              checkExpression (mkQueryClassEnv emptyStaticClassEnv []) [] [] goal [] expression @?= Right ()
+            [] -> assertFailure "a concrete intrinsic unit goal had no constructor"
+          _ -> assertBool "intrinsic unit inhabited an arbitrary rigid type" $ null candidates
+  , testCase "local polymorphic consumers can select intrinsic unit without a declaration" $ do
+      let result = TypeVar 0
+          consumer = TypeForall [1] [] $ TypeArrow (TypeVar 1) result
+          goal = TypeForall [0] [] $ TypeArrow consumer result
+          containsUnit expression = case expression of
+            Generated.Tuple fields -> null fields || any containsUnit fields
+            Generated.Lambda _ body -> containsUnit body
+            Generated.Apply function argument -> containsUnit function || containsUnit argument
+            Generated.VisibleTypeApplication function _ -> containsUnit function
+            Generated.Let _ value body -> containsUnit value || containsUnit body
+            Generated.Case value branches -> containsUnit value || any (containsUnit . snd) branches
+            _ -> False
+      environment <- expectRight $ E.mkExferenceEnvironment $ EnvDictionary [] [] emptyStaticClassEnv
+      checked <- expectRight $ E.prepareExferenceQuery environment $
+        E.ExferenceQuery goal Set.empty defaultExferenceOptions
+          { exferenceMaximumSteps = 4096, exferenceMaximumQueueSize = Just 1024
+          , exferenceAllowUnused = True
+          , exferenceCandidateRanking = SharedQuality.defaultCandidateRankingPolicy }
+      let candidates = take 60 $ concatMap E.chunkElements $ E.findExpressions checked
+      (expression, residual, _) <- maybe
+        (fail "intrinsic unit was absent from the bounded local-consumer prefix") pure $
+          find (\(term, _, _) -> containsUnit $ toGeneratedExpression term) candidates
+      residual @?= []
+      checkExpression (mkQueryClassEnv emptyStaticClassEnv []) [] [] goal [] expression @?= Right ()
   , testCase "bare provider foralls cross the checked result boundary" $ do
       let unit = TypeTuple Boxed []
           vacuousUnit = TypeForall [] [] unit
@@ -2791,3 +2837,80 @@ assertTwoLexicalSelections local = do
 
 expectRight :: Show problem => Either problem result -> IO result
 expectRight = either (fail . show) pure
+
+-- This diagnostic uses the same closed goal and balanced 256-result window
+-- as the public behavioral regression. The reference is an assertion only.
+unitPrefixGoal :: HsType
+unitPrefixGoal = TypeForall [0, 1] [] $ TypeArrow source target
+ where
+  maybeType binder element = TypeForall [binder] [] $
+    TypeArrow (TypeVar binder) $ TypeArrow
+      (TypeArrow element $ TypeVar binder) (TypeVar binder)
+  eitherType binder left right = TypeForall [binder] [] $
+    TypeArrow (TypeArrow left $ TypeVar binder) $ TypeArrow
+      (TypeArrow right $ TypeVar binder) (TypeVar binder)
+  source = eitherType 4 (maybeType 2 $ TypeVar 0) (maybeType 3 $ TypeVar 1)
+  target = maybeType 6 $ eitherType 5 (TypeVar 0) (TypeVar 1)
+
+unitPrefixNormalize :: Generated.Expression Int -> Generated.Expression Int
+unitPrefixNormalize = Generated.simplifyExpressionBy id . go
+ where
+  go expression = case expression of
+    Generated.Lambda patterns body -> foldr
+      (\pattern rest -> Generated.Lambda [pattern] rest) (go body) patterns
+    Generated.Apply function argument -> Generated.Apply (go function) (go argument)
+    Generated.VisibleTypeApplication function _ -> go function
+    Generated.Tuple fields -> Generated.Tuple $ map go fields
+    Generated.Let pattern value body -> Generated.Let pattern (go value) (go body)
+    Generated.Case value branches -> Generated.Case (go value)
+      [(pattern, go body) | (pattern, body) <- branches]
+    _ -> expression
+
+unitPrefixMatches :: Expression -> Bool
+unitPrefixMatches expression = Generated.alphaEquivalentExpression expected $
+  unitPrefixNormalize $ toGeneratedExpression expression
+ where
+  local = Generated.Local
+  app = Generated.Apply
+  lam variables = Generated.lambdaExpression $ map Generated.Bind variables
+  expected = unitPrefixNormalize $ lam [0, 1, 2] $
+    app (app (local 0)
+      (lam [3] $ app (app (local 3) (local 1))
+        (lam [4] $ app (local 2) $ lam [5, 6] $ app (local 5) (local 4))))
+      (lam [7] $ app (app (local 7) (local 1))
+        (lam [8] $ app (local 2) $ lam [9, 10] $ app (local 10) (local 8)))
+
+unitPrefixCandidates :: IO [E.ExferenceOutputElement]
+unitPrefixCandidates = unitPrefixCandidatesIn []
+
+unitPrefixCandidatesIn :: [FunctionBinding] -> IO [E.ExferenceOutputElement]
+unitPrefixCandidatesIn functions = do
+  environment <- expectRight $ E.mkExferenceEnvironment $
+    EnvDictionary functions [] emptyStaticClassEnv
+  checked <- expectRight $ E.prepareExferenceQuery environment $
+    E.ExferenceQuery unitPrefixGoal Set.empty defaultExferenceOptions
+      { exferenceMaximumSteps = 100000
+      , exferenceMaximumQueueSize = Just 8192
+      , exferenceAllowUnused = True
+      , exferenceCandidateRanking = SharedQuality.defaultCandidateRankingPolicy }
+  pure $ take 256 $ concatMap E.chunkElements $ E.findExpressions checked
+
+unitPrefixRegression :: IO ()
+unitPrefixRegression = do
+  constructor <- expectRight $ SharedName.tupleName SharedName.Boxed 0
+  let unit = FunctionBinding (TypeTuple Boxed []) constructor 9.9 [] []
+  forM_ [[], [unit]] $ \functions -> do
+    candidates <- unitPrefixCandidatesIn functions
+    (expression, residual, _) <- maybe
+      (fail "maybeEither witness was absent from the original 256-candidate prefix") pure $
+        find (\(term, _, _) -> unitPrefixMatches term) candidates
+    residual @?= []
+    checkExpression (mkQueryClassEnv emptyStaticClassEnv []) functions []
+      unitPrefixGoal [] expression @?= Right ()
+
+emitUnitPrefix :: IO ()
+emitUnitPrefix = do
+  candidates <- unitPrefixCandidates
+  forM_ (zip [(1 :: Int)..] candidates) $ \(index, (term, residual, stats)) -> do
+    residual @?= []
+    print (index, unitPrefixMatches term, stats, showExpression term)

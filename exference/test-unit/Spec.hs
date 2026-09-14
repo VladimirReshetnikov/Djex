@@ -8744,13 +8744,21 @@ tests = testGroup "Exference"
             , "and 156 function decls"
             ]
           (goal, _) <- expectRight $ parseTypePure "()"
+          checkExpression (mkQueryClassEnv emptyClassEnv []) unitBindings []
+            goal [] (ExpName $ validTupleName 0) @?= Right ()
           case findOneExpression identityInput
               { input_goalType = goal
               , input_envFuncs = unitBindings
               } of
-            Just (ExpName (TupleCon 0), _, _) -> pure ()
+            Just (expression, residual, _) -> do
+              residual @?= []
+              checkExpression (mkQueryClassEnv emptyClassEnv []) unitBindings []
+                goal [] expression @?= Right ()
+              case expression of
+                ExpName (TupleCon 0) -> pure ()
+                ExpTuple [] -> pure ()
+                _ -> fail "unit search returned a different expression"
             Nothing -> fail "built-in unit did not inhabit ()"
-            Just _ -> fail "unit search returned a different expression"
       , testCase "unboxed tuple syntax is rejected during elaboration" $ do
           let mode = enableUnboxedTuples $ haskellSrcExtsParseMode "unboxed"
           mapM_ (expectUnsupportedUnboxed . parseTypeWithModePure mode)

@@ -646,8 +646,8 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
           contexts
         ++ boxedTupleArities body
 
-  -- Only roots which the checked query uses in a proper-type position become
-  -- candidates for an otherwise unconstrained visible binder.  In an
+  -- Roots which the checked query uses in a proper-type position become
+  -- candidates for an otherwise unconstrained visible binder. In an
   -- application the argument kind is not recoverable from this first-order
   -- core, so the traversal retains the complete application but deliberately
   -- does not descend into its function or argument.  Arrow and tuple children
@@ -2198,6 +2198,15 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
     contxt = nodeQueryClassEnv initialNode
     constraintGoals' = nodeConstraintGoals initialNode
 
+    -- The ordinary Haskell inventory already supplies the reserved unit
+    -- constructor with its exact nullary type. Preserve that existing search
+    -- path (including its caller-owned rating); adding an intrinsic duplicate
+    -- changes the bounded candidate prefix. A nominal value merely returning
+    -- unit is not this constructor, and must not suppress syntax introduction.
+    unitConstructorAvailable = any isUnitConstructor $ nodeFunctions initialNode
+    isUnitConstructor (FunctionBinding (TypeTuple Boxed []) (TupleCon 0) _ [] []) = True
+    isUnitConstructor _ = False
+
     -- if type is TypeArrow, transform to lambda expression.
     arrowStep
       :: HsType
@@ -2332,6 +2341,34 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
             $ heuristics_functionGoalTransform h
         , nodeLastStepBinding = Nothing
         }
+
+    -- Unit is a nullary intrinsic constructor. In addition to a known unit
+    -- goal, it can solve a flexible argument of an ordinary polymorphic use,
+    -- just as a nullary environment constructor would. This determines the
+    -- argument by constructing its value; it does not guess visible binder
+    -- assignments or weaken the proper-kind guard on query candidates.
+    -- Keep the sibling after existing provider choices. Apply its unifier to
+    -- the complete persistent scope and pending evidence before completing
+    -- the hole; rigid goal variables cannot unify with this concrete type.
+    flexibleUnitStep :: StateT SearchNode SearchBranches ()
+    flexibleUnitStep = do
+      substitutions <- lift $ maybeBranch $
+        unifyShared goalType $ TypeTuple Boxed []
+      let (changed, constraints) = mapM
+            (scopedConstraintApplySubsts substitutions) constraintGoals'
+      checkedConstraints <- lift $ maybeBranch $
+        if allowConstrs || not (getAny changed)
+          then Just constraints
+          else resolveScopedConstraints isPossible contxt constraints
+      builderApplySubst substitutions substitutions
+      modify $ \node -> node {nodeConstraintGoals = checkedConstraints}
+      tupleStep []
+      -- A flexible goal supplies no evidence for choosing this concrete type.
+      -- Treat that default as a weak constructor match, using the existing
+      -- fallback cost rather than the exact environment-match cost. Known
+      -- unit goals still take ordinary syntax-directed tuple introduction.
+      modify $ \node -> node
+        { nodeDepth = addScore (nodeDepth node) $ heuristics_stepEnvBad h }
 
     -- A nested concrete product tree is just as syntax-directed as one pair.
     -- Materialize every known nonempty boxed-tuple layer in a sibling branch,
@@ -3049,12 +3086,15 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
         introducedForallStep is cs t
       TypeForall is cs t | forallMode == TryForallIntroduction ->
         byProvided <|> byFunctionSimple <|> introducedForallStep is cs t
-      TypeTuple Boxed elements | not $ null elements ->
+      TypeTuple Boxed [] | unitConstructorAvailable -> byProvided <|> byFunctionSimple
+      TypeTuple Boxed elements ->
         byProvided
           <|> (case tupleMode of
             AllowTupleTree -> tupleTreeStep elements <|> tupleStep elements
             ContinueShallowTuple -> tupleStep elements)
           <|> byFunctionSimple
+      TypeVar{} | not unitConstructorAvailable ->
+        byProvided <|> byFunctionSimple <|> flexibleUnitStep
       _ -> byProvided <|> byFunctionSimple
 
     -- Each outer list element is one finite sibling lane.  Inner alternatives
@@ -3072,12 +3112,16 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
         map byProvidedFor providedBindings
           ++ map byFunctionSimpleFor functionBindings
           ++ [introducedForallStep is cs t]
-      TypeTuple Boxed elements | not $ null elements ->
+      TypeTuple Boxed [] | unitConstructorAvailable ->
+        map byProvidedFor providedBindings ++ map byFunctionSimpleFor functionBindings
+      TypeTuple Boxed elements ->
         map byProvidedFor providedBindings
           ++ (case tupleMode of
             AllowTupleTree -> [tupleTreeStep elements, tupleStep elements]
             ContinueShallowTuple -> [tupleStep elements])
           ++ map byFunctionSimpleFor functionBindings
+      TypeVar{} | not unitConstructorAvailable -> map byProvidedFor providedBindings
+        ++ map byFunctionSimpleFor functionBindings ++ [flexibleUnitStep]
       _ -> map byProvidedFor providedBindings
         ++ map byFunctionSimpleFor functionBindings
   in StateStepPlan legacyAction orderedActions

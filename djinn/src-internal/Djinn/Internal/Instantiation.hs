@@ -37,6 +37,7 @@ module Djinn.Internal.Instantiation
     , providerInstantiationPremises
     , providerInstantiationAssignmentPremises
     , closedMonotypeSubtrees
+    , closedQuantifiedSubtrees
     , instantiationAxiomPremises
     , instantiationAxiomSymbols
     , instantiationVisibleApplications

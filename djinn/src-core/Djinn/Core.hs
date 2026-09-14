@@ -117,6 +117,7 @@ import Djinn.Internal.GeneratedDeduplication
 import Djinn.Internal.HTypes
 import Djinn.Internal.Instantiation
     ( closedMonotypeSubtrees
+    , closedQuantifiedSubtrees
     , independentConstructionScopes
     , instantiationAxiomPremises
     , instantiationAxiomSymbols
@@ -1915,7 +1916,13 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
                 SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
                     map SharedType.TypeVariable goalVariables ++
                     [argument | Constraint _ arguments <- availableContexts,
-                        argument <- arguments] ++ closedMonotypeSubtrees elaboratedGoal
+                        argument <- arguments] ++ closedMonotypeSubtrees elaboratedGoal ++
+                    -- Qualified hypotheses need the same source-owned forall
+                    -- choices as ordinary instantiation. Keep the existing
+                    -- vocabulary prefix; lexical closure excludes subtrees
+                    -- that would escape a nested binder. Kind and Given checks
+                    -- still validate each complete contextual instantiation.
+                    closedQuantifiedSubtrees elaboratedGoal
             tuples source =
                 let (binders, _, _) = SharedType.splitLeadingForalls source
                     count = length binders

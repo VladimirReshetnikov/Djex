@@ -124,6 +124,7 @@ tests =
     , ("separate streaming terminal logical evidence from truncation", testCandidateStreamEvidence)
     , ("retain contextual streaming identity with exact unused Given authority", testCandidateStreamContext)
     , ("compose contextual methods with polymorphic values of abstract datatypes", testContextualPolymorphicConstructors)
+    , ("select a supplied polytype for a qualified local consumer", testContextualPolymorphicSelection)
     , ("validate streaming requests before observing their search", testCandidateStreamValidation)
     , ("stream a demanded singleton bridge reused by alpha-equivalent quantified inputs", testCandidateStreamDemandedSingleton)
     , ("stream cooperating quantified bridges at the exact demanded result", testCandidateStreamDemandedGroup)
@@ -2387,6 +2388,76 @@ testCandidateStreamContext = do
     assertBool "the contextual identity fixture produced no candidates" $ not $ null candidates
     assertUnusedGivenIdentityGraphs target source (sharedName "StreamContext") batch
     forM_ observations $ assertUnusedGivenIdentityGraphs target source (sharedName "StreamContext")
+
+-- A qualified local consumer must select the whole supplied forall while
+-- retaining the outer Given. No constructor or global can supply the result.
+testContextualPolymorphicSelection :: IO ()
+testContextualPolymorphicSelection =
+  forM_ [polytype, boxedPolytype] $ \selectedType ->
+  forM_ [False, True] $ \alternatives ->
+  forM_ [DepthFirst, Interleave] $ \strategy -> do
+    let source = sourceWith selectedType
+    environment <- mkNeutralDjinnEnvironment declarations
+    prepared <- expectShownRight $ RawEnvironment.prepareGroundSynthesisEnvironment environment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $ sharedName "contextualPolytype"
+    (implicit, _) <- expectShownRight $ SharedType.implicitizeLeadingForalls
+        (const (Nothing :: Maybe ())) fresh Set.empty source
+    let (_, contexts, goal) = SharedType.splitLeadingForalls implicit
+        configured = defaultQueryOptions
+            { optionAlternatives = alternatives, optionSorted = False, optionStrategy = strategy
+            , optionCutoff = 1, optionBudget = Just 4096 }
+    completed <- timeout 20000000 $ do
+        result <- expectShownRight $ inhabitTypedSynthesisResultPreparedWithSourceGoal
+            configured prepared source contexts (DjinnSourceInstantiationCandidates []) target goal
+        let candidates = SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+        assertBool "qualified consumer could not select the supplied forall" $ not $ null candidates
+        assertTypedCoreGraphs target source result
+        graphs <- mapM (expectShownRight . SharedTypedCandidate.typedCandidateTermGraph) candidates
+        forM_ graphs $ \graph -> do
+            assertBool "candidate lost its dictionary application" $ not $ null
+                [() | (_, SharedTypedGenerated.TermNode _ SharedTypedGenerated.TypedContextApplication{})
+                    <- SharedTypedGenerated.termGraphNodes graph]
+            assertBool "candidate did not select the exact supplied polytype" $ any (selectedPolytype selectedType) $
+                SharedTypedGenerated.termGraphNodes graph
+    case completed of
+        Nothing -> fail "qualified polytype selection exceeded its separate 20-second test guard"
+        Just () -> pure ()
+  where
+    proper = SharedKind.ProperTypeKind
+    variable = SharedType.TypeVariable
+    token = SharedType.TypeConstructor $ sharedName "PolyToken"
+    witness a r = SharedType.TypeApplication
+        (SharedType.TypeApplication (SharedType.TypeConstructor $ sharedName "PolyWitness") a) r
+    polytype = SharedType.ForallType ["b"] [] $ SharedType.FunctionType (variable "b") token
+    boxedPolytype = SharedType.TypeApplication (SharedType.TypeConstructor $ sharedName "PolyBox") polytype
+    requiredContext = Constraint (sharedName "PolyContext") [variable "a"]
+    consumer = SharedType.ForallType ["selected"] [requiredContext] $
+        SharedType.FunctionType (variable "selected") $ witness (variable "selected") (variable "r")
+    sourceWith selectedType = SharedType.ForallType ["a", "r"] [requiredContext] $
+        SharedType.FunctionType consumer $ SharedType.FunctionType selectedType $ witness selectedType (variable "r")
+    -- No constructors or global values can provide r. The only result source
+    -- is the qualified local consumer, instantiated with the whole forall.
+    declarations =
+        [ SharedDeclaration.ClassDeclaration () (sharedName "PolyContext")
+            [SharedDeclaration.TypeParameter "a" $ Just proper] [] []
+        , SharedDeclaration.AbstractTypeDeclaration () (sharedName "PolyToken") proper
+        , SharedDeclaration.AbstractTypeDeclaration () (sharedName "PolyWitness") $
+            SharedKind.FunctionKind proper $ SharedKind.FunctionKind proper proper
+        , SharedDeclaration.AbstractTypeDeclaration () (sharedName "PolyBox") $
+            SharedKind.FunctionKind proper proper
+        ]
+    selectedPolytype selectedType (_, SharedTypedGenerated.TermNode _ form) = case form of
+        SharedTypedGenerated.TypedImplicitTypeApplication _ _ application ->
+            SharedTypeAtom.alphaEquivalentTypes (fmap SharedType.FlexibleVariable selectedType) $
+                SharedTypedGenerated.implicitTypeApplicationSelected application
+        SharedTypedGenerated.TypedVisibleTypeApplication _ _ _ application ->
+            SharedTypeAtom.alphaEquivalentTypes (fmap SharedType.FlexibleVariable selectedType) $
+                SharedTypedGenerated.typeApplicationSelected application
+        _ -> False
+    fresh reserved original = Just $ choose $ original ++ "'"
+      where
+        choose candidate | candidate `Set.member` reserved = choose $ candidate ++ "'"
+                         | otherwise = candidate
 
 -- Native constructors arrive as closed polymorphic value schemes while their
 -- datatypes remain nominal. Structural DataTypeDeclaration expansion would

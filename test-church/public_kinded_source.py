@@ -51,7 +51,11 @@ def main():
     parser.add_argument('--exe', type=Path, required=True)
     parser.add_argument('--backend', choices=['djinn', 'exference'], default='djinn')
     parser.add_argument('--case', action='append', dest='cases')
+    parser.add_argument('--choice-budget', type=int,
+                        help='Djinn choice budget; omitted retains the frontend default')
     args = parser.parse_args()
+    if args.choice_budget is not None and (args.choice_budget < 0 or args.backend != 'djinn'):
+        parser.error('--choice-budget requires Djinn and a non-negative value')
     root = Path(__file__).resolve().parent.parent
     exe = args.exe.resolve()
     out = runtime.prepare_output_directory(args.output.resolve())
@@ -63,7 +67,7 @@ def main():
         cwd=root).decode().split('\0')
     paths = sorted({p for p in paths if p and (root/p).is_file()
                     and Path(p).suffix in ['.hs', '.cabal', '.py']})
-    report = dict(status='running', backend=args.backend, queries=[],
+    report = dict(status='running', backend=args.backend, queries=[], choice_budget=args.choice_budget,
                   source_sha256={p:runtime.sha256(root/p) for p in paths},
                   runtime_sha256={str(exe):runtime.sha256(exe)})
     for p in paths:
@@ -109,7 +113,9 @@ def main():
             report['queries'].append(row)
             shot = runner.run(label+'-one-shot',
                 [str(exe), args.backend, '--environment', str(environment),
-                 '--render', 'expression', '--select', 'first', signature], cwd=root, env=env)
+                 '--render', 'expression', '--select', 'first'] +
+                ([] if args.choice_budget is None else ['--choice-budget', str(args.choice_budget)]) +
+                [signature], cwd=root, env=env)
             row['one_shot'] = dict(exit_code=shot.returncode, stdout=shot.stdout, stderr=shot.stderr)
             if shot.returncode == 0 and shot.stdout.strip():
                 row['one_shot']['replay'] = replay(
@@ -123,6 +129,8 @@ def main():
                 ).replace('== (7,7)', '== (7,9)')
             command = [str(exe), 'repl', '--ignore-startup', '--environment', str(environment)]
             prefix = ':set prompt ""\n:backend '+args.backend+'\n:set allow-unused on\n:set djinn-axioms off\n'
+            if args.choice_budget is not None:
+                prefix += ':set choice-budget ' + str(args.choice_budget) + '\n'
             query = ':synth probe :: '+signature+' where '+predicate+'\n:quit\n'
             named = runner.run(label+'-named', command, source=prefix+query, cwd=root, env=env)
             row['named'] = dict(exit_code=named.returncode, stdout=named.stdout, stderr=named.stderr)

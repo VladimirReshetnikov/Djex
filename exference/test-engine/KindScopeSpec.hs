@@ -9,6 +9,10 @@ import Test.Tasty.HUnit ((@?=), assertBool, assertFailure, testCase)
 import Language.Haskell.Exference.Core.Internal.FlexibleIds (allocateNamespace)
 import Language.Haskell.Exference.Core.Expression (Expression (..))
 import qualified Language.Haskell.Exference.Core.Internal.ExpressionCheck as Check
+import qualified Language.Haskell.Exference.Core.Internal.Exference as Engine
+import Language.Haskell.Exference.Core.Internal.Options
+  ( ExferenceOptions (..), defaultExferenceOptions )
+import Language.Haskell.Exference.Core.Candidate (emptyExferenceSourceTypeVariableHints)
 import Language.Haskell.Exference.Core.FunctionBinding (EnvDictionary (..))
 import Language.Haskell.Exference.Core.Internal.KindScope
 import Language.Haskell.Exference.Core.Internal.Polytype
@@ -19,6 +23,9 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.RigidInstantiation
   ( planRigidInstantiation, mkRigidInstantiationContext )
 import qualified Language.Haskell.Synthesis.Generated as G
+import qualified Language.Haskell.Synthesis.Query as Query
+import qualified Language.Haskell.Synthesis.Search as Search
+import qualified Language.Haskell.Synthesis.Internal.TypedCandidate as Candidate
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Kind (Kind (..))
 import Language.Haskell.Synthesis.KindInference
@@ -153,6 +160,22 @@ tests = testGroup "lexical kind scope"
       kindScopeBinderKind extended firstBinder @?= Just higher
       kindScopeBinderKind extended secondBinder @?= Just proper
       left $ checkKindScopeCompatibility extended proper firstType secondType
+  , testCase "repeated declaration batches share parameters only within their own use" $ do
+      (_, scope) <- higherSource
+      let application = T.TypeApplication (ty 0) unit
+          values = [application, T.FunctionType application unit]
+      (firstUse, _, firstScope) <- right $ freshenKindScopeTypes reserved scope values []
+      (secondUse, _, secondScope) <- right $
+        freshenKindScopeTypes reserved firstScope values []
+      let firstVariables = foldMap T.freeVariables firstUse
+          secondVariables = foldMap T.freeVariables secondUse
+      Set.size firstVariables @?= 1
+      Set.size secondVariables @?= 1
+      assertBool "separate provider uses shared an identity" $
+        Set.null $ Set.intersection firstVariables secondVariables
+      forM_ (Set.toList $ Set.union firstVariables secondVariables) $ \variable ->
+        kindScopeBinderKind secondScope variable @?= Just higher
+      checkKindScopeTypes secondScope (map ((,) proper) $ firstUse ++ secondUse) @?= Right ()
   , testCase "a source from another nominal inventory cannot extend the scope" $ do
       (_, scope) <- higherSource
       checked <- right $ S.prepareSourceTypeKinds emptyKindAssumptions unit []
@@ -265,6 +288,50 @@ tests = testGroup "lexical kind scope"
         Left (Check.InvalidCheckKind _) -> pure ()
         Left failure -> assertFailure $ "wrong rejection: " ++ show failure
         Right _ -> assertFailure "unowned source callback acquired kind authority"
+  , testCase "live search consumes higher-kinded and vacuous callbacks" $ do
+      let variableResult = T.ForallType [v 0] [] $
+            T.FunctionType (T.ForallType [v 1] [] $ ty 0) (ty 0)
+          listResult = T.ForallType [v 0] [] $
+            T.FunctionType
+              (T.ForallType [v 1] [] $
+                T.FunctionType (T.TypeApplication (ty 1) unit) (ty 0))
+              (T.FunctionType (T.TypeApplication list unit) (ty 0))
+          annotations = [S.SourceKindAnnotation
+            [S.ForallBody, S.FunctionParameter] 0 higher]
+      environment <- right $ Engine.mkExferenceEnvironment $
+        EnvDictionary [] [] emptyStaticClassEnv
+      target <- right $ G.mkDefinitionName $ named "kinded"
+      forM_ [variableResult, listResult] $ \source -> do
+        checked <- right $ S.prepareSourceTypeKinds assumptions source annotations
+        let options = defaultExferenceOptions
+              { exferenceMaximumSteps = 512, exferenceAllowUnused = False }
+            query = Engine.ExferenceQuery source Set.empty options
+        checkedOptions <- right $ Engine.checkExferenceOptions options
+        results <- right $ Engine.findTypedQueryResultsInEnvironmentWithSourceKinds
+          checked Map.empty Map.empty target (emptyExferenceSourceTypeVariableHints source)
+          environment query checkedOptions
+        let candidates = concatMap (Search.batchCandidates . Query.resultSearch) results
+        assertBool ("no kind-checked candidate for " ++ show source) $ not $ null candidates
+        forM_ (take 2 candidates) $ \candidate -> do
+          kinds <- right $ Candidate.typedCandidateBinderKinds candidate
+          assertBool "candidate projection lost the higher-kinded binder" $
+            any ((== higher) . snd) kinds
+          _ <- right $ Candidate.typedCandidateTermGraph candidate
+          pure ()
+  , testCase "kinded search rejects source authority belonging to another query" $ do
+      checked <- right $ S.prepareSourceTypeKinds assumptions unit []
+      environment <- right $ Engine.mkExferenceEnvironment $
+        EnvDictionary [] [] emptyStaticClassEnv
+      target <- right $ G.mkDefinitionName $ named "kinded"
+      options <- right $ Engine.checkExferenceOptions defaultExferenceOptions
+      let different = T.FunctionType unit unit
+      case Engine.findTypedQueryResultsInEnvironmentWithSourceKinds
+          checked Map.empty Map.empty target
+          (emptyExferenceSourceTypeVariableHints different) environment
+          (Engine.ExferenceQuery different Set.empty defaultExferenceOptions) options of
+        Left (Engine.InvalidSourceKinds _) -> pure ()
+        Left failure -> assertFailure $ "wrong rejection: " ++ show failure
+        Right _ -> assertFailure "unrelated source acquired query authority"
   ]
 
 proper, higher :: GroundKind

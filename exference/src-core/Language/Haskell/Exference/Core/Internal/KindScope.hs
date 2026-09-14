@@ -9,6 +9,8 @@ module Language.Haskell.Exference.Core.Internal.KindScope
   ( KindScope
   , prepareKindScope
   , extendKindScope
+  , acquireKindScopeType
+  , freshenKindScopeTypes
   , kindScopeVariables
   , kindScopeBinderKind
   , kindScopeAnnotations
@@ -36,6 +38,7 @@ import Language.Haskell.Exference.Core.Internal.VariableSupply
 import Language.Haskell.Exference.Core.Types (HsType, SynthesisVariable)
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
+import Language.Haskell.Synthesis.Name (Boxity (Boxed))
 import Language.Haskell.Synthesis.KindInference
   ( GroundKind, KindAssumptions, checkTypesKinds
   , inferVariableKindsForObligations )
@@ -144,6 +147,42 @@ extendKindScope reserved scope@(KindScope assumptions kinds pending) checked
       let next = KindScope assumptions combined pending
       checkKindScopeTypes next [(ProperTypeKind, ty)]
       pure (ty, next)
+
+-- | Acquire an unannotated declaration scheme from this scope's inventory.
+-- Query-owned schemes must use their original checked annotations instead.
+acquireKindScopeType
+  :: Set.Set SynthesisVariable -> KindScope -> HsType
+  -> Either String (HsType, KindScope)
+acquireKindScopeType reserved scope@(KindScope assumptions _ _) source = do
+  checked <- first show $ S.prepareSourceTypeKinds assumptions source []
+  extendKindScope reserved scope checked
+
+-- | Freshen a declaration's value types and class constraints together.
+-- A synthetic telescope binds its implicit flexible parameters; nested
+-- foralls stay lexical and receive independent identities and kinds.
+freshenKindScopeTypes
+  :: Set.Set SynthesisVariable -> KindScope -> [HsType]
+  -> [Constraint HsType]
+  -> Either String ([HsType], [Constraint HsType], KindScope)
+freshenKindScopeTypes reserved scope types constraints = do
+  let variables = Set.toAscList $ Set.filter flexible $ Set.unions $
+        map T.freeVariables types ++
+        [T.freeVariables argument | Constraint _ arguments <- constraints, argument <- arguments]
+      terminal = T.TupleType Boxed []
+      source = T.ForallType variables constraints $ T.functionType types terminal
+  (prepared, updated) <- acquireKindScopeType reserved scope source
+  case prepared of
+    T.ForallType _ contexts body -> do
+      values <- unpack (length types) body
+      pure (values, contexts, updated)
+    _ -> Left "declaration kind freshening lost its synthetic telescope"
+ where
+  flexible T.FlexibleVariable{} = True
+  flexible T.RigidVariable{} = False
+  unpack 0 (T.TupleType Boxed []) = Right []
+  unpack remaining (T.FunctionType parameter result) | remaining > 0 =
+    (parameter :) <$> unpack (remaining - 1) result
+  unpack _ _ = Left "declaration kind freshening changed the value-type batch"
 
 retain
   :: Map.Map SynthesisVariable GroundKind

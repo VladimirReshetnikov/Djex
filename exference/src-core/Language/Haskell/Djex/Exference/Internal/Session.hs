@@ -22,6 +22,7 @@ module Language.Haskell.Djex.Exference.Internal.Session
   , sessionSearchEnvironment
   , sessionClassArity
   , elaborateSessionGoal
+  , elaborateSessionSourceKinds
   , elaborateSessionTypeAtKind
   , checkSessionTypeSynonymInspectionSaturation
   , normalizeSessionTypeSynonyms
@@ -73,6 +74,9 @@ import Language.Haskell.Synthesis.Declaration
   ( ValueSignature (..)
   , declarationTermSignatures
   )
+import qualified Language.Haskell.Synthesis.Declaration as Declaration
+import qualified Language.Haskell.Synthesis.SourceKind as SourceKind
+import qualified Language.Haskell.Synthesis.SourceKind.Expansion as SourceKindExpansion
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , shownErrorDiagnostic
@@ -86,6 +90,7 @@ import Language.Haskell.Synthesis.Inventory
   ( Inventory
   , inventoryClassArity
   , inventoryEnvironment
+  , inventoryKindAssumptions
   , mkInventoryFromEnvironmentWithClassPolicy
   )
 import Language.Haskell.Synthesis.KindInference
@@ -439,6 +444,24 @@ elaborateSessionGoal
   -> Either (TypeElaborationError SynthesisVariable) (Type SynthesisVariable)
 elaborateSessionGoal session = elaboratePreparedType
   freshSynthesisVariable (preparedView session) ProperTypeKind
+
+-- Kind annotations belong to lexical binder slots. Expand synonyms with
+-- that evidence attached, including vacuous and duplicated arguments.
+elaborateSessionSourceKinds
+  :: ExferenceSession
+  -> SourceKind.SourceTypeKinds SynthesisVariable
+  -> Either String (SourceKind.SourceTypeKinds SynthesisVariable)
+elaborateSessionSourceKinds session checked
+  | SourceKind.sourceKindAssumptions checked /= inventoryKindAssumptions inventory =
+      Left "checked source kinds belong to a different session inventory"
+  | otherwise = first show $
+      SourceKindExpansion.expandSourceTypeKinds freshSynthesisVariable definitions checked
+ where
+  inventory = exferenceSessionInventory session
+  definitions = Map.fromList
+    [(name, (map Declaration.parameterVariable parameters, body))
+    | Declaration.TypeSynonymDeclaration _ name parameters body <-
+        environmentDeclarations $ inventoryEnvironment inventory]
 
 -- | Elaborate a type against one exact ground kind from this session's sealed
 -- inventory. Provider assignments use this narrower internal operation after

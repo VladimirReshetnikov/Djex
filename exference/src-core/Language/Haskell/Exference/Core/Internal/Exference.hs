@@ -19,6 +19,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , findQueryResultsInEnvironmentWithCheckedOptions
   , findTypedQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
   , findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
+  , findTypedQueryResultsInEnvironmentWithSourceKinds
   , findTypedQueryResultsWithAllocators
   , findQueryResultsWithAllocators
   , typedQueryProjectionStrictnessForTesting
@@ -70,6 +71,7 @@ import Language.Haskell.Exference.Core.Internal.Candidate
   , ExferenceTypeVariableHints
   , projectValidatedCandidate
   , typeVariableHintsWithPlan
+  , retargetExferenceSourceTypeVariableHints
   )
 import Language.Haskell.Exference.Core.Internal.ExpressionCheck
 import Language.Haskell.Exference.Core.Score
@@ -83,6 +85,9 @@ import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
 import Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
 import Language.Haskell.Exference.Core.Internal.Polytype
+import qualified Language.Haskell.Exference.Core.Internal.KindScope as KindScope
+import qualified Language.Haskell.Synthesis.SourceKind as SourceKind
+import Language.Haskell.Synthesis.KindInference (GroundKind)
 import Language.Haskell.Exference.Core.Internal.RigidScope
   ( escapingRigidConstraints
   , emptyRigidScope
@@ -204,6 +209,7 @@ data CheckedExferenceQuery = CheckedExferenceQuery
   !(M.Map QualifiedName [HsType])
   !(M.Map QualifiedName [[HsType]])
   !RigidInstantiationPlan
+  !(Maybe KindScope.KindScope)
 
 -- | Why an input, environment, query, or option set was rejected before any
 -- search ran.  Validation reports the first failure in the historical guard
@@ -235,6 +241,7 @@ data ExferenceInputError
   | InvalidHeuristic String Penalty
   | RigidIdentifierExhaustion RigidInstantiationError
   | InvalidSourceTypeVariableHints ExferenceSourceTypeVariableHintError
+  | InvalidSourceKinds String
   deriving (Eq)
 
 -- | Whether a rejected input failed on its search options rather than the
@@ -266,6 +273,7 @@ isExferenceOptionError failure = case failure of
   InvalidHeuristic{} -> True
   RigidIdentifierExhaustion{} -> False
   InvalidSourceTypeVariableHints{} -> False
+  InvalidSourceKinds{} -> False
 
 instance Show ExferenceInputError where
   showsPrec precedence failure = showParen (precedence > 10)
@@ -318,6 +326,8 @@ renderExferenceInputError failure = case failure of
     constructor "RigidIdentifierExhaustion" [show rigidFailure]
   InvalidSourceTypeVariableHints hintFailure ->
     constructor "InvalidSourceTypeVariableHints" [show hintFailure]
+  InvalidSourceKinds kindFailure ->
+    constructor "InvalidSourceKinds" [show kindFailure]
  where
   constructor name fields = unwords $ name : fields
   sourceType typeExpression = "(" ++ showHsType M.empty typeExpression ++ ")"
@@ -381,6 +391,7 @@ data ValidatedEngineCandidate = ValidatedEngineCandidate
   [HsConstraint]
   ExferenceStats
   ExferenceTermGraphAvailability
+  [(HsType, GroundKind)]
 
 -- Stable within one deterministic query trace: the engine step identifies the
 -- producing batch and the pre-filter branch index identifies the candidate.
@@ -573,7 +584,7 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
       }
       providerCandidates
       providerAssignments
-      rigidPlan) =
+      rigidPlan sourceKindScope) =
   unfoldr helper rootFindExpressionState
  where
   -- Removing an already checked binding cannot invalidate the environment.
@@ -682,8 +693,11 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
     null source && not (SharedType.containsForall source)
 
   rootClassEnvironment = mkQueryClassEnv sClassEnv []
-  preparedCheckContext = prepareExpressionCheckContextWithSchemes
-    rigidPlan rootClassEnvironment funcs deconss' functionSchemes t
+  preparedCheckContext = case sourceKindScope of
+    Nothing -> prepareExpressionCheckContextWithSchemes
+      rigidPlan rootClassEnvironment funcs deconss' functionSchemes t
+    Just scope -> prepareExpressionCheckContextWithKindScope scope
+      rigidPlan rootClassEnvironment funcs deconss' functionSchemes t
 
   rootFindExpressionState = FindExpressionsState
     { findSteps = 0
@@ -746,10 +760,23 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
       -- The root goal and expression already own hole 0.
     , nodeNextVarId       = 1
     , nodeFlexibleIds     = supplyFromIdentifiers
-        $ IntSet.toAscList $ flexibleIdentifiers t
+        $ IntSet.toAscList $ IntSet.union (flexibleIdentifiers t) $
+          case sourceKindScope of
+            Nothing -> IntSet.empty
+            Just scope -> IntSet.unions $
+              IntSet.fromList
+                [identifier | SharedType.FlexibleVariable identifier <-
+                  S.toList $ KindScope.kindScopeVariables scope] :
+              map flexibleIdentifiers
+                (M.elems allFunctionSchemes
+                  ++ concatMap functionBindingTypes allFunctions
+                  ++ concatMap deconstructorBindingTypes deconss'
+                  ++ concatMap (constraint_params . snd)
+                    (environmentConstraints $ EnvDictionary allFunctions deconss' sClassEnv))
     , nodeRigidInstantiations = rigidInstantiations rigidPlan
     , nodeRigidPlan       = rigidPlan
     , nodeRigidScope      = emptyRigidScope
+    , nodeKindScope       = sourceKindScope
     , nodeDepth           = 0.0
     , nodeLastStepBinding = Nothing
     }
@@ -762,7 +789,7 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
         , exferenceDepthPruned = totalDepthPruned
         })
       (SharedQuality.rankCandidatesByQuality ranking providerQualityCost
-        (\(ValidatedEngineCandidate expression _ _ _) ->
+        (\(ValidatedEngineCandidate expression _ _ _ _) ->
           toGeneratedExpression expression)
       [ ValidatedEngineCandidate
           e
@@ -771,6 +798,7 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
             $ SharedCount.saturatingNaturalToInt
             $ frontierSize searchState)
           typedGraphAvailability
+          (checkedExpressionBinderKinds checkedEvidence)
       | ReadySolution originStep solutionIndex solution <- potentialSolutions
       , let contxt = nodeQueryClassEnv solution
       , remainingScopedConstraints <- maybeToList
@@ -1060,7 +1088,7 @@ findEngineCandidatesWithAllocatorsForTesting allocators' =
   concatMap (map observe . SharedSearch.batchCandidates)
     . findEngineBatchesWith allocators'
  where
-  observe (ValidatedEngineCandidate expression _ statistics availability) =
+  observe (ValidatedEngineCandidate expression _ statistics availability _) =
     (expression, statistics, availability)
 
 -- | Typed-candidate counterpart of the legacy differential oracle.  Retaining
@@ -1074,7 +1102,7 @@ findEngineCandidatesWithAllocatorsUsingLegacyStateStepForTesting allocators' =
   concatMap (map observe . SharedSearch.batchCandidates)
     . findEngineBatchesWithStateStepRoute LegacyStateStepAction allocators'
  where
-  observe (ValidatedEngineCandidate expression _ statistics availability) =
+  observe (ValidatedEngineCandidate expression _ statistics availability _) =
     (expression, statistics, availability)
 
 projectCompatibilityChunk :: EngineBatch -> ExferenceChunkElement
@@ -1100,7 +1128,7 @@ projectCompatibilityChunk chunk = ExferenceChunkElement
       | otherwise -> SearchPruned
 
   projectCompatibilityCandidate
-    (ValidatedEngineCandidate expression constraints statistics _) =
+    (ValidatedEngineCandidate expression constraints statistics _ _) =
       (expression, constraints, statistics)
 
 -- | Project exact engine totals into the historical chunk API without
@@ -1261,11 +1289,31 @@ findTypedQueryResultsWithCheckedOptionsAndAllocators
   -> CheckedExferenceOptions
   -> Either ExferenceInputError [ExferenceTypedResult]
 findTypedQueryResultsWithCheckedOptionsAndAllocators
-    allocators' candidates assignments target sourceHints environment query
+    allocators' candidates assignments =
+  findTypedQueryResultsWithKindsAndAllocators
+    allocators' candidates assignments Nothing
+
+-- The kind scope is source authority acquired before search, never a
+-- successful branch's inferred state.
+findTypedQueryResultsWithKindsAndAllocators
+  :: SearchAllocators
+  -> M.Map QualifiedName [HsType]
+  -> M.Map QualifiedName [[HsType]]
+  -> Maybe KindScope.KindScope
+  -> SharedGenerated.DefinitionName
+  -> ExferenceSourceTypeVariableHints
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> CheckedExferenceOptions
+  -> Either ExferenceInputError [ExferenceTypedResult]
+findTypedQueryResultsWithKindsAndAllocators
+    allocators' candidates assignments sourceKindScope target sourceHints environment query
       checkedOptions = do
-  checked@(CheckedExferenceQuery _ checkedQuery _ _ rigidPlan) <-
+  CheckedExferenceQuery checkedEnv checkedQuery checkedCandidates checkedAssignments rigidPlan _ <-
     prepareExferenceQueryWithCheckedOptionsAndEvidence
       environment checkedOptions candidates assignments queryWithTargetExcluded
+  let checked = CheckedExferenceQuery checkedEnv checkedQuery checkedCandidates
+        checkedAssignments rigidPlan sourceKindScope
   -- The opaque value is paired with the exact canonical goal for which its
   -- spelling scope was checked. Stable adapters retarget it only while
   -- performing origin-safe synonym elaboration; direct core callers cannot
@@ -1284,6 +1332,38 @@ findTypedQueryResultsWithCheckedOptionsAndAllocators
         (queryExcludedBindings query)
     }
 
+-- | Private kinded search entrance. Source identity is checked before lexical
+-- freshening, and all environment namespaces are reserved before acquiring
+-- query-owned binders. Stable adapters must also preserve kinded synonym
+-- expansion before calling this boundary.
+findTypedQueryResultsInEnvironmentWithSourceKinds
+  :: SourceKind.SourceTypeKinds SynthesisVariable
+  -> M.Map QualifiedName [HsType]
+  -> M.Map QualifiedName [[HsType]]
+  -> SharedGenerated.DefinitionName
+  -> ExferenceSourceTypeVariableHints
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> CheckedExferenceOptions
+  -> Either ExferenceInputError [ExferenceTypedResult]
+findTypedQueryResultsInEnvironmentWithSourceKinds source candidates assignments
+    target hints environment@(ExferenceEnvironment dictionary _ schemes) query options = do
+  unless (SharedType.canonicalizeType (SourceKind.sourceKindsType source)
+      == SharedType.canonicalizeType (queryGoalType query)) $
+    Left $ InvalidSourceKinds "checked source kinds belong to a different query"
+  let reserved = foldMap (foldMap S.singleton) $
+        M.elems schemes
+        ++ concatMap functionBindingTypes (environmentFunctions dictionary)
+        ++ concatMap deconstructorBindingTypes (environmentDeconstructors dictionary)
+        ++ concatMap (constraint_params . snd) (environmentConstraints dictionary)
+        ++ concat (M.elems candidates) ++ concatMap concat (M.elems assignments)
+  (goal, scope) <- either (Left . InvalidSourceKinds) Right $
+    KindScope.prepareKindScope reserved source
+  findTypedQueryResultsWithKindsAndAllocators defaultSearchAllocators
+    candidates assignments (Just scope) target
+    (retargetExferenceSourceTypeVariableHints goal hints) environment
+    (query {queryGoalType = goal}) options
+
 -- Keep this projection lazy in both the chunk and candidate dimensions.  The
 -- shared smart constructor observes only whether the candidate list is empty,
 -- so it neither invents logical evidence nor evaluates the candidate tail.
@@ -1298,11 +1378,11 @@ projectTypedQueryResult target typeHints =
  where
   projectCandidate
       (ValidatedEngineCandidate candidateExpression constraints statistics
-        availability) =
-    SharedTypedCandidate.mkCertificateCapableTypedCandidate
+        availability kinds) =
+    SharedTypedCandidate.mkKindedCertificateCapableTypedCandidate
       (projectValidatedCandidate
         target typeHints candidateExpression constraints statistics)
-      (case availability of
+      (fmap (\graph -> (graph, kinds)) $ case availability of
         ExferenceTermGraphUnavailable absence -> Left absence
         ExferenceTermGraphAvailable graph -> Right $ Left graph
         ExferenceTermGraphAssociated checked -> Right $ Right checked)
@@ -1358,6 +1438,7 @@ typedQueryProjectionStrictnessForTesting target typeHints =
     $ SharedSearch.SearchBatch SharedSearch.Continuing metadata
       ( ValidatedEngineCandidate expression [] (ExferenceStats 1 0 0)
           (error "typed compatibility forced graph availability")
+          (error "typed compatibility forced binder kinds")
       : error "typed compatibility forced the mapped candidate tail"
       )
   compatibilityCandidate = SharedTypedCandidate.typedCandidateCompatibility
@@ -1368,6 +1449,7 @@ typedQueryProjectionStrictnessForTesting target typeHints =
           (error "typed graph lookup forced compatibility expression")
           [] (ExferenceStats 1 0 0)
           (ExferenceTermGraphUnavailable TermGraphEvidenceMismatch)
+          (error "graph absence forced binder kinds")
       : error "typed graph lookup forced the mapped candidate tail"
       )
   fallbackObserved = case SharedTypedCandidate.typedCandidateTermGraph
@@ -1410,6 +1492,7 @@ queryProjectionStrictnessForTesting target typeHints =
     $ SharedSearch.SearchBatch SharedSearch.Continuing metadata
       ( ValidatedEngineCandidate expression [] (ExferenceStats 1 0 0)
           (error "query projection forced typed graph availability")
+          (error "query projection forced binder kinds")
       : error "query projection forced the mapped candidate tail"
       )
   firstCandidate = case SharedSearch.batchCandidates
@@ -1440,6 +1523,7 @@ compatibilityProjectionStrictnessForTesting =
     $ SharedSearch.SearchBatch SharedSearch.Continuing metadata
       ( ValidatedEngineCandidate expression [] (ExferenceStats 1 0 0)
           (error "compatibility projection forced typed graph availability")
+          (error "compatibility projection forced binder kinds")
       : error "compatibility projection forced the mapped candidate tail"
       )
   (observedExpression, observedConstraints, observedStatistics) =
@@ -1488,6 +1572,7 @@ prepareExferenceInput input = do
     M.empty
     M.empty
     rigidPlan
+    Nothing
  where
   environment = inputEnvironment input
   query = inputQuery input
@@ -1598,7 +1683,7 @@ prepareExferenceQueryWithCheckedOptionsAndEvidence
   let canonicalQuery = canonicalizeQuery query
   rigidPlan <- prepareRigidInstantiation rigidContext canonicalQuery
   pure $ CheckedExferenceQuery
-    sealed canonicalQuery candidates assignments rigidPlan
+    sealed canonicalQuery candidates assignments rigidPlan Nothing
  where
   query = uncheckedQuery {querySearchOptions = options}
   constraints = queryConstraints query
@@ -2266,6 +2351,7 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
         }
       let substs = IntMap.fromList
             [ (binder, TypeConstant rigid) | (binder, rigid) <- instantiations]
+      builderTransportKinds substs
       modify $ \node -> node
         { nodeGoals = TGoal
             (VarBinding var $ snd $ applySubsts substs t)
@@ -2300,6 +2386,7 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
                  | (binder, rigid) <- instantiations]
               openedContexts = map
                 (snd . constraintApplySubsts substitutions) contexts
+          builderTransportKinds substitutions
           modify $ \node -> node
             { nodeGoals = TGoal
                 (VarBinding var $ snd $ applySubsts substitutions t)
@@ -2428,17 +2515,20 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
         (TypeForallNative{}, _ : _) -> pure ()
         _ -> mzero
       supply <- gets nodeFlexibleIds
-      (instantiated, constraints, currentSupply) <- maybe
+      (instantiated, constraints, currentOpenings, currentSupply) <- maybe
         (lift $ truncateBranch BranchIdentifierSpaceExhausted) pure $
-          instantiateLeadingForallsWith
+          instantiateLeadingForallsWithOpenings
             (searchAllocateFlexibleNamespace allocators) supply source
       case splitArrowChain instantiated of
         (TypeForallNative{}, _ : _) -> pure ()
         _ -> mzero
-      (ultimateResult, futureSupply) <- maybe
+      (ultimateResult, futureOpenings, futureSupply) <- maybe
         (lift $ truncateBranch BranchIdentifierSpaceExhausted) pure $
           lookAhead currentSupply instantiated
+      builderRetainKindOpenings $ currentOpenings ++ futureOpenings
+      builderCheckKindEquality goalType ultimateResult
       substitutions <- maybe mzero pure $ unifyShared goalType ultimateResult
+      builderTransportKinds substitutions
       let currentBinders = freeVars instantiated `S.difference` freeVars source
           futureBinders = S.fromList $ IntSet.toList $
             reservedIdentifierSet futureSupply `IntSet.difference`
@@ -2461,10 +2551,11 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
      where
       lookAhead current sourceType = case fst $ splitArrowChain sourceType of
         residual@TypeForallNative{} -> do
-          (opened, _, next) <- instantiateLeadingForallsWith
+          (opened, _, openings, next) <- instantiateLeadingForallsWithOpenings
             (searchAllocateFlexibleNamespace allocators) current residual
-          lookAhead next opened
-        result -> Just (result, current)
+          (result, deeper, finalSupply) <- lookAhead next opened
+          pure (result, openings ++ deeper, finalSupply)
+        result -> Just (result, [], current)
 
     -- try to resolve the goal by looking at the parameters in scope, i.e.
     -- the parameters accumulated by building the expression so far.
@@ -2536,12 +2627,13 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
 
           ordinaryInstantiation = do
             supply <- gets nodeFlexibleIds
-            case instantiateLeadingForallsWith
+            case instantiateLeadingForallsWithOpenings
                 (searchAllocateFlexibleNamespace allocators)
                 supply
                 scheme of
               Nothing -> lift $ truncateBranch BranchIdentifierSpaceExhausted
-              Just (instantiated, constraints, nextSupply) -> do
+              Just (instantiated, constraints, openings, nextSupply) -> do
+                builderRetainKindOpenings openings
                 modify $ \node -> node {nodeFlexibleIds = nextSupply}
                 let (instantiatedResult, instantiatedParameters) =
                       splitArrowChain instantiated
@@ -2580,10 +2672,11 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
           overappliedInstantiationAt knownDomain = do
             unless (hasQuantifiedResult scheme) mzero
             supply <- gets nodeFlexibleIds
-            (instantiated, constraints, nextSupply) <- maybe
+            (instantiated, constraints, openings, nextSupply) <- maybe
               (lift $ truncateBranch BranchIdentifierSpaceExhausted) pure $
-                instantiateLeadingForallsWith
+                instantiateLeadingForallsWithOpenings
                   (searchAllocateFlexibleNamespace allocators) supply scheme
+            builderRetainKindOpenings openings
             let (result, parameters) = splitArrowChain instantiated
             case result of
               TypeVar identifier
@@ -2673,10 +2766,13 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
         $ map flexibleIdentifiers $ functionBindingTypes binding
       let
         rename = renameFlexibleType renaming
-        provType = rename $ functionResult binding
-        constraints = map (renameFlexibleConstraint renaming)
-          $ functionConstraints binding
-        parameters = map rename $ functionParameters binding
+      (freshTypes, constraints) <- builderFreshenKindValueTypes
+        (map rename $ functionResult binding : functionParameters binding)
+        (map (renameFlexibleConstraint renaming) $ functionConstraints binding)
+      (provType, parameters) <- case freshTypes of
+        resultType : parameterTypes -> pure (resultType, parameterTypes)
+        [] -> mzero
+      let
         good = addScore (heuristics_stepEnvGood h)
           $ functionPenalty binding
         bad = addScore (heuristics_stepEnvBad h)
@@ -2998,6 +3094,7 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
 
       byUnified :: Substs -> Substs -> StateT SearchNode SearchBranches ()
       byUnified originalGoalSS originalProvSS = do
+        builderCheckKindEquality goalType provided
         -- Constraint-only parameters cannot be inferred from the result or
         -- scheduled value arguments. The allocation snapshot identifies this
         -- provider use's fresh variables, excluding every persistent goal or

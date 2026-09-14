@@ -1370,6 +1370,19 @@ tests = testGroup "Exference private engine boundaries"
                 (error "availability equality forced associated payload"))
             @?= False
           _ <- evaluate $ force associated
+          let kinds = [(TypeVar 0, SharedKind.ProperTypeKind)]
+              kindedCandidate = TypedCandidate.mkKindedCertificateCapableTypedCandidate () $
+                Right (Right checked, kinds) `asTypeOf` Left ("" :: String)
+              poisoned = TypedCandidate.mkKindedCertificateCapableTypedCandidate ()
+                (error "compatibility forced certificate/kind availability")
+                  `asTypeOf` kindedCandidate
+          TypedCandidate.typedCandidateCompatibility poisoned @?= ()
+          TypedCandidate.typedCandidateBinderKinds kindedCandidate @?=
+            (Right kinds :: Either String [(HsType, SharedKindInference.GroundKind)])
+          TypedCandidate.typedCandidateTermGraph kindedCandidate @?= Right graph
+          TypedCandidate.foldTypedCandidateGraph
+            (\_ _ -> False) (\_ _ -> False) (\_ _ -> True) kindedCandidate @?= True
+          _ <- evaluate $ force kindedCandidate
           let witnesses =
                 [ witness
                 | (_, Typed.TermNode _

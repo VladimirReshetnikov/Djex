@@ -44,6 +44,7 @@ import Language.Haskell.Exference.Core.Internal.RigidScope
   (RigidScope)
 import Language.Haskell.Exference.Core.Internal.ScopedConstraint
   (ScopedConstraint)
+import Language.Haskell.Exference.Core.Internal.KindScope (KindScope)
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 
 import qualified Data.IntMap.Strict as IntMap
@@ -237,6 +238,7 @@ data SearchNode = SearchNode
   , nodeRigidInstantiations :: [(TVarId, TVarId)]
   , nodeRigidPlan :: !RigidInstantiationPlan
   , nodeRigidScope :: !RigidScope
+  , nodeKindScope :: Maybe KindScope
   , nodeDepth           :: {-# UNPACK #-} !Penalty
   , nodeLastStepBinding :: Maybe QualifiedName
   }

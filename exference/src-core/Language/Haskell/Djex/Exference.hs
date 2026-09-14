@@ -187,7 +187,7 @@ import Language.Haskell.Synthesis.Kind
   , observedKindNodeCount
   )
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
-import Language.Haskell.Synthesis.SourceKind (prepareSourceTypeKinds)
+import Language.Haskell.Synthesis.SourceKind (prepareSourceTypeKinds, sourceKindsType)
 import Language.Haskell.Synthesis.Name
   ( Name
   , renderCanonical
@@ -198,7 +198,6 @@ import Language.Haskell.Synthesis.Query
   , ProviderInstantiationAssignment (..)
   , QueryResult
   , QueryRequest (..)
-  , requestContextualType
   , requestContextualSourceKinds
   , maximumProviderInstantiationAssignments
   , maximumProviderInstantiationCandidates
@@ -733,19 +732,21 @@ runExferenceTypedQueryWithProviderEvidence
   (sharedGoal, checkedSourceHints) <-
     prepareExferenceRequestContexts
       (Session.sessionClassArity session) request
-  case exferenceRequestSourceKinds request of
-    [] -> pure ()
+  checkedKinds <- case exferenceRequestSourceKinds request of
+    [] -> pure Nothing
     kinds -> do
-      _checked <- first (requestDiagnostic . shownErrorDiagnostic "DJEX_EXF_SOURCE_KINDS"
+      checked <- first (requestDiagnostic . shownErrorDiagnostic "DJEX_EXF_SOURCE_KINDS"
         "source binder kinds contradict the execution query") $
           prepareSourceTypeKinds
             (inventoryKindAssumptions $ Session.exferenceSessionInventory session)
-            (requestContextualType query) (requestContextualSourceKinds query kinds)
-      Left $ requestDiagnostic $ contextualDiagnostic Error "DJEX_EXF_SOURCE_KINDS"
-        "kinded source search integration is not yet available"
-        "the request retains checked binder kinds; the current search path cannot discard them"
-  elaboratedGoal <- first (requestDiagnostic . elaborationFailure)
-    $ Session.elaborateSessionGoal session sharedGoal
+            sharedGoal (requestContextualSourceKinds query kinds)
+      Just <$> first (requestDiagnostic . shownErrorDiagnostic "DJEX_EXF_SOURCE_KINDS"
+        "Exference could not preserve source kinds through synonym expansion")
+          (Session.elaborateSessionSourceKinds session checked)
+  elaboratedGoal <- case checkedKinds of
+    Just checked -> pure $ sourceKindsType checked
+    Nothing -> first (requestDiagnostic . elaborationFailure)
+      $ Session.elaborateSessionGoal session sharedGoal
   backendGoal <- first
     (requestDiagnostic . shownErrorDiagnostic
       "DJEX_EXF_LOWER"
@@ -768,13 +769,17 @@ runExferenceTypedQueryWithProviderEvidence
         | Core.isExferenceOptionError failure = optionFailure failure
         | otherwise = requestDiagnostic $ shownErrorDiagnostic
             "DJEX_EXF_QUERY" "Exference rejected the query" failure
-  first searchFailure $ if Map.null providerAssignments
-    then CoreInternal.findTypedQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
-      providerCandidates target sourceHints
+  first searchFailure $ case checkedKinds of
+    Just checked -> CoreInternal.findTypedQueryResultsInEnvironmentWithSourceKinds
+      checked providerCandidates providerAssignments target sourceHints
       (Session.sessionSearchEnvironment session) input checkedOptions
-    else CoreInternal.findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
-      providerAssignments target sourceHints
-      (Session.sessionSearchEnvironment session) input checkedOptions
+    Nothing | Map.null providerAssignments ->
+      CoreInternal.findTypedQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
+        providerCandidates target sourceHints
+        (Session.sessionSearchEnvironment session) input checkedOptions
+    Nothing -> CoreInternal.findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
+        providerAssignments target sourceHints
+        (Session.sessionSearchEnvironment session) input checkedOptions
 
 prepareProviderInstantiationCandidates
   :: ExferenceSession

@@ -12,6 +12,7 @@ module Language.Haskell.Exference.Core.Internal.ExpressionCheck
   , NestedRigidProvenance
   , CheckedExpressionEvidence
   , checkedExpressionVisibleInstantiationRepair
+  , checkedExpressionBinderKinds
   , CheckedTypeApplicationOrigin
   , CheckedTypeApplicationOriginStep
   , checkedExpressionTypeApplicationOrigins
@@ -85,6 +86,7 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Unify (unifyShared, unifyRight)
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
+import Language.Haskell.Synthesis.KindInference (GroundKind)
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -233,6 +235,12 @@ data CheckedExpressionEvidence = CheckedExpressionEvidence
   CheckedTermResult
   [CheckedTypeApplicationOrigin]
   (Maybe Expression)
+  [(HsType, GroundKind)]
+
+-- | Exact variable-kind facts retained by the independent checker. The
+-- table travels with this checked expression and its graph reconstruction.
+checkedExpressionBinderKinds :: CheckedExpressionEvidence -> [(HsType, GroundKind)]
+checkedExpressionBinderKinds (CheckedExpressionEvidence _ _ _ _ kinds) = kinds
 
 -- | A proposed emission repair derived from completed type reconstruction.
 -- This is not checked evidence for the modified expression: callers must run
@@ -240,7 +248,7 @@ data CheckedExpressionEvidence = CheckedExpressionEvidence
 checkedExpressionVisibleInstantiationRepair
   :: CheckedExpressionEvidence -> Maybe Expression
 checkedExpressionVisibleInstantiationRepair
-    (CheckedExpressionEvidence _ _ _ repair) = repair
+    (CheckedExpressionEvidence _ _ _ repair _) = repair
 
 -- Failed transactional inference branches discard this source-order trace
 -- with the other checker state. Keep it independent of optional term graphs
@@ -323,7 +331,7 @@ checkedExpressionTypeApplicationOrigins
   :: CheckedExpressionEvidence
   -> [CheckedTypeApplicationOrigin]
 checkedExpressionTypeApplicationOrigins
-    (CheckedExpressionEvidence _ _ origins _) = origins
+    (CheckedExpressionEvidence _ _ origins _ _) = origins
 
 -- | Origin coordinates attached to checked visible applications, in source
 -- order.  Coordinates are lookup identities only; this projection grants no
@@ -334,7 +342,7 @@ checkedExpressionTypeApplicationOriginReferences
   :: CheckedExpressionEvidence
   -> [(Natural, Natural)]
 checkedExpressionTypeApplicationOriginReferences
-    (CheckedExpressionEvidence _ checkedResult origins _) =
+    (CheckedExpressionEvidence _ checkedResult origins _ _) =
   case checkedResult of
     CheckedTermResult _ (Right term) -> concatMap referencesForOrigin origins
      where
@@ -855,6 +863,9 @@ checkValidatedExpression provenCandidateRigids
     $ reverse $ checkTypeApplicationOrigins finalState
     )
     (if repaired == expression then Nothing else Just repaired)
+    [ (applyRigidAlpha rigidAlpha variable, kind)
+    | scope <- maybe [] pure $ checkKindScope finalState
+    , (variable, kind) <- KindScope.kindScopeAnnotations scope ]
   where
     -- Checking is deliberately bidirectional only where the expected type
     -- carries information which synthesis cannot recover. In particular, an
@@ -1017,11 +1028,15 @@ checkValidatedExpression provenCandidateRigids
     infer _ (ExpName name) = do
       checked <- case Map.lookup name functionSchemes of
         Just scheme | Set.null $ SharedType.freeVariables scheme ->
-          instantiateImplicitLocalProvider $
-            availableCheckedTerm scheme $ CheckedGlobal name Nothing
+          do
+            owned <- acquireDeclarationKindScheme scheme
+            instantiateImplicitLocalProvider $
+              availableCheckedTerm owned $ CheckedGlobal name Nothing
         _ | Just scheme <- implicitConstructorScheme name ->
-          instantiateImplicitLocalProvider $
-            availableCheckedTerm scheme $ CheckedGlobal name Nothing
+          do
+            owned <- acquireDeclarationKindScheme scheme
+            instantiateImplicitLocalProvider $
+              availableCheckedTerm owned $ CheckedGlobal name Nothing
         _ -> do
           instantiated <- instantiateBinding name
           let contextual = any
@@ -1379,7 +1394,10 @@ checkValidatedExpression provenCandidateRigids
       [] -> throwCheck $ UnknownBinding name
       _ : _ -> case Map.lookup name functionSchemes of
         Nothing -> instantiateBinding name
-        Just scheme -> recordAliveType scheme >> pure scheme
+        Just scheme -> do
+          owned <- acquireDeclarationKindScheme scheme
+          recordAliveType owned
+          pure owned
 
     -- Local polymorphic values are instantiated independently at every use.
     -- Their direct forall contexts become ordinary checker obligations. The
@@ -1774,7 +1792,7 @@ checkedExpressionTermGraph
   -> CheckedExpressionEvidence
   -> ExferenceTermGraphAvailability
 checkedExpressionTermGraph candidateKey
-    (CheckedExpressionEvidence compatibility checkedResult origins _) =
+    (CheckedExpressionEvidence compatibility checkedResult origins _ _) =
   case checkedResult of
     CheckedTermResult _ (Left reason) ->
       ExferenceTermGraphUnavailable reason
@@ -2749,6 +2767,23 @@ freshenTypes
   -> [HsConstraint]
   -> Check (NonEmpty HsType, [HsConstraint])
 freshenTypes types constraints = do
+  currentScope <- gets checkKindScope
+  case currentScope of
+    Nothing -> freshenUnkindedTypes types constraints
+    Just scope -> do
+      reserved <- gets $ reservedIdentifierSet . checkFlexibleIds
+      (freshTypes, freshConstraints, updated) <- either (throwCheck . InvalidCheckKind) pure $
+        KindScope.freshenKindScopeTypes
+          (Set.fromList $ map SharedType.FlexibleVariable $ IntSet.toList reserved)
+          scope (foldr (:) [] types) constraints
+      retainCheckerKindScope updated
+      case freshTypes of
+        firstType : rest -> pure (firstType :| rest, freshConstraints)
+        [] -> throwCheck $ InvalidCheckKind "freshening erased a nonempty type batch"
+
+freshenUnkindedTypes
+  :: NonEmpty HsType -> [HsConstraint] -> Check (NonEmpty HsType, [HsConstraint])
+freshenUnkindedTypes types constraints = do
   let variables = Set.toAscList
         $ foldMap freeVars types
         `Set.union` foldMap (foldMap freeVars . constraint_params) constraints
@@ -2758,6 +2793,28 @@ freshenTypes types constraints = do
     ( fmap (snd . applySubsts substitutions) types
     , map (snd . constraintApplySubsts substitutions) constraints
     )
+
+acquireDeclarationKindScheme :: HsType -> Check HsType
+acquireDeclarationKindScheme source = do
+  currentScope <- gets checkKindScope
+  case currentScope of
+    Nothing -> pure source
+    Just scope -> do
+      reserved <- gets $ reservedIdentifierSet . checkFlexibleIds
+      (owned, updated) <- either (throwCheck . InvalidCheckKind) pure $
+        KindScope.acquireKindScopeType
+          (Set.fromList $ map SharedType.FlexibleVariable $ IntSet.toList reserved) scope source
+      retainCheckerKindScope updated
+      pure owned
+
+retainCheckerKindScope :: KindScope.KindScope -> Check ()
+retainCheckerKindScope updated = modify' $ \current -> current
+  { checkKindScope = Just updated
+  , checkFlexibleIds = reserveIdentifiers
+      (IntSet.toList $ kindScopeFlexibleIdentifiers updated) (checkFlexibleIds current)
+  , checkAliveFlexibleIds = IntSet.union
+      (kindScopeFlexibleIdentifiers updated) (checkAliveFlexibleIds current)
+  }
 
 -- Search and the checker may encounter independent nested goals in different
 -- orders. Their dynamically fresh rigid spellings are therefore compared up

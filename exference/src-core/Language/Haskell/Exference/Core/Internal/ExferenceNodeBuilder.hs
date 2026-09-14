@@ -11,6 +11,10 @@ module Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
   , builderAllocHole
   , builderFreshenTVarNamespace
   , builderRecordVarUse
+  , builderRetainKindOpenings
+  , builderTransportKinds
+  , builderCheckKindEquality
+  , builderFreshenKindValueTypes
   )
 where
 
@@ -22,10 +26,18 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Internal.RigidScope
   (validateRigidSubstitutions)
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
+import qualified Language.Haskell.Exference.Core.Internal.KindScope as KindScope
+import Language.Haskell.Exference.Core.Internal.Polytype (LeadingForallOpening)
+import Language.Haskell.Exference.Core.Internal.VariableSupply
+  (reserveIdentifiers, reservedIdentifierSet)
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Lazy (StateT, gets, modify)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 
 -- | Allocate an expression hole without treating it as a variable introduced
 -- into scope. The returned identifier is the value before the increment.
@@ -108,6 +120,7 @@ builderApplySubst
   -- ^ Substitutions which belong to the persistent search node.
   -> StateT SearchNode SearchBranches ()
 builderApplySubst checkedSubstitutions appliedSubstitutions = do
+  builderTransportKinds checkedSubstitutions
   rigidScope <- gets nodeRigidScope
   case validateRigidSubstitutions rigidScope checkedSubstitutions of
     Left _ -> lift $ maybeBranch Nothing
@@ -118,3 +131,56 @@ builderApplySubst checkedSubstitutions appliedSubstitutions = do
           (nodeProvidedScopes node)
       , nodeRigidScope = nextRigidScope
       }
+
+builderRetainKindOpenings
+  :: [LeadingForallOpening] -> StateT SearchNode SearchBranches ()
+builderRetainKindOpenings openings = builderUpdateKinds $
+  \scope -> KindScope.retainLeadingForallKinds scope openings
+
+builderTransportKinds :: Substs -> StateT SearchNode SearchBranches ()
+builderTransportKinds substitutions = builderUpdateKinds $ \scope ->
+  snd <$> KindScope.substituteKindScope scope
+    (Map.fromList [(SharedType.FlexibleVariable variable, image)
+      | (variable, image) <- IntMap.toList substitutions]) []
+
+builderCheckKindEquality
+  :: HsType -> HsType -> StateT SearchNode SearchBranches ()
+builderCheckKindEquality left right = builderUpdateKinds $ \scope -> do
+  KindScope.checkKindScopeEquality scope left right
+  pure scope
+
+-- Declaration batches share their implicit parameters, but each use owns
+-- fresh lexical binders. The ordinary engine keeps its existing allocation.
+builderFreshenKindValueTypes
+  :: [HsType] -> [HsConstraint]
+  -> StateT SearchNode SearchBranches ([HsType], [HsConstraint])
+builderFreshenKindValueTypes types constraints = do
+  current <- gets nodeKindScope
+  case current of
+    Nothing -> pure (types, constraints)
+    Just scope -> do
+      reserved <- gets $ reservedIdentifierSet . nodeFlexibleIds
+      case KindScope.freshenKindScopeTypes
+          (Set.fromList $ map SharedType.FlexibleVariable $ IntSet.toList reserved)
+          scope types constraints of
+        Left _ -> lift $ maybeBranch Nothing
+        Right (freshTypes, freshConstraints, updated) -> do
+          builderUpdateKinds $ const $ Right updated
+          pure (freshTypes, freshConstraints)
+
+builderUpdateKinds
+  :: (KindScope.KindScope -> Either String KindScope.KindScope)
+  -> StateT SearchNode SearchBranches ()
+builderUpdateKinds update = do
+  current <- gets nodeKindScope
+  case current of
+    Nothing -> pure ()
+    Just scope -> case update scope of
+      Left _ -> lift $ maybeBranch Nothing
+      Right updated -> modify $ \node -> node
+        { nodeKindScope = Just updated
+        , nodeFlexibleIds = reserveIdentifiers
+            [variable | SharedType.FlexibleVariable variable <-
+              Set.toList $ KindScope.kindScopeVariables updated]
+            (nodeFlexibleIds node)
+        }

@@ -329,6 +329,7 @@ Library
     Language.Haskell.Exference.Core.Internal.ExpressionCheck
     Language.Haskell.Exference.Core.Internal.Options
     Language.Haskell.Exference.Core.Internal.Polytype
+    Language.Haskell.Exference.Core.Internal.KindScope
     Language.Haskell.Exference.Core.Internal.RigidScope
     Language.Haskell.Exference.Core.Internal.ScopedConstraint
     Language.Haskell.Exference.Core.Internal.SearchControl
@@ -750,6 +751,7 @@ Test-Suite exference-engine-tests
     NestedForallGraphSpec
     ImplicitConstructorGraphSpec
     GivenEvidenceSpec
+    KindScopeSpec
     Language.Haskell.Exference.Core.Candidate
     Language.Haskell.Exference.Core.ConstraintSolver
     Language.Haskell.Exference.Core.Declaration
@@ -765,6 +767,7 @@ Test-Suite exference-engine-tests
     Language.Haskell.Exference.Core.Internal.FlexibleIds
     Language.Haskell.Exference.Core.Internal.Options
     Language.Haskell.Exference.Core.Internal.Polytype
+    Language.Haskell.Exference.Core.Internal.KindScope
     Language.Haskell.Exference.Core.Internal.RigidScope
     Language.Haskell.Exference.Core.Internal.ScopedConstraint
     Language.Haskell.Exference.Core.Internal.Scope

@@ -32,6 +32,7 @@ module Language.Haskell.Exference.Core.Internal.ExpressionCheck
   , checkedExpressionTermGraph
   , prepareExpressionCheckContext
   , prepareExpressionCheckContextWithSchemes
+  , prepareExpressionCheckContextWithKindScope
   , checkExpressionInContext
   , checkExpressionInContextWithNestedRigidProvenance
   , checkExpressionInContextWithNestedRigidProvenanceEvidence
@@ -77,11 +78,13 @@ import Language.Haskell.Exference.Core.Internal.ScopedConstraint
   )
 import Language.Haskell.Exference.Core.Internal.VariableSupply
 import Language.Haskell.Exference.Core.Internal.Polytype
+import qualified Language.Haskell.Exference.Core.Internal.KindScope as KindScope
 import Language.Haskell.Exference.Core.RigidInstantiation
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
-import Language.Haskell.Exference.Core.Unify (unifyShared)
+import Language.Haskell.Exference.Core.Unify (unifyShared, unifyRight)
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
+import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -130,6 +133,7 @@ data ExpressionCheckError
   | InvalidCheckExpressionScope (SharedGenerated.ScopeError TVarId)
   | InvalidCheckExpressionSyntax SharedGenerated.RenderError
   | InvalidCheckDeconstructor DeconstructorValidationError
+  | InvalidCheckKind String
   deriving (Eq, Show)
 
 -- | A successful independent check can still decline to claim a typed graph.
@@ -510,6 +514,7 @@ data CheckState = CheckState
   , checkNextTypeApplicationOrigin :: !Natural
   , checkTypeApplicationOrigins :: [CheckedTypeApplicationOrigin]
   , checkProviderOccurrences :: [CheckedProviderOccurrence]
+  , checkKindScope :: Maybe KindScope.KindScope
   }
 
 -- | Fixed, independently validated inputs for checking many candidates from
@@ -525,6 +530,7 @@ data ExpressionCheckContext = ExpressionCheckContext
   (Map.Map QualifiedName HsType)
   (Map.Map QualifiedName Int)
   RigidInstantiationPlan
+  (Maybe KindScope.KindScope)
 
 type VariableEnvironment = IntMap.IntMap HsType
 type Check a = StateT CheckState (Either ExpressionCheckError) a
@@ -616,6 +622,34 @@ prepareExpressionCheckContextWithSchemes plan classEnvironment functions
     Right () -> Right ()
   prepareValidatedExpressionCheckContext plan classEnvironment functions
     deconstructors schemes goal
+
+-- | Private checked-kind entrance. Search must supply the scope acquired
+-- from the exact source query, with fresh lexical identities. Candidate
+-- substitutions and local instantiations are checked independently below;
+-- no search-produced kind assignments are imported.
+prepareExpressionCheckContextWithKindScope
+  :: KindScope.KindScope
+  -> RigidInstantiationPlan
+  -> QueryClassEnv
+  -> [FunctionBinding]
+  -> [DeconstructorBinding]
+  -> Map.Map QualifiedName HsType
+  -> HsType
+  -> Either ExpressionCheckError ExpressionCheckContext
+prepareExpressionCheckContextWithKindScope scope plan classEnvironment functions
+    deconstructors schemes goal = do
+  forM_ (Set.toList $ foldMap Set.singleton goal) $ \variable ->
+    case KindScope.kindScopeBinderKind scope variable of
+      Nothing -> Left $ InvalidCheckKind $
+        "query variable has no checked source kind: " ++ show variable
+      Just _ -> pure ()
+  either (Left . InvalidCheckKind) Right $
+    KindScope.checkKindScopeTypes scope [(ProperTypeKind, goal)]
+  ExpressionCheckContext checkedGoal openings classes fs ds retained arities checkedPlan _ <-
+    prepareExpressionCheckContextWithSchemes plan classEnvironment functions
+      deconstructors schemes goal
+  pure $ ExpressionCheckContext checkedGoal openings classes fs ds retained
+    arities checkedPlan $ Just scope
 
 -- Raw public entrances have already established the complete fixed-input
 -- invariant before reaching this worker. Instantiate first so the historical
@@ -717,6 +751,7 @@ prepareExpressionCheckContextUnchecked plan classEnvironment functions
     schemes
     (constructorArityIndex deconstructors)
     plan
+    Nothing
 
 -- Both public entrances establish the complete raw-input invariant before
 -- reaching this worker. Keeping planning outside it lets live search supply
@@ -730,7 +765,7 @@ checkValidatedExpression
   -> Either ExpressionCheckError CheckedExpressionEvidence
 checkValidatedExpression provenCandidateRigids
     (ExpressionCheckContext checkedGoal rootOpenings augmentedEnvironment
-      functions deconstructors functionSchemes _ rigidPlan)
+      functions deconstructors functionSchemes _ rigidPlan sourceKindScope)
     expected expression = do
   let candidateRigids = IntSet.filter
         (not . (`rigidInstantiationIdentifierIsReserved` rigidPlan))
@@ -738,9 +773,11 @@ checkValidatedExpression provenCandidateRigids
         $ expressionRigidIdentifiers expression
       initialState = CheckState
         { checkFlexibleIds = supplyFromIdentifierSet
-            $ IntSet.union
-                (flexibleIdentifiers checkedGoal)
-                (expressionFlexibleIdentifiers expression)
+            $ IntSet.unions
+                [ flexibleIdentifiers checkedGoal
+                , expressionFlexibleIdentifiers expression
+                , maybe IntSet.empty kindScopeFlexibleIdentifiers sourceKindScope
+                ]
         , checkAliveFlexibleIds = flexibleFreeIdentifiers checkedGoal
         , checkSubstitutions = IntMap.empty
         , checkLocalGivens = []
@@ -758,6 +795,7 @@ checkValidatedExpression provenCandidateRigids
         , checkNextTypeApplicationOrigin = 0
         , checkTypeApplicationOrigins = []
         , checkProviderOccurrences = []
+        , checkKindScope = sourceKindScope
         }
   (checkedResult, finalState) <- runStateT (do
     checked <- checkOpenedTelescope rootOpenings $
@@ -963,6 +1001,7 @@ checkValidatedExpression provenCandidateRigids
         -- the generated expression.
         SubsumedProviderForwarding -> do
           result <- zonk annotation'
+          checkKindSubsumption declared' result
           pure $ unavailableCheckedTerm result
             $ SubsumedLocalSpecialization variable declared' result
         InstantiateProviderUse -> do
@@ -1367,6 +1406,7 @@ checkValidatedExpression provenCandidateRigids
       consume fresh obligations checked = case checkedResultType checked of
         TypeForallNative (binder : remaining) contexts body -> do
           selected <- freshTypeVariable
+          checkKindSelection binder selected
           let result = SharedType.canonicalizeType $
                 substituteScopedVariable binder selected $
                   if null remaining && null contexts then body
@@ -1417,6 +1457,7 @@ checkValidatedExpression provenCandidateRigids
           -- ever extended rather than silently changing explicit evidence
           -- into inference.
           _ -> throwCheck FlexibleIdentifierSupplyExhausted
+        checkKindSelection binder replacement
         let substitute = substituteScopedVariable binder replacement
             instantiatedContexts = map (fmap substitute) contexts
             instantiatedBody = substitute body
@@ -2345,7 +2386,7 @@ validateCheckCandidateInputs
   -> Expression
   -> Either ExpressionCheckError ()
 validateCheckCandidateInputs
-    (ExpressionCheckContext _ _ classEnvironment _ _ _ constructorArities _)
+    (ExpressionCheckContext _ _ classEnvironment _ _ _ constructorArities _ _)
     expected expression = do
   mapM_ (validateCheckConstraint classEnvironment QueryConstraint) expected
   validateExpressionPatternArities
@@ -2614,7 +2655,10 @@ checkOpenedTelescope :: [CheckedOpening] -> Check CheckedTermResult
   -> Check CheckedTermResult
 checkOpenedTelescope [] action = action
 checkOpenedTelescope (opening : remaining) action = case opening of
-  CheckedOpenForall source selected ->
+  CheckedOpenForall source selected -> do
+    case source of
+      TypeForallNative (binder : _) _ _ -> checkKindSelection binder selected
+      _ -> throwCheck $ InvalidCheckKind "forall opening has no source binder"
     unaryCheckedTerm source (CheckedForallIntroduction selected)
       <$> checkOpenedTelescope remaining action
   CheckedOpenContext source -> case source of
@@ -2850,6 +2894,9 @@ unifyTypes left right = do
   rigidAlpha <- gets checkRigidAlpha
   let left'' = applyRigidAlpha rigidAlpha left'
       right'' = applyRigidAlpha rigidAlpha right'
+  kindScope <- gets checkKindScope
+  forM_ kindScope $ \scope -> either (throwCheck . InvalidCheckKind) pure $
+    KindScope.checkKindScopeEquality scope left'' right''
   case unifyShared left'' right'' of
     Nothing -> throwCheck $ TypeMismatch left'' right''
     Just substitutions -> do
@@ -2864,20 +2911,92 @@ unifyTypes left right = do
 bindVariable :: TVarId -> HsType -> Check ()
 bindVariable variable ty
   | containsVar variable ty = throwCheck $ InfiniteType variable ty
-  | otherwise = modify' $ \current -> current
-      { checkSubstitutions = IntMap.insert variable ty
-          $ IntMap.map (applySubst $ Subst variable ty)
-          $ checkSubstitutions current
-      }
+  | otherwise = do
+      _ <- transportCheckKinds
+        (Map.singleton (SharedType.FlexibleVariable variable) ty) []
+      modify' $ \current -> current
+        { checkSubstitutions = IntMap.insert variable ty
+            $ IntMap.map (applySubst $ Subst variable ty)
+            $ checkSubstitutions current
+        }
 
 zonk :: HsType -> Check HsType
 zonk ty = do
   substitutions <- gets checkSubstitutions
   rigidAlpha <- gets checkRigidAlpha
-  let (_, applied) = applySubsts substitutions ty
+  kindScope <- gets checkKindScope
+  transported <- case kindScope of
+    Nothing -> pure $ snd $ applySubsts substitutions ty
+    Just _ -> do
+      results <- transportCheckKinds
+        (Map.fromList [(SharedType.FlexibleVariable variable, image)
+          | (variable, image) <- IntMap.toList substitutions]) [ty]
+      case results of
+        [result] -> pure result
+        _ -> throwCheck $ InvalidCheckKind "kind substitution changed the batch shape"
+  let applied = transported
       canonical = SharedType.canonicalizeType
         $ applyRigidAlpha rigidAlpha applied
   if canonical == ty then pure canonical else zonk canonical
+
+kindScopeFlexibleIdentifiers :: KindScope.KindScope -> IntSet.IntSet
+kindScopeFlexibleIdentifiers scope = IntSet.fromList
+  [identifier | SharedType.FlexibleVariable identifier <-
+    Set.toList $ KindScope.kindScopeVariables scope]
+
+transportCheckKinds
+  :: Map.Map SynthesisVariable HsType -> [HsType] -> Check [HsType]
+transportCheckKinds substitutions sources = do
+  currentScope <- gets checkKindScope
+  case currentScope of
+    Nothing -> pure sources
+    Just scope -> do
+      (results, updated) <- either (throwCheck . InvalidCheckKind) pure $
+        KindScope.substituteKindScope scope substitutions sources
+      modify' $ \current -> current
+        { checkKindScope = Just updated
+        , checkFlexibleIds = reserveIdentifiers
+            (IntSet.toList $ kindScopeFlexibleIdentifiers updated)
+            (checkFlexibleIds current)
+        }
+      pure results
+
+checkKindSelection :: SynthesisVariable -> HsType -> Check ()
+checkKindSelection binder selected = do
+  currentScope <- gets checkKindScope
+  forM_ currentScope $ \scope -> do
+    case KindScope.kindScopeBinderKind scope binder of
+      Nothing -> throwCheck $ InvalidCheckKind $
+        "selected binder has no checked lexical kind: " ++ show binder
+      Just _ -> pure ()
+    _ <- transportCheckKinds (Map.singleton binder selected) []
+    pure ()
+
+-- The legacy classifier has already proved guarded shallow subsumption.
+-- Reproduce its one-sided body match on exact source identities so the
+-- selected images can also be checked at the provider binders' kinds.
+checkKindSubsumption :: HsType -> HsType -> Check ()
+checkKindSubsumption provider requested = do
+  currentScope <- gets checkKindScope
+  forM_ currentScope $ \scope -> do
+    let (binders, _, body) = SharedType.splitLeadingForalls provider
+        (_, _, target) = SharedType.splitLeadingForalls requested
+    forM_ binders $ \binder -> case KindScope.kindScopeBinderKind scope binder of
+      Nothing -> throwCheck $ InvalidCheckKind $
+        "subsumed provider binder has no checked kind: " ++ show binder
+      Just _ -> pure ()
+    substitutions <- maybe
+      (throwCheck $ TypeMismatch provider requested) pure $ unifyRight target body
+    results <- transportCheckKinds
+      (Map.fromList [(SharedType.FlexibleVariable variable, image)
+        | (variable, image) <- IntMap.toList substitutions]) [body]
+    updated <- gets checkKindScope
+    case (results, updated) of
+      ([instantiated], Just checkedScope) ->
+        either (throwCheck . InvalidCheckKind) pure $
+          KindScope.checkKindScopeCompatibility checkedScope ProperTypeKind
+            instantiated target
+      _ -> throwCheck $ InvalidCheckKind "kind subsumption lost its checked scope"
 
 -- | Open the goal's leading prenex chain exactly as live search does,
 -- returning the instantiated body together with every opened layer's

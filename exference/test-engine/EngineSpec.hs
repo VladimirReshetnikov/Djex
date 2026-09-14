@@ -72,6 +72,9 @@ import Language.Haskell.Exference.Core.Internal.Polytype
   , assignmentProviderInstantiations
   , groundProviderInstantiations
   , instantiateLeadingForallsWith
+  , instantiateLeadingForallsWithOpenings
+  , leadingForallOpeningSource
+  , leadingForallOpeningBindings
   , quantifiedProviderSubsumes
   )
 import Language.Haskell.Exference.Core.Internal.RigidScope
@@ -97,6 +100,8 @@ import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
+import qualified Language.Haskell.Synthesis.Kind as SharedKind
+import qualified Language.Haskell.Synthesis.SourceKind as SourceKind
 import qualified Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
   as Certificate
 import qualified Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association
@@ -113,6 +118,7 @@ import qualified Language.Haskell.Synthesis.TypedGenerated.Fingerprint
 import qualified NestedForallGraphSpec
 import qualified ImplicitConstructorGraphSpec
 import qualified GivenEvidenceSpec
+import qualified KindScopeSpec
 
 main :: IO ()
 main = do
@@ -127,6 +133,7 @@ tests = testGroup "Exference private engine boundaries"
   , NestedForallGraphSpec.tests
   , ImplicitConstructorGraphSpec.tests
   , GivenEvidenceSpec.tests
+  , KindScopeSpec.tests
   , testCase "rigid scopes reject direct and propagated skolem escapes" $ do
       let opened = registerRigidScope
             (IntSet.singleton 0) [7] emptyRigidScope
@@ -831,6 +838,50 @@ tests = testGroup "Exference private engine boundaries"
           bodyIdentifier @?= innerIdentifier
         actual -> fail $ "unexpected shadowed-forall instantiation: "
           ++ show actual
+  , testCase "forall allocation evidence preserves vacuous and shadowed kind owners" $ do
+      let proper = SharedKind.ProperTypeKind
+          higher = SharedKind.FunctionKind proper proper
+          outerClass = name "Outer"
+          unit = TypeTuple Boxed []
+          nestedValue = TypeForall [3] [] $ TypeArrow (TypeVar 3) (TypeVar 9)
+          inner = TypeForall [0] [] $ TypeArrow (TypeApp (TypeVar 0) unit) nestedValue
+          source = TypeForall [2, 0] [HsConstraint outerClass [TypeVar 0]] inner
+          assumptions = SharedKindInference.KindAssumptions Map.empty $
+            Map.singleton outerClass [Just proper]
+          initialSupply = supplyFromIdentifiers []
+      checked <- expectRight $ SourceKind.prepareSourceTypeKinds assumptions source
+        [SourceKind.SourceKindAnnotation [] 0 higher,
+         SourceKind.SourceKindAnnotation [SourceKind.ForallBody] 0 higher]
+      case instantiateLeadingForallsWithOpenings allocateNamespace initialSupply source of
+        Just (body, constraints, openings, finalSupply) -> do
+          map leadingForallOpeningBindings openings @?= [[(2, 12), (0, 10)], [(0, 13)]]
+          map leadingForallOpeningSource openings @?= [source, inner]
+          body @?= TypeArrow (TypeApp (TypeVar 13) unit) nestedValue
+          constraints @?= [HsConstraint outerClass [TypeVar 10]]
+          -- Slot ownership comes from the independently checked source. A
+          -- flattened map keyed by source ID 0 would conflate these kinds;
+          -- scanning the result cannot recover the vacuous ID 2 at all.
+          let transported =
+                [(fresh, Map.lookup (replicate depth SourceKind.ForallBody, slot) $
+                    SourceKind.sourceBinderKinds checked)
+                | (depth, opening) <- zip [0..] openings
+                , (slot, (_, fresh)) <- zip [0..] $ leadingForallOpeningBindings opening]
+          transported @?= [(12, Just higher), (10, Just proper), (13, Just higher)]
+          instantiateLeadingForallsWith allocateNamespace initialSupply source @?=
+            Just (body, constraints, finalSupply)
+        Nothing -> assertFailure "the opening discarded available lexical allocation evidence"
+  , testCase "forall allocation evidence retains constraint-only telescope steps" $ do
+      let outerClass = name "Outer"
+          obligation = HsConstraint outerClass [TypeVar 9]
+          residual = TypeForall [0] [] $ TypeVar 9
+          source = TypeForall [] [obligation] residual
+      case instantiateLeadingForallsWithOpenings allocateNamespace (supplyFromIdentifiers []) source of
+        Just (body, constraints, openings, _) -> do
+          body @?= TypeVar 9
+          constraints @?= [obligation]
+          map leadingForallOpeningSource openings @?= [source, residual]
+          map leadingForallOpeningBindings openings @?= [[], [(0, 10)]]
+        Nothing -> assertFailure "constraint-only opening failed"
   , testCase "ground provider evidence separates free and bound identities" $ do
       let outerClass = name "Outer"
           innerClass = name "Inner"

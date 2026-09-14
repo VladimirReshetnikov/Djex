@@ -11,6 +11,10 @@ module Language.Haskell.Exference.Core.Internal.Polytype
   , classifyProviderUse
   , quantifiedProviderSubsumes
   , instantiateLeadingForallsWith
+  , LeadingForallOpening
+  , leadingForallOpeningSource
+  , leadingForallOpeningBindings
+  , instantiateLeadingForallsWithOpenings
   , inferredProviderVisibleArguments
   , selectedPolytypeVisibleArguments
   , groundProviderInstantiations
@@ -186,14 +190,42 @@ instantiateLeadingForallsWith
   -> FlexibleIdSupply
   -> HsType
   -> Maybe (HsType, [HsConstraint], FlexibleIdSupply)
-instantiateLeadingForallsWith allocate initialSupply source =
-  go reservedSupply [] source
+instantiateLeadingForallsWith allocate initialSupply source = do
+  (body, constraints, _, finalSupply) <-
+    instantiateLeadingForallsWithOpenings allocate initialSupply source
+  pure (body, constraints, finalSupply)
+
+-- | One lexical forall layer and the exact renaming used to open it. Bindings
+-- retain source slot order, including vacuous binders. Repeated identifiers
+-- in different layers remain separate entries, rather than being merged into
+-- a spelling-keyed map. A layer with only constraints is retained as well.
+data LeadingForallOpening = LeadingForallOpening HsType [(TVarId, TVarId)]
+  deriving (Eq, Show)
+
+leadingForallOpeningSource :: LeadingForallOpening -> HsType
+leadingForallOpeningSource (LeadingForallOpening source _) = source
+
+leadingForallOpeningBindings :: LeadingForallOpening -> [(TVarId, TVarId)]
+leadingForallOpeningBindings (LeadingForallOpening _ bindings) = bindings
+
+-- | The same instantiation used by search and checking, with its lexical
+-- allocation evidence retained. Kind authority can follow these exact slots
+-- even when a binder has no remaining occurrence from which to recover it.
+instantiateLeadingForallsWithOpenings
+  :: ([TVarId]
+      -> FlexibleIdSupply
+      -> Maybe (FlexibleRenaming, FlexibleIdSupply))
+  -> FlexibleIdSupply
+  -> HsType
+  -> Maybe (HsType, [HsConstraint], [LeadingForallOpening], FlexibleIdSupply)
+instantiateLeadingForallsWithOpenings allocate initialSupply source =
+  go reservedSupply [] [] source
  where
   reservedSupply = reserveIdentifiers
     (IntSet.toAscList $ flexibleIdentifiers source)
     initialSupply
 
-  go supply contextChunks (TypeForallNative binders contexts body) = do
+  go supply contextChunks openings layer@(TypeForallNative binders contexts body) = do
     identifiers <- traverse SharedType.flexibleVariableIdentity binders
     guard $ IntSet.size (IntSet.fromList identifiers) == length identifiers
     (renaming, nextSupply) <- allocate identifiers supply
@@ -206,11 +238,15 @@ instantiateLeadingForallsWith allocate initialSupply source =
           | (old, fresh) <- IntMap.toAscList renaming
           ]
         rename = SharedType.renameScopedVariables scopedRenaming
+        opening = LeadingForallOpening layer
+          [(identifier, IntMap.findWithDefault identifier identifier renaming)
+          | identifier <- identifiers]
     go nextSupply
       (map (fmap rename) contexts : contextChunks)
+      (opening : openings)
       (rename body)
-  go supply contextChunks body = Just
-    (body, concat $ reverse contextChunks, supply)
+  go supply contextChunks openings body = Just
+    (body, concat $ reverse contextChunks, reverse openings, supply)
 
 -- | Preserve an impredicative choice which Haskell's simplified subsumption
 -- may not infer beneath another forall. Recover the selected leading-binder

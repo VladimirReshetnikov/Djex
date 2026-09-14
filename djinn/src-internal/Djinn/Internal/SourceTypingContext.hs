@@ -3,6 +3,8 @@
 module Djinn.Internal.SourceTypingContext
   ( SourceTypingContext
   , sourceTypingContext
+  , sourceTypingContextWithCheckedGoal
+  , sourceTypingCheckedGoal
   , sourceTypingContextWithProviderKinds
   , sourceTypingPreparedEnvironment
   , sourceTypingGoal
@@ -23,6 +25,7 @@ import qualified Language.Haskell.Synthesis.Environment as Environment
 import qualified Language.Haskell.Synthesis.Inventory as Inventory
 import Language.Haskell.Synthesis.KindInference (GroundKind)
 import Language.Haskell.Synthesis.Name (Name)
+import qualified Language.Haskell.Synthesis.SourceKind as SourceKind
 import qualified Language.Haskell.Synthesis.Type as Type
 
 -- The prepared environment is the original, nominal source inventory. In
@@ -32,10 +35,11 @@ data SourceTypingContext = SourceTypingContext
   PreparedEnvironment
   (Type.Type String)
   (Map.Map Name [GroundKind])
+  (Maybe (SourceKind.SourceTypeKinds String))
 
 sourceTypingContext
   :: PreparedEnvironment -> Type.Type String -> SourceTypingContext
-sourceTypingContext prepared goal = SourceTypingContext prepared goal Map.empty
+sourceTypingContext prepared goal = SourceTypingContext prepared goal Map.empty Nothing
 
 -- | Kinds admitted by the provider-assignment checker, keyed by the exact
 -- source provider. Ordinary inferred requests carry no extra kind authority.
@@ -44,21 +48,34 @@ sourceTypingContextWithProviderKinds
   -> Type.Type String
   -> Map.Map Name [GroundKind]
   -> SourceTypingContext
-sourceTypingContextWithProviderKinds = SourceTypingContext
+sourceTypingContextWithProviderKinds prepared goal kinds = SourceTypingContext prepared goal kinds Nothing
+
+-- | Only checked metadata under this exact nominal inventory can authorize
+-- lexical kind transport. The checked type itself is the source goal.
+sourceTypingContextWithCheckedGoal
+  :: PreparedEnvironment -> SourceKind.SourceTypeKinds String
+  -> Map.Map Name [GroundKind] -> Either String SourceTypingContext
+sourceTypingContextWithCheckedGoal prepared checked kinds
+  | SourceKind.sourceKindAssumptions checked /= Inventory.inventoryKindAssumptions
+      (preparedEnvironmentInventory prepared) = Left "source goal kinds belong to a different inventory"
+  | otherwise = Right $ SourceTypingContext prepared (SourceKind.sourceKindsType checked) kinds (Just checked)
+
+sourceTypingCheckedGoal :: SourceTypingContext -> Maybe (SourceKind.SourceTypeKinds String)
+sourceTypingCheckedGoal (SourceTypingContext _ _ _ checked) = checked
 
 sourceTypingPreparedEnvironment :: SourceTypingContext -> PreparedEnvironment
-sourceTypingPreparedEnvironment (SourceTypingContext prepared _ _) = prepared
+sourceTypingPreparedEnvironment (SourceTypingContext prepared _ _ _) = prepared
 
 sourceTypingGoal :: SourceTypingContext -> Type.Type String
-sourceTypingGoal (SourceTypingContext _ goal _) = goal
+sourceTypingGoal (SourceTypingContext _ goal _ _) = goal
 
 sourceTypingProviderKinds :: SourceTypingContext -> Map.Map Name [GroundKind]
-sourceTypingProviderKinds (SourceTypingContext _ _ kinds) = kinds
+sourceTypingProviderKinds (SourceTypingContext _ _ kinds _) = kinds
 
 -- | Constructor roles come from the sealed declaration inventory. This name
 -- projection does not repeat kind inference or source scheme elaboration.
 sourceTypingConstructorNames :: SourceTypingContext -> Set.Set Name
-sourceTypingConstructorNames (SourceTypingContext prepared _ _) = Set.fromList
+sourceTypingConstructorNames (SourceTypingContext prepared _ _ _) = Set.fromList
   [ Declaration.constructorName constructor
   | Declaration.DataTypeDeclaration _ _ _ constructors <-
       Environment.environmentDeclarations $
@@ -71,7 +88,7 @@ sourceTypingConstructorNames (SourceTypingContext prepared _ _) = Set.fromList
 -- Constructor signatures retain their nominal datatype applications.
 sourceTypingTermSchemes
   :: SourceTypingContext -> Either String (Map.Map Name (Type.Type String))
-sourceTypingTermSchemes (SourceTypingContext prepared _ _) =
+sourceTypingTermSchemes (SourceTypingContext prepared _ _ _) =
   Map.fromList . concat <$> mapM elaborate declarations
  where
   declarations = Environment.environmentDeclarations

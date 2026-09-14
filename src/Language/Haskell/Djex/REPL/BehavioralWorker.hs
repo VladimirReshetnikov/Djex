@@ -259,6 +259,7 @@ runBehavioralWorker = do
       result <- HintUnsafe.unsafeRunInterpreterWithArgs ["-XTypeAbstractions"] $ do
         Hint.set [Hint.languageExtensions Hint.:=
           [ Hint.RankNTypes, Hint.ImpredicativeTypes, Hint.ScopedTypeVariables
+          , Hint.LiberalTypeSynonyms
           , Hint.TypeApplications, Hint.AllowAmbiguousTypes
           , Hint.ExplicitNamespaces, Hint.PatternSynonyms ]]
         imports <- either (Catch.throwM . Hint.UnknownError) pure $

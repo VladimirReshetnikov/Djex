@@ -3504,6 +3504,18 @@ typeTests = testGroup "source types"
               (SharedType.TypeVariable flexible)
       TypeRender.renderType variableName (listOf churchBoolean) @?=
         "[(forall a. a -> a -> a)]"
+  , testCase "render checked binder declarations without decorating occurrences" $ do
+      let higher = ("f", True)
+          proper = ("a", False)
+          variable = SharedType.TypeVariable
+          identity = SharedType.ForallType [higher, proper] [] $
+            SharedType.FunctionType (variable proper) (variable proper)
+          cls = right $ mkIdentifier "C"
+          ty = SharedType.ForallType [] [Constraint cls [identity]] identity
+          binder (name, True) = "(" ++ name ++ " :: * -> *)"
+          binder (name, False) = name
+      TypeRender.renderTypeWithBinderNames FullyQualified fst binder ty @?=
+        "(C (forall (f :: * -> *) a. a -> a)) => forall (f :: * -> *) a. a -> a"
   , testCase "compare opaque polytypes by lexical alpha-equivalence" $ do
       let outerClass = right $ mkIdentifier "Outer"
           innerClass = right $ mkIdentifier "Inner"

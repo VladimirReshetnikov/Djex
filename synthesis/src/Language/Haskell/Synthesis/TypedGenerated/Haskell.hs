@@ -7,9 +7,13 @@ module Language.Haskell.Synthesis.TypedGenerated.Haskell
   , renderHaskellTermGraphAtSignature
   , renderHaskellTermGraphWithMetavariables
   , renderHaskellTermGraphAtSignatureWithMetavariables
+  , renderHaskellTermGraphWithKindsAndMetavariables
   ) where
 
-import Control.Monad (unless)
+import Control.Monad (foldM, unless)
+import Data.Void (absurd)
+import Language.Haskell.Synthesis.Kind (Kind (..))
+import Language.Haskell.Synthesis.KindInference (GroundKind)
 import Data.Char (isAlphaNum, isLower)
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
@@ -33,6 +37,7 @@ data HaskellGraphRenderError
   | HaskellGraphUnsupportedContextEvidence
   | HaskellGraphRootSignatureRequired
   | HaskellGraphRootSignatureMismatch
+  | HaskellGraphInvalidBinderKinds
   | HaskellGraphHole
   deriving (Eq, Show)
 
@@ -55,7 +60,7 @@ renderHaskellTermGraph
   => G.RenderOptions local
   -> Q.TermGraph (T.Type variable) local
   -> Either HaskellGraphRenderError String
-renderHaskellTermGraph = renderGraph (const False) Nothing
+renderHaskellTermGraph = renderGraph (const Nothing) (const False) Nothing
 
 -- | Render the right-hand side of a binding with this exact, explicitly
 -- quantified source signature. ScopedTypeVariables brings its leading binders
@@ -70,7 +75,7 @@ renderHaskellTermGraphAtSignature
   :: (Ord variable, Ord local)
   => G.RenderOptions local -> T.Type String -> Q.TermGraph (T.Type variable) local
   -> Either HaskellGraphRenderError String
-renderHaskellTermGraphAtSignature options signature = renderGraph (const False) (Just signature) options
+renderHaskellTermGraphAtSignature options signature = renderGraph (const Nothing) (const False) (Just signature) options
 
 -- | Render tagged synthesis variables, admitting local generalization of
 -- unconstrained flexible variables in an internal expression. A fresh variable
@@ -85,7 +90,7 @@ renderHaskellTermGraphWithMetavariables
   => G.RenderOptions local
   -> Q.TermGraph (T.Type (T.Variable variable)) local
   -> Either HaskellGraphRenderError String
-renderHaskellTermGraphWithMetavariables = renderGraph flexible Nothing
+renderHaskellTermGraphWithMetavariables = renderGraph (const Nothing) flexible Nothing
 
 -- | The source-signature counterpart of 'renderHaskellTermGraphWithMetavariables'.
 renderHaskellTermGraphAtSignatureWithMetavariables
@@ -94,7 +99,25 @@ renderHaskellTermGraphAtSignatureWithMetavariables
   -> Q.TermGraph (T.Type (T.Variable variable)) local
   -> Either HaskellGraphRenderError String
 renderHaskellTermGraphAtSignatureWithMetavariables options signature =
-  renderGraph flexible (Just signature) options
+  renderGraph (const Nothing) flexible (Just signature) options
+
+-- | Render the exact checked binder-kind table retained with this candidate.
+-- This is presentation metadata, not a replacement for source checking. The
+-- public frontend takes the table and graph from the same opaque candidate.
+renderHaskellTermGraphWithKindsAndMetavariables
+  :: (Ord variable, Ord local)
+  => G.RenderOptions local -> Maybe (T.Type String)
+  -> [(T.Type (T.Variable variable), GroundKind)]
+  -> Q.TermGraph (T.Type (T.Variable variable)) local
+  -> Either HaskellGraphRenderError String
+renderHaskellTermGraphWithKindsAndMetavariables options signature annotations graph = do
+  kinds <- foldM retain Map.empty annotations
+  renderGraph (`Map.lookup` kinds) flexible signature options graph
+ where
+  retain kinds (T.TypeVariable variable, kind) = case Map.lookup variable kinds of
+    Just previous | previous /= kind -> Left HaskellGraphInvalidBinderKinds
+    _ -> Right $ Map.insert variable kind kinds
+  retain _ _ = Left HaskellGraphInvalidBinderKinds
 
 flexible :: T.Variable variable -> Bool
 flexible T.FlexibleVariable{} = True
@@ -102,10 +125,10 @@ flexible T.RigidVariable{} = False
 
 renderGraph
   :: (Ord variable, Ord local)
-  => (variable -> Bool) -> Maybe (T.Type String)
+  => (variable -> Maybe GroundKind) -> (variable -> Bool) -> Maybe (T.Type String)
   -> G.RenderOptions local -> Q.TermGraph (T.Type variable) local
   -> Either HaskellGraphRenderError String
-renderGraph canGeneralize suppliedSignature options graph = do
+renderGraph binderKind canGeneralize suppliedSignature options graph = do
   _ <- syntax $ G.renderExpression options erased
   root <- node $ Q.termGraphRoot graph
   unless (Set.null $ T.freeVariables $ Q.termNodeType root) $
@@ -211,11 +234,11 @@ renderGraph canGeneralize suppliedSignature options graph = do
 
   -- Each bound type gets a name disjoint from every opened skolem name.
   -- Repeated source identities in nested foralls are handled by lexical maps.
-  typeText scope ty = R.renderTypeWithQualification qualification id
+  typeText scope ty = R.renderTypeWithBinderNames qualification fst declaredBinder
     <$> rename (0 :: Int) scope ty
   rename depth scope ty = case ty of
     T.TypeVariable variable -> maybe (Left HaskellGraphUnboundTypeVariable)
-      (Right . T.TypeVariable) $ Map.lookup variable scope
+      (Right . T.TypeVariable . (\spelling -> (spelling, Nothing))) $ Map.lookup variable scope
     T.TypeConstructor name -> Right $ T.TypeConstructor name
     T.TypeApplication f a -> T.TypeApplication <$> rename depth scope f <*> rename depth scope a
     T.FunctionType a b -> T.FunctionType <$> rename depth scope a <*> rename depth scope b
@@ -225,9 +248,15 @@ renderGraph canGeneralize suppliedSignature options graph = do
             ["djexBound" ++ show depth ++ "_" ++ show index
             | index <- [0 :: Int .. length variables - 1]]
           nested = Map.union (Map.fromList $ zip variables spellings) scope
-      T.ForallType spellings
+      T.ForallType (zip spellings $ map binderKind variables)
         <$> traverse (traverse $ rename (depth + 1) nested) constraints
         <*> rename (depth + 1) nested body
+
+  declaredBinder (spelling, Nothing) = spelling
+  declaredBinder (spelling, Just kind) = parens $ spelling ++ " :: " ++ kindText kind
+  kindText ProperTypeKind = "*"
+  kindText (FunctionKind domain result) = parens (kindText domain) ++ " -> " ++ kindText result
+  kindText (KindVariable impossible) = absurd impossible
 
   patternText names scope pattern = do
     ty <- typeText scope $ Q.typedPatternType pattern
@@ -315,14 +344,14 @@ renderGraph canGeneralize suppliedSignature options graph = do
           (Q.implicitTypeApplicationSelected witness)
       Q.TypedForallIntroduction _ body witness ->
         case (Q.forallIntroductionSource witness, Q.forallIntroductionVariable witness) of
-          (T.ForallType (_ : _) _ _, T.TypeVariable variable) -> do
+          (T.ForallType (binder : _) _ _, T.TypeVariable variable) -> do
             let spelling = freshSpelling (Set.fromList $ Map.elems scope) $
                   "djexSkolem" ++ show (Q.termNodeIdValue key)
                 nested = Map.insert variable spelling scope
                 name = helper key
             opened <- typeText nested $ Q.forallIntroductionBody witness
             result <- render names nested givens locals body
-            pure $ parens $ "let { " ++ name ++ " :: forall " ++ spelling ++ ". "
+            pure $ parens $ "let { " ++ name ++ " :: forall " ++ declaredBinder (spelling, binderKind binder) ++ ". "
               ++ opened ++ "; " ++ name ++ " = " ++ result ++ " } in " ++ name
           _ -> Left HaskellGraphUnsupportedForall
       Q.TypedContextIntroduction occurrence body witness -> do

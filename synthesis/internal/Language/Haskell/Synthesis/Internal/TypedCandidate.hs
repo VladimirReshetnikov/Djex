@@ -10,6 +10,7 @@
 module Language.Haskell.Synthesis.Internal.TypedCandidate
   ( TypedCandidate
   , mkTypedCandidate
+  , mkKindedTypedCandidate
   , mkCertificateCapableTypedCandidate
   , mkCertificateAssociatedTypedCandidate
   , mapTypedCandidateCompatibility
@@ -17,9 +18,11 @@ module Language.Haskell.Synthesis.Internal.TypedCandidate
   , typedCandidateCompatibility
   , typedQueryResultCompatibility
   , typedCandidateTermGraph
+  , typedCandidateBinderKinds
   ) where
 
 import Control.DeepSeq (NFData (rnf))
+import Language.Haskell.Synthesis.KindInference (GroundKind)
 
 import Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association
   ( CheckedTypeApplicationCertificateGraph
@@ -55,6 +58,10 @@ data TypedCandidateGraph failure ty local where
   TypedCandidatePlainGraph
     :: TermGraph ty local
     -> TypedCandidateGraph failure ty local
+  TypedCandidateKindedGraph
+    :: TermGraph ty local
+    -> [(ty, GroundKind)]
+    -> TypedCandidateGraph failure ty local
   TypedCandidateCertificateGraph
     :: NFData variable
     => CheckedTypeApplicationCertificateGraph variable local
@@ -72,8 +79,8 @@ instance
   TypedCandidate leftCompatibility leftGraph ==
       TypedCandidate rightCompatibility rightGraph =
     leftCompatibility == rightCompatibility &&
-      typedCandidateGraphProjection leftGraph ==
-        typedCandidateGraphProjection rightGraph
+      typedCandidateGraphSemanticProjection leftGraph ==
+        typedCandidateGraphSemanticProjection rightGraph
 
 instance
     ( Ord failure
@@ -86,8 +93,8 @@ instance
       (TypedCandidate rightCompatibility rightGraph) =
     case compare leftCompatibility rightCompatibility of
       EQ -> compare
-        (typedCandidateGraphProjection leftGraph)
-        (typedCandidateGraphProjection rightGraph)
+        (typedCandidateGraphSemanticProjection leftGraph)
+        (typedCandidateGraphSemanticProjection rightGraph)
       result -> result
 
 instance
@@ -101,7 +108,10 @@ instance
       showString "TypedCandidate " .
       showsPrec 11 compatibility .
       showChar ' ' .
-      showsPrec 11 (typedCandidateGraphProjection graph)
+      showsPrec 11 (typedCandidateGraphProjection graph) .
+      (case graph of
+        TypedCandidateKindedGraph _ kinds -> showString " withBinderKinds " . shows kinds
+        _ -> id)
 
 instance
     ( NFData failure
@@ -123,6 +133,18 @@ mkTypedCandidate compatibility graph =
   TypedCandidate compatibility $ case graph of
     Left failure -> TypedCandidateGraphUnavailable failure
     Right checkedGraph -> TypedCandidatePlainGraph checkedGraph
+
+-- | Retain an engine-checked graph and its exact binder-kind table in one
+-- lazy carrier. The private engine caller is responsible for checking both.
+mkKindedTypedCandidate
+  :: candidate
+  -> Either failure (TermGraph ty local, [(ty, GroundKind)])
+  -> TypedCandidate failure ty local candidate
+mkKindedTypedCandidate compatibility checked =
+  TypedCandidate compatibility $ case checked of
+    Left failure -> TypedCandidateGraphUnavailable failure
+    Right (graph, []) -> TypedCandidatePlainGraph graph
+    Right (graph, kinds) -> TypedCandidateKindedGraph graph kinds
 
 -- | Package-private, lazy conversion of the compatibility vocabulary while
 -- retaining the exact hidden graph carrier. Engine-owned adapters must prove
@@ -197,6 +219,8 @@ foldTypedCandidateGraph unavailable plain associated
     unavailable compatibility failure
   TypedCandidatePlainGraph checkedGraph ->
     plain compatibility checkedGraph
+  TypedCandidateKindedGraph checkedGraph _ ->
+    plain compatibility checkedGraph
   TypedCandidateCertificateGraph checkedGraph ->
     associated compatibility checkedGraph
 
@@ -230,6 +254,7 @@ typedCandidateGraphProjection
 typedCandidateGraphProjection graph = case graph of
   TypedCandidateGraphUnavailable failure -> Left failure
   TypedCandidatePlainGraph checkedGraph -> Right checkedGraph
+  TypedCandidateKindedGraph checkedGraph _ -> Right checkedGraph
   TypedCandidateCertificateGraph checkedGraph ->
     Right $ checkedTypeApplicationCertificateGraph checkedGraph
 
@@ -240,4 +265,25 @@ rnfTypedCandidateGraph
 rnfTypedCandidateGraph graph = case graph of
   TypedCandidateGraphUnavailable failure -> rnf failure
   TypedCandidatePlainGraph checkedGraph -> rnf checkedGraph
+  TypedCandidateKindedGraph checkedGraph kinds -> rnf checkedGraph `seq` rnf kinds
   TypedCandidateCertificateGraph checkedGraph -> rnf checkedGraph
+
+-- | Read exact binder kinds retained by the engine that checked this graph.
+-- Keys are variable types in that graph's identity domain, never source names.
+-- An empty table means that this candidate carries no explicit kind metadata;
+-- it does not authorize assigning proper kind to every binder.
+typedCandidateBinderKinds
+  :: TypedCandidate failure ty local candidate
+  -> Either failure [(ty, GroundKind)]
+typedCandidateBinderKinds (TypedCandidate _ graph) = case graph of
+  TypedCandidateGraphUnavailable failure -> Left failure
+  TypedCandidateKindedGraph _ kinds -> Right kinds
+  _ -> Right []
+
+typedCandidateGraphSemanticProjection
+  :: TypedCandidateGraph failure ty local
+  -> Either failure (TermGraph ty local, [(ty, GroundKind)])
+typedCandidateGraphSemanticProjection graph = case graph of
+  TypedCandidateGraphUnavailable failure -> Left failure
+  TypedCandidateKindedGraph checked kinds -> Right (checked, kinds)
+  _ -> fmap (\checked -> (checked, [])) $ typedCandidateGraphProjection graph

@@ -11,6 +11,7 @@ module Language.Haskell.Synthesis.TypedCandidate
   , typedCandidateCompatibility
   , typedQueryResultCompatibility
   , typedCandidateTermGraph
+  , typedCandidateBinderKinds
   ) where
 
 import Language.Haskell.Synthesis.Internal.TypedCandidate
@@ -18,4 +19,5 @@ import Language.Haskell.Synthesis.Internal.TypedCandidate
   , typedCandidateCompatibility
   , typedQueryResultCompatibility
   , typedCandidateTermGraph
+  , typedCandidateBinderKinds
   )

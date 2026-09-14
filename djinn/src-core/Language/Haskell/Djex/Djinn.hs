@@ -30,6 +30,8 @@ module Language.Haskell.Djex.Djinn
   , defaultQueryOptions
   , DjinnRequest
   , mkDjinnRequest
+  , mkDjinnRequestWithSourceKinds
+  , djinnRequestSourceKinds
   , djinnRequestQuery
   , parseDjinnRequest
   , parseDjinnRequestWithCheckedTarget
@@ -65,6 +67,9 @@ module Language.Haskell.Djex.Djinn
   , renderDjinnCandidateDefinition
   ) where
 
+import Data.Bifunctor (first)
+import Language.Haskell.Synthesis.Inventory (inventoryKindAssumptions)
+import Language.Haskell.Synthesis.SourceKind (SourceTypeKinds, prepareSourceTypeKinds)
 import Djinn.Core
   ( DjinnCandidateDetails (..)
   , DjinnCandidate
@@ -88,6 +93,8 @@ import Language.Haskell.Djex.Djinn.Internal.Request
   , defaultQueryOptions
   , djinnRequestQuery
   , mkDjinnRequest
+  , mkDjinnRequestWithSourceKinds
+  , djinnRequestSourceKinds
   , validateDjinnTarget
   )
 import qualified Language.Haskell.Djex.Djinn.Internal.Request as Request
@@ -131,6 +138,7 @@ import Language.Haskell.Synthesis.Query
   , RequestProvenance (..)
   , mkQueryResult
   , requestContextualType
+  , requestContextualSourceKinds
   , resultEvidence
   , resultSearch
   , withRequestProvenance
@@ -362,11 +370,13 @@ runDjinnTypedQueryWithProviderEvidence session evidence request = do
   let query = djinnRequestQuery request
   (contexts, goal) <- Request.prepareDjinnRequest
     (Session.sessionClassArity session) request
-  let execute = Core.inhabitTypedSynthesisResultPreparedWithSourceGoal
-        (requestOptions query)
-        (Session.sessionPreparedEnvironment session)
-        (requestContextualType query)
-        contexts
+  checked <- prepareKindedSourceExecution session request
+  let run = case checked of
+        Nothing -> Core.inhabitTypedSynthesisResultPreparedWithSourceGoal
+          (requestOptions query) (Session.sessionPreparedEnvironment session) (requestContextualType query)
+        Just source -> Core.inhabitTypedSynthesisResultPreparedWithKindedSourceGoal
+          (requestOptions query) (Session.sessionPreparedEnvironment session) source
+      execute = run contexts
         (djinnSourceEvidence evidence)
         (requestTarget query)
         goal
@@ -381,16 +391,33 @@ runDjinnTypedQueryStreamWithProviderEvidence session evidence request = do
   let query = djinnRequestQuery request
   (contexts, goal) <- Request.prepareDjinnRequest
     (Session.sessionClassArity session) request
-  case Core.inhabitTypedSynthesisStreamPreparedWithSourceGoal
-      (requestOptions query)
-      (Session.sessionPreparedEnvironment session)
-      (requestContextualType query)
-      contexts
+  checked <- prepareKindedSourceExecution session request
+  let run = case checked of
+        Nothing -> Core.inhabitTypedSynthesisStreamPreparedWithSourceGoal
+          (requestOptions query) (Session.sessionPreparedEnvironment session) (requestContextualType query)
+        Just source -> Core.inhabitTypedSynthesisStreamPreparedWithKindedSourceGoal
+          (requestOptions query) (Session.sessionPreparedEnvironment session) source
+  case run contexts
       (djinnSourceEvidence evidence)
       (requestTarget query)
       goal of
     Left failure -> Left $ djinnQueryFailure request failure
     Right results -> Right $ map (adaptDjinnQueryResult session request) results
+
+-- Validate against the execution session, not the inventory which happened
+-- to parse the source. Core consumes the checked value through session-owned
+-- expansion and independent lexical source graph checking.
+prepareKindedSourceExecution :: DjinnSession -> DjinnRequest -> Either Diagnostic (Maybe (SourceTypeKinds DjinnTypeVariable))
+prepareKindedSourceExecution session request
+  | null kinds = Right Nothing
+  | otherwise = first (Request.withDjinnRequestProvenance request) $
+      fmap Just $ first (shownErrorDiagnostic "DJEX_DJINN_SOURCE_KINDS"
+        "source binder kinds contradict the execution query") $
+          prepareSourceTypeKinds (inventoryKindAssumptions $ djinnSessionInventory session)
+            (requestContextualType query) (requestContextualSourceKinds query kinds)
+ where
+  query = djinnRequestQuery request
+  kinds = djinnRequestSourceKinds request
 
 djinnSourceEvidence :: DjinnProviderEvidence -> Core.DjinnSourceProviderEvidence
 djinnSourceEvidence evidence = case evidence of

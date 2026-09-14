@@ -68,6 +68,7 @@ import Language.Haskell.Djex.HaskellSrc
   , parseSourceType
   , parseSourceTypeInScope
   , parsedSourceType
+  , parsedSourceRequestKinds
   , parsedSourceTypeLocation
   , parsedSourceTypeVariableNames
   )
@@ -347,7 +348,8 @@ mkExferenceRequestWithCheckedTargetFromParsed options checkedTarget parsed = do
         , requestContexts = []
         , requestOptions = options
         }
-  Request.mkExferenceRequestWithSourceInfo
+  Request.mkExferenceRequestWithSourceInfoAndKinds
     (parsedSourceTypeVariableNames parsed)
     (parsedSourceTypeLocation parsed)
+    (parsedSourceRequestKinds parsed)
     query

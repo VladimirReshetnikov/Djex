@@ -8,12 +8,13 @@ module Djinn.Internal.SourceGraph
   ( SourceGraphError(..)
   , checkSourceClauseGraph
   , checkAnnotatedSourceClauseGraph
+  , checkAnnotatedSourceClauseGraphWithKinds
   ) where
 
 import Control.Monad (foldM, unless, when, zipWithM, zipWithM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict
-  ( StateT, evalStateT, get, gets, modify, runStateT )
+  ( StateT, get, gets, modify, runStateT )
 import Data.Bifunctor (first)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -25,8 +26,9 @@ import Djinn.Internal.SourceAnnotation
 import Djinn.Internal.LJTFormula (Symbol)
 import Djinn.Internal.SourceTypingContext
 import Djinn.Internal.Environment (preparedEnvironmentInventory)
+import qualified Djinn.Internal.LexicalKinds as Lexical
 import Djinn.Internal.SourceGraphKinds
-  ( validateSourceGraphKinds, inferSourceGraphMetavariableKinds )
+  ( validateSourceGraphKindsWithLexicalKinds, inferSourceGraphMetavariableKindsWithLexicalKinds )
 import qualified Language.Haskell.Synthesis.Declaration as D
 import Language.Haskell.Synthesis.Constraint (Constraint(..))
 import qualified Language.Haskell.Synthesis.Environment as E
@@ -66,6 +68,7 @@ data CheckState = CheckState
   , checkAnnotations :: SourceAnnotations
   , checkSourceVariables :: Map.Map String Type
   , checkSourceGivens :: Map.Map Symbol (Constraint Type, Q.ContextEvidence)
+  , checkLexicalKinds :: Lexical.LexicalKinds
   }
 
 type Check = StateT CheckState (Either SourceGraphError)
@@ -80,7 +83,15 @@ checkSourceClauseGraph key context = checkAnnotatedSourceClauseGraph key context
 checkAnnotatedSourceClauseGraph
   :: Natural -> SourceTypingContext -> SourceAnnotations -> G.FunctionClause String
   -> Either SourceGraphError (Q.TermGraph Type String)
-checkAnnotatedSourceClauseGraph key context annotations annotatedClause = do
+checkAnnotatedSourceClauseGraph key context annotations clause =
+  fst <$> checkAnnotatedSourceClauseGraphWithKinds key context annotations clause
+
+-- The kind table is returned only together with the successfully checked graph.
+-- Consumers must retain this exact association when exposing rendering hints.
+checkAnnotatedSourceClauseGraphWithKinds
+  :: Natural -> SourceTypingContext -> SourceAnnotations -> G.FunctionClause String
+  -> Either SourceGraphError (Q.TermGraph Type String, [(Type, KI.GroundKind)])
+checkAnnotatedSourceClauseGraphWithKinds key context annotations annotatedClause = do
   clause <- if Map.null annotations then pure annotatedClause else do
     expression <- first SourceGraphTypingFailure $ eraseSourceAnnotations annotations $
       G.functionClauseExpression annotatedClause
@@ -97,41 +108,48 @@ checkAnnotatedSourceClauseGraph key context annotations annotatedClause = do
       constructors = Map.restrictKeys globals constructorNames
       emptyTypes = Set.fromList
         [name | D.DataTypeDeclaration _ name _ [] <- declarations]
-      goal = fmap T.FlexibleVariable $ sourceTypingGoal context
+      originalGoal = fmap T.FlexibleVariable $ sourceTypingGoal context
       reserved = Set.unions
         [ T.freeVariables ty `Set.union` Set.fromList (T.typeBinderVariables ty)
-        | ty <- goal : Map.elems globals
+        | ty <- originalGoal : Map.elems globals
         ]
-      initial = CheckState key 0 100000 0 reserved Map.empty Map.empty
-        Map.empty Map.empty globals constructors emptyTypes [] annotations Map.empty Map.empty
+  (goal, lexical) <- case sourceTypingCheckedGoal context of
+    Nothing -> pure (originalGoal, Lexical.emptyLexicalKinds)
+    Just checked -> first SourceGraphTypingFailure $ Lexical.prepareLexicalKinds reserved checked
+  let initial = CheckState key 0 100000 0 (Set.union reserved $ Lexical.lexicalVariables lexical) Map.empty Map.empty
+        Map.empty Map.empty globals constructors emptyTypes [] annotations Map.empty Map.empty lexical
   first (SourceGraphTypingFailure . show) $ G.validateFunctionClauseScope clause
   (root, state) <- runStateT
     (checkExpression Map.empty (G.functionClauseExpression annotatedClause) goal) initial
   (provisional, observedState) <- runStateT
     (mapM (resolveNodeWith zonk) $ Map.toAscList $ checkNodes state) state
+  (retained, kindState) <- runStateT resolvedLexicalSelections observedState
   unresolvedKinds <- first (SourceGraphTypingFailure . ("before source type completion: " ++)) $
-    inferSourceGraphMetavariableKinds context
+    inferSourceGraphMetavariableKindsWithLexicalKinds (checkLexicalKinds kindState) retained context
       (Map.keys $ checkMetas state `Map.difference` checkSubstitutions state)
       $ Q.TermGraphSource root provisional
-  let representatives = closedKindRepresentatives $ I.inventoryKindAssumptions $
+  let synonymArities = Map.fromList
+        [(name, length parameters) | D.TypeSynonymDeclaration _ name parameters _ <- declarations]
+      representatives = closedKindRepresentatives synonymArities $ I.inventoryKindAssumptions $
         preparedEnvironmentInventory $ sourceTypingPreparedEnvironment context
-  (_, completedState) <- runStateT (mapM_ (complete representatives) unresolvedKinds) observedState
-  nodes <- evalStateT
+  (_, completedState) <- runStateT (mapM_ (complete representatives) unresolvedKinds) kindState
+  (nodes, resolvedState) <- runStateT
     (mapM (resolveNodeWith resolveEvidenceType) $ Map.toAscList $ checkNodes completedState)
     completedState
+  (finalRetained, finalState) <- runStateT resolvedLexicalSelections resolvedState
   let structure = Q.sharedTypeStructure
         { Q.forallTypeStructure = Just Q.sharedContextualForallTypeStructure
         , Q.constructorPatternFieldTypes = constructorFields constructors
         }
       source = Q.TermGraphSource root nodes
   first (SourceGraphTypingFailure . ("completed source graph: " ++)) $
-    validateSourceGraphKinds context source
+    validateSourceGraphKindsWithLexicalKinds (checkLexicalKinds finalState) finalRetained context source
   graph <- first SourceGraphSealingFailure $ Q.sealTermGraphWithContext
     Q.sharedContextTypeStructure structure
     Q.defaultTermGraphLimits source
   unless (Q.eraseTermGraphToFunctionClause (G.clauseName clause) graph == clause) $
     Left SourceGraphProjectionMismatch
-  pure graph
+  pure (graph, Lexical.lexicalKindAnnotations $ checkLexicalKinds finalState)
  where
   complete representatives (variable, kind) = case Map.lookup kind representatives of
     Nothing -> failCheck $ "no admitted closed source type for unresolved kind: " ++ show kind
@@ -142,22 +160,35 @@ checkAnnotatedSourceClauseGraph key context annotations annotatedClause = do
       bindMeta variable selected
 
 -- Type choices only: completing a vacuous instantiation introduces no term
--- provider. Start with unit and the exact admitted constructor kinds, then
--- close under partial application. Every added key is a result-kind subterm
--- of that finite inventory, so this deterministic census reaches a fixed point.
-closedKindRepresentatives :: KI.KindAssumptions -> Map.Map KI.GroundKind Type
-closedKindRepresentatives assumptions = close initial
+-- provider. Generative constructors permit partial application, while synonyms
+-- must receive every declared parameter before they can be used as a type.
+-- Every added kind is a result-kind subterm of the finite inventory, so this
+-- deterministic census reaches a fixed point without inventing providers.
+closedKindRepresentatives
+  :: Map.Map Name Int -> KI.KindAssumptions -> Map.Map KI.GroundKind Type
+closedKindRepresentatives synonymArities assumptions = close initial
  where
+  constructors = Map.toAscList $ KI.typeConstructorKinds assumptions
   initial = foldl add (Map.singleton K.ProperTypeKind $ T.TupleType Boxed [])
-    [(kind, T.TypeConstructor name) | (name, kind) <- Map.toAscList $ KI.typeConstructorKinds assumptions]
+    [(kind, T.TypeConstructor name) | (name, kind) <- constructors,
+      Map.findWithDefault 0 name synonymArities == 0]
   add representatives (kind, ty) = Map.insertWith (\_ original -> original) kind ty representatives
+  saturate _ 0 kind ty = Just (kind, ty)
+  saturate representatives count (K.FunctionKind domain result) ty = do
+    argument <- Map.lookup domain representatives
+    saturate representatives (count - 1) result $ T.TypeApplication ty argument
+  saturate _ _ _ _ = Nothing
   close representatives =
     let applications =
           [ (result, T.TypeApplication function argument)
           | (K.FunctionKind domain result, function) <- Map.toAscList representatives
           , Just argument <- [Map.lookup domain representatives]
           ]
-        extended = foldl add representatives applications
+        synonyms =
+          [ selected | (name, kind) <- constructors,
+            Just arity <- [Map.lookup name synonymArities], arity > 0,
+            Just selected <- [saturate representatives arity kind $ T.TypeConstructor name] ]
+        extended = foldl add representatives $ applications ++ synonyms
     in if Map.size extended == Map.size representatives then extended else close extended
 
 failCheck :: String -> Check a
@@ -228,9 +259,22 @@ zonk ty = do
   substitutions <- gets checkSubstitutions
   let relevant = Map.restrictKeys substitutions $ T.freeVariables ty
   resolved <- mapM zonk relevant
-  either liftFailure (pure . eraseEmptyForalls . T.canonicalizeType) $ substitute resolved ty
- where
-  liftFailure = lift . Left
+  eraseEmptyForalls . T.canonicalizeType <$> substituteChecked resolved ty
+
+substituteChecked :: Map.Map Variable Type -> Type -> Check Type
+substituteChecked substitutions source = do
+  authority <- gets checkLexicalKinds
+  (result, retained) <- either failCheck pure $ Lexical.substituteLexicalKinds authority substitutions source
+  modify $ \state -> state
+    { checkLexicalKinds = retained
+    , checkReserved = Set.union (checkReserved state) $ Lexical.lexicalVariables retained
+    }
+  pure result
+
+resolvedLexicalSelections :: Check [(KI.GroundKind, Type)]
+resolvedLexicalSelections = do
+  selections <- gets $ Lexical.lexicalSelections . checkLexicalKinds
+  mapM (traverse zonk) selections
 
 -- Empty, context-free wrappers have no binder or dictionary to introduce.
 -- Keep every nonempty binder/context layer and all nested type structure.
@@ -270,7 +314,8 @@ unify left right = do
   tick
   l <- zonk left
   r <- zonk right
-  if A.alphaEquivalentTypes l r then pure () else do
+  explicitKinds <- gets $ Lexical.hasLexicalKinds . checkLexicalKinds
+  if l == r || (not explicitKinds && A.alphaEquivalentTypes l r) then pure () else do
     metas <- gets checkMetas
     case (l, r) of
       (T.TypeVariable variable, _) | Map.member variable metas -> bindMeta variable r
@@ -306,8 +351,9 @@ underLevel action = do
 
 consumeForall :: Type -> Type -> Check Type
 consumeForall source selected = case source of
-  T.ForallType (binder : rest) constraints body ->
-    either (lift . Left) (pure . T.canonicalizeType) $ substitute
+  T.ForallType (binder : rest) constraints body -> do
+    modify $ \state -> state {checkLexicalKinds = Lexical.retainKindSelection binder selected $ checkLexicalKinds state}
+    T.canonicalizeType <$> substituteChecked
       (Map.singleton binder selected)
       (if null rest && null constraints then body else T.ForallType rest constraints body)
   T.ForallType [] (_ : _) _ -> failCheck "source type application cannot consume dictionary evidence"
@@ -487,7 +533,7 @@ sourceAnnotationType source = do
   variables <- gets checkSourceVariables
   unless (T.freeVariables source `Set.isSubsetOf` Map.keysSet variables) $
     failCheck "selected source type refers outside its lexical opening"
-  lift $ substitute
+  substituteChecked
     (Map.fromList [(T.FlexibleVariable name, ty) | (name, ty) <- Map.toList variables])
     (fmap T.FlexibleVariable source)
 
@@ -565,7 +611,9 @@ inferSelectedSourceApplication locals expression original arguments dictionaries
     _ -> checkExpression locals expression source
   actual <- nodeType provider
   unify actual source
-  consume provider source selected dictionaries
+  -- The independently inferred provider owns the lexical kind identities.
+  -- The erased annotation supplies selections but cannot replace that type.
+  consume provider actual selected dictionaries
  where
   -- A selected argument may itself be a forall or qualified type. Once the
   -- original telescope has been consumed, that resulting type belongs to the

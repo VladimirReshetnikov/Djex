@@ -246,6 +246,7 @@ Library
     Djinn.Internal.SourceAnnotation
     Djinn.Internal.SourceGraphKinds
     Djinn.Internal.SourceTypingContext
+    Djinn.Internal.LexicalKinds
     Djinn.Internal.Declaration
     Djinn.Internal.GeneratedDeduplication
     Djinn.Internal.HCheck.Implementation
@@ -404,6 +405,7 @@ Test-Suite djex-tests
     ContextEvidenceSpec
     ContextBudgetSpec
     SourceKindParserSpec
+    SourceKindRequestSpec
     KindedSourceConversionSpec
   -- This integration suite deliberately crosses the stable facade, both raw
   -- search APIs, and the HSE compatibility API.
@@ -498,6 +500,7 @@ Test-Suite synthesis-length-tests
     Djinn.Internal.SourceAnnotation
     Djinn.Internal.SourceGraphKinds
     Djinn.Internal.SourceTypingContext
+    Djinn.Internal.LexicalKinds
     LengthWhereSpec
     SMTLibLiveSpec
     SMTLibQFLIASpec
@@ -587,6 +590,7 @@ Test-Suite synthesis-certificate-tests
     Language.Haskell.Synthesis.Name
     Language.Haskell.Synthesis.Qualification
     Language.Haskell.Synthesis.Query
+    Language.Haskell.Synthesis.SourceKind
     Language.Haskell.Synthesis.Search
     Language.Haskell.Synthesis.Type
     Language.Haskell.Synthesis.TypeAtom
@@ -805,6 +809,7 @@ Test-Suite djinn-source-graph-private-tests
     djinn/test-source-graph-private
     djinn/src-internal
   Other-Modules:
+    LexicalKindSpec
     DjinnContextSpec
     ContextualInstantiationSpec
     ContextualErasureSpec
@@ -823,4 +828,5 @@ Test-Suite djinn-source-graph-private-tests
     Djinn.Internal.SourceAnnotation
     Djinn.Internal.SourceGraphKinds
     Djinn.Internal.SourceTypingContext
+    Djinn.Internal.LexicalKinds
   Build-Depends:  djex

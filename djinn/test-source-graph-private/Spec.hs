@@ -5,6 +5,7 @@ import qualified Data.Set as Set
 import Data.Void (Void)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertBool, assertEqual, assertFailure, testCase)
+import qualified LexicalKindSpec
 import qualified KindGraphCases
 import qualified DjinnContextSpec
 import qualified ContextualInstantiationSpec
@@ -32,7 +33,7 @@ import qualified Language.Haskell.Synthesis.TypedGenerated as Q
 main :: IO ()
 main = defaultMain $ testGroup "private Djinn source graph checker"
   [ sharingTests, lexicalTests, constructorTests, specializationTests
-  , KindGraphCases.tests, DjinnContextSpec.tests, ContextualInstantiationSpec.tests
+  , LexicalKindSpec.tests, KindGraphCases.tests, DjinnContextSpec.tests, ContextualInstantiationSpec.tests
   , ContextualErasureSpec.tests, NestedGivenErasureSpec.tests, SourceSelectionSpec.tests ]
 
 type DeclarationSource = Declaration String Void ()

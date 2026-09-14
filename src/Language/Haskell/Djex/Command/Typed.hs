@@ -29,10 +29,11 @@ elaborateSourceCandidate parsed projectSignature options candidate =
       ( "graph present; root=" ++ show (termGraphRoot graph)
           ++ "; nodes=" ++ show (length $ termGraphNodes graph)
       , either (Left . show) Right $
-          case traverse (`Map.lookup` sourceNames) $ parsedSourceType parsed of
-            Nothing -> Haskell.renderHaskellTermGraphWithMetavariables options graph
-            Just signature -> Haskell.renderHaskellTermGraphAtSignatureWithMetavariables options
-              (projectSignature signature) graph
+          case typedCandidateBinderKinds candidate of
+            Left _ -> Left Haskell.HaskellGraphInvalidBinderKinds
+            Right kinds -> Haskell.renderHaskellTermGraphWithKindsAndMetavariables options
+              (projectSignature <$> traverse (`Map.lookup` sourceNames) (parsedSourceType parsed))
+              kinds graph
       )
  where
   hintedNames = Map.fromList

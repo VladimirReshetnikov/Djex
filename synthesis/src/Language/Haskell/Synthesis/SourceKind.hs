@@ -10,6 +10,7 @@ module Language.Haskell.Synthesis.SourceKind
   , SourceKindError (..)
   , SourceTypeKinds
   , prepareSourceTypeKinds
+  , validateSourceKindAnnotations
   , sourceKindsType
   , sourceKindAnnotations
   , sourceBinderKinds
@@ -80,10 +81,7 @@ prepareSourceTypeKinds
   -> [SourceKindAnnotation]
   -> Either (SourceKindError variable) (SourceTypeKinds variable)
 prepareSourceTypeKinds assumptions ty annotations = do
-  first InvalidSourceKindType $ validateType ty
-  let (opened, sites) = open [] Map.empty ty
-      owners = Map.fromList [(site, BoundSourceKindVariable path slot) | site@(path, slot) <- sites]
-  exact <- foldM (retain owners) Map.empty annotations
+  (opened, owners, exact) <- sourceKindParts ty annotations
   let obligations = (ProperTypeKind, opened) :
         [(kind, TypeVariable variable) | (site, kind) <- Map.toList exact,
           Just variable <- [Map.lookup site owners]]
@@ -93,14 +91,38 @@ prepareSourceTypeKinds assumptions ty annotations = do
   kinds <- traverse (lookupSolved solved) owners
   pure $ SourceTypeKinds ty annotations kinds assumptions
  where
+  lookupSolved solved variable = case Map.lookup variable solved of
+    Just kind -> Right kind
+    Nothing -> Left $ MissingInferredSourceKind variable
+
+-- | Check annotation ownership without acquiring nominal kind authority.
+-- Request constructors can use this before a session is available; execution
+-- must still call 'prepareSourceTypeKinds' with that session's assumptions.
+validateSourceKindAnnotations
+  :: Ord variable
+  => Type variable -> [SourceKindAnnotation] -> Either (SourceKindError variable) ()
+validateSourceKindAnnotations ty annotations = () <$ sourceKindParts ty annotations
+
+sourceKindParts
+  :: Ord variable
+  => Type variable
+  -> [SourceKindAnnotation]
+  -> Either (SourceKindError variable)
+       ( Type (SourceKindVariable variable)
+       , Map.Map ([SourceTypeStep], Int) (SourceKindVariable variable)
+       , Map.Map ([SourceTypeStep], Int) GroundKind )
+sourceKindParts ty annotations = do
+  first InvalidSourceKindType $ validateType ty
+  let (opened, sites) = open [] Map.empty ty
+      owners = Map.fromList [(site, BoundSourceKindVariable path slot) | site@(path, slot) <- sites]
+  exact <- foldM (retain owners) Map.empty annotations
+  pure (opened, owners, exact)
+ where
   retain owners retained (SourceKindAnnotation path slot kind)
     | Map.notMember site owners = Left $ MissingSourceKindBinder path slot
     | Map.member site retained = Left $ DuplicateSourceKindAnnotation path slot
     | otherwise = Right $ Map.insert site kind retained
    where site = (path, slot)
-  lookupSolved solved variable = case Map.lookup variable solved of
-    Just kind -> Right kind
-    Nothing -> Left $ MissingInferredSourceKind variable
 
 -- Retain every forall/context node while replacing only its bound variables
 -- by lexical tokens. All occurrences, including class arguments and nested

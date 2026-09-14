@@ -15,7 +15,10 @@ module Language.Haskell.Djex.Exference.Internal.Request
   , ExferenceTypeVariable
   , ExferenceType
   , mkExferenceRequest
+  , mkExferenceRequestWithSourceKinds
   , mkExferenceRequestWithSourceInfo
+  , mkExferenceRequestWithSourceInfoAndKinds
+  , exferenceRequestSourceKinds
   , exferenceRequestQuery
   , prepareExferenceRequestContexts
   , withExferenceRequestProvenance
@@ -23,7 +26,10 @@ module Language.Haskell.Djex.Exference.Internal.Request
   ) where
 
 import Data.Bifunctor (first)
+import Data.List (sort)
 import qualified Data.Map.Strict as Map
+import Language.Haskell.Synthesis.SourceKind
+  ( SourceKindAnnotation, validateSourceKindAnnotations )
 
 import Language.Haskell.Exference.Core.Internal.Options
   ( ExferenceOptions (..)
@@ -97,10 +103,18 @@ data ExferenceRequestPlan = ExferenceRequestPlan
 -- of the stable request value. Location provenance is owned separately by the
 -- shared envelope, which gives both adapters the same query-only equality and
 -- display contract.
-newtype ExferenceRequest = ExferenceRequest
+data ExferenceRequest = ExferenceRequest
   (CachedQuery ExferenceType ExferenceOptions ExferenceRequestPlan)
-  deriving (Eq, Show)
-    via (CachedQuery ExferenceType ExferenceOptions ExferenceRequestPlan)
+  [SourceKindAnnotation]
+
+instance Eq ExferenceRequest where
+  ExferenceRequest left leftKinds == ExferenceRequest right rightKinds =
+    left == right && leftKinds == rightKinds
+
+instance Show ExferenceRequest where
+  showsPrec precedence (ExferenceRequest query []) = showsPrec precedence query
+  showsPrec precedence (ExferenceRequest query kinds) = showParen (precedence > 10) $
+    showString "KindedExferenceRequest " . showsPrec 11 query . showChar ' ' . showsPrec 11 kinds
 
 -- | Validate and seal a programmatic request. The goal and every context
 -- class name are checked in request order, and any diagnostic is
@@ -111,6 +125,24 @@ mkExferenceRequest
   -> Either Diagnostic ExferenceRequest
 mkExferenceRequest = mkExferenceRequestWithProvenance
   Map.empty ProgrammaticRequest
+
+mkExferenceRequestWithSourceKinds
+  :: [SourceKindAnnotation]
+  -> QueryRequest ExferenceType ExferenceOptions
+  -> Either Diagnostic ExferenceRequest
+mkExferenceRequestWithSourceKinds kinds query =
+  retainSourceKinds kinds =<< mkExferenceRequest query
+
+exferenceRequestSourceKinds :: ExferenceRequest -> [SourceKindAnnotation]
+exferenceRequestSourceKinds (ExferenceRequest _ kinds) = kinds
+
+retainSourceKinds :: [SourceKindAnnotation] -> ExferenceRequest -> Either Diagnostic ExferenceRequest
+retainSourceKinds [] request = Right request
+retainSourceKinds kinds request@(ExferenceRequest cached _) =
+  first (withExferenceRequestProvenance request) $ do
+    first (shownErrorDiagnostic "DJEX_EXF_SOURCE_KINDS" "invalid Exference source binder-kind annotations") $
+      validateSourceKindAnnotations (requestGoal $ exferenceRequestQuery request) kinds
+    pure $ ExferenceRequest cached $ sort kinds
 
 -- | Construct a checked request with parser-neutral rendering hints and
 -- source provenance. This internal operation is the only such entry point:
@@ -124,13 +156,22 @@ mkExferenceRequestWithSourceInfo sourceVariables location =
   mkExferenceRequestWithProvenance sourceVariables
     $ SourceRequest location
 
+mkExferenceRequestWithSourceInfoAndKinds
+  :: Map.Map String ExferenceLocal
+  -> SourceLocation
+  -> [SourceKindAnnotation]
+  -> QueryRequest ExferenceType ExferenceOptions
+  -> Either Diagnostic ExferenceRequest
+mkExferenceRequestWithSourceInfoAndKinds sourceVariables location kinds query =
+  retainSourceKinds kinds =<< mkExferenceRequestWithSourceInfo sourceVariables location query
+
 mkExferenceRequestWithProvenance
   :: Map.Map String ExferenceLocal
   -> RequestProvenance
   -> QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ExferenceRequest
 mkExferenceRequestWithProvenance sourceVariables provenance query =
-  ExferenceRequest <$> sealCachedQueryWithProvenance provenance (do
+  (\cached -> ExferenceRequest cached []) <$> sealCachedQueryWithProvenance provenance (do
     canonicalGoal <- normalizeRequestType RequestGoal $ requestGoal query
     mapM_ validateRequestConstraint $ requestContexts query
     sourceNames <- first sourceHintFailure
@@ -175,7 +216,7 @@ invalidRequestType site failure = contextualDiagnostic Error
 exferenceRequestQuery
   :: ExferenceRequest
   -> QueryRequest ExferenceType ExferenceOptions
-exferenceRequestQuery (ExferenceRequest query) = cachedQueryRequest query
+exferenceRequestQuery (ExferenceRequest query _) = cachedQueryRequest query
 
 -- | Attach the request's source location to a diagnostic when the request
 -- was sealed from source text ('mkExferenceRequestWithSourceInfo'); a
@@ -184,7 +225,7 @@ withExferenceRequestProvenance
   :: ExferenceRequest
   -> Diagnostic
   -> Diagnostic
-withExferenceRequestProvenance (ExferenceRequest query) =
+withExferenceRequestProvenance (ExferenceRequest query _) =
   withCachedQueryProvenance query
 
 -- | Normalize and scope-check the deferred context arguments against the
@@ -249,7 +290,7 @@ sourceHintFailure = shownErrorDiagnostic
   "invalid Exference source type-variable rendering hint"
 
 exferenceRequestPlan :: ExferenceRequest -> ExferenceRequestPlan
-exferenceRequestPlan (ExferenceRequest query) = cachedQueryCache query
+exferenceRequestPlan (ExferenceRequest query _) = cachedQueryCache query
 
 -- | Check the source-level name of an Exference result definition.
 -- Frontends use this before parsing so command-usage errors retain precedence

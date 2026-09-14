@@ -9,6 +9,8 @@ module Language.Haskell.Djex.HaskellSrc
   , ParsedSourceType
   , parsedSourceType
   , parsedSourceKinds
+  , parsedSourceHasKindAnnotations
+  , parsedSourceRequestKinds
   , parsedSourceTypeVariableNames
   , parsedSourceTypeLocation
   , parseSourceType
@@ -18,6 +20,7 @@ module Language.Haskell.Djex.HaskellSrc
 import Control.Monad.Trans.Except (runExceptT)
 import Data.Bifunctor (first)
 import Data.Functor.Identity (runIdentity)
+import qualified Data.Map.Strict as Map
 import qualified Language.Haskell.Exts.Parser as HSE
 import qualified Language.Haskell.Exts.SrcLoc as HSEL
 import qualified Language.Haskell.Exts.Syntax as HSES
@@ -26,13 +29,12 @@ import Language.Haskell.Exference.Core.Types
   ( TypeVarIndex
   , toSynthesisType
   )
-import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
-  ( parseTypeWithInventory
-  , parseTypeWithInventoryInQualifiedScope
-  , parseTypeWithInventoryInScope
-  )
+import Language.Haskell.Exference.Core.Declaration (freshSynthesisVariable)
+import Language.Haskell.Exference.Internal.TypeParsing
+  ( parseHaskellSrcType, typeResolverFromInventory )
 import Language.Haskell.Exference.TypeFromHaskellSrc
-  ( haskellSrcExtsParseMode )
+  ( haskellSrcExtsParseMode, scopeTypeResolver, scopeTypeResolverWithQualifiedNames )
+import Language.Haskell.Djex.HaskellSrc.Kinded (convertKindedSourceType)
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , SourceLocation
@@ -50,7 +52,9 @@ import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Type (Type, Variable)
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Language.Haskell.Synthesis.SourceKind
-  ( SourceTypeKinds, prepareSourceTypeKinds, sourceKindsType )
+  ( SourceTypeKinds, SourceKindAnnotation (..), SourceTypeStep (ForallBody)
+  , prepareSourceTypeKinds, sourceKindsType, sourceKindAnnotations )
+import Language.Haskell.Synthesis.SourceKind.Expansion (expandSourceTypeKinds)
 import Language.Haskell.Djex.HaskellSrc.Scope (hasExplicitOuterForall)
 
 -- | GHCi-style name-resolution state for one interactive query.
@@ -77,19 +81,33 @@ data ParsedSourceType = ParsedSourceType
   (SourceTypeKinds (Variable Int))
   TypeVarIndex
   SourceLocation
+  Bool
   deriving (Eq, Show)
 
 parsedSourceType :: ParsedSourceType -> Type (Variable Int)
 parsedSourceType = sourceKindsType . parsedSourceKinds
 
 parsedSourceKinds :: ParsedSourceType -> SourceTypeKinds (Variable Int)
-parsedSourceKinds (ParsedSourceType kinds _ _) = kinds
+parsedSourceKinds (ParsedSourceType kinds _ _ _) = kinds
+
+-- | Whether the written signature supplied binder-kind annotations. The
+-- checked kind table also contains inferred facts for unannotated syntax;
+-- this flag lets compatibility frontends retain their unannotated path.
+parsedSourceHasKindAnnotations :: ParsedSourceType -> Bool
+parsedSourceHasKindAnnotations (ParsedSourceType _ _ _ explicitKinds) = explicitKinds
+
+-- | Effective obligations which a source-aware request must retain. Ordinary
+-- unannotated syntax continues to use the existing session inference policy.
+parsedSourceRequestKinds :: ParsedSourceType -> [SourceKindAnnotation]
+parsedSourceRequestKinds parsed
+  | parsedSourceHasKindAnnotations parsed = sourceKindAnnotations $ parsedSourceKinds parsed
+  | otherwise = []
 
 parsedSourceTypeVariableNames :: ParsedSourceType -> TypeVarIndex
-parsedSourceTypeVariableNames (ParsedSourceType _ variables _) = variables
+parsedSourceTypeVariableNames (ParsedSourceType _ variables _ _) = variables
 
 parsedSourceTypeLocation :: ParsedSourceType -> SourceLocation
-parsedSourceTypeLocation (ParsedSourceType _ _ location) = location
+parsedSourceTypeLocation (ParsedSourceType _ _ location _) = location
 
 -- | Parse against the complete namespace of one sealed source inventory.
 parseSourceType
@@ -118,37 +136,32 @@ parseSourceTypeWithScope
 parseSourceTypeWithScope inventory maybeScope sourceName source = do
   let mode = haskellSrcExtsParseMode sourceName
       location = sourceTextLocation (HSE.parseFilename mode) source
-      parsed = runIdentity $ runExceptT $ case maybeScope of
-        Nothing -> parseTypeWithInventory inventory Nothing mode source
+      originalResolver = typeResolverFromInventory inventory
+      resolver = case maybeScope of
+        Nothing -> originalResolver
         Just scope
-          | null $ exferenceQueryQualifiedNames scope ->
-              parseTypeWithInventoryInScope
-                inventory
-                (toHseModuleName <$> exferenceQueryCurrentModule scope)
-                (exferenceQueryVisibleNames scope)
-                (exferenceQueryModuleAliases scope)
-                mode
-                source
-          | otherwise -> parseTypeWithInventoryInQualifiedScope
-              inventory
-              (toHseModuleName <$> exferenceQueryCurrentModule scope)
-              (exferenceQueryVisibleNames scope)
-              (exferenceQueryModuleAliases scope)
-              (exferenceQueryQualifiedNames scope)
-              mode
-              source
-  (backendType, sourceVariables) <- first
+          | null $ exferenceQueryQualifiedNames scope -> scopeTypeResolver
+              (exferenceQueryVisibleNames scope) (exferenceQueryModuleAliases scope) originalResolver
+          | otherwise -> scopeTypeResolverWithQualifiedNames
+              (exferenceQueryVisibleNames scope) (exferenceQueryModuleAliases scope)
+              (exferenceQueryQualifiedNames scope) originalResolver
+      currentModule = maybeScope >>= fmap toHseModuleName . exferenceQueryCurrentModule
+      parsed = runIdentity $ runExceptT $ parseHaskellSrcType
+        (convertKindedSourceType (inventoryKindAssumptions inventory) resolver currentModule)
+        mode source
+  (rawKinds, sourceVariables) <- first
     (withCode "DJEX_TYPE_PARSE") parsed
-  sharedType <- either
+  canonicalKinds <- either
     (Left . withSourceLocation location . shownErrorDiagnostic
-      "DJEX_TYPE_PARSE" "parsed source type failed shared validation")
+      "DJEX_TYPE_PARSE" "source kind canonicalization failed")
     Right
-    $ toSynthesisType backendType
+    $ expandSourceTypeKinds freshSynthesisVariable Map.empty rawKinds
   -- Haskell implicitly quantifies a signature's free variables in written
   -- first-occurrence order. Close that source scheme before either backend
   -- constructs its candidate graph; renderer-only closure cannot repair an
   -- open graph or recover an erased contextual parameter later.
-  let free = SharedType.freeVariablesInFirstOccurrenceOrder sharedType
+  let sharedType = sourceKindsType canonicalKinds
+      free = SharedType.freeVariablesInFirstOccurrenceOrder sharedType
       explicit = hasExplicitOuterForall source
   if explicit && not (null free)
     then Left $ withSourceLocation location $ shownErrorDiagnostic
@@ -162,8 +175,12 @@ parseSourceTypeWithScope inventory maybeScope sourceName source = do
   sourceKinds <- either
     (Left . withSourceLocation location . shownErrorDiagnostic
       "DJEX_TYPE_PARSE" "source binder kind validation failed")
-    Right $ prepareSourceTypeKinds (inventoryKindAssumptions inventory) closedType []
+    Right $ prepareSourceTypeKinds (inventoryKindAssumptions inventory) closedType
+      [ annotation { sourceKindPath = if null free then sourceKindPath annotation
+          else ForallBody : sourceKindPath annotation }
+      | annotation <- sourceKindAnnotations canonicalKinds ]
   pure $ ParsedSourceType sourceKinds sourceVariables location
+    (not $ null $ sourceKindAnnotations rawKinds)
  where
   toHseModuleName moduleName = HSES.ModuleName HSEL.noSrcSpan
     $ renderModuleName moduleName

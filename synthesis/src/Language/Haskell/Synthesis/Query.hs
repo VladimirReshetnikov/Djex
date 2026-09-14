@@ -23,6 +23,7 @@ module Language.Haskell.Synthesis.Query
   , traverseRequestTypes
   , traverseRequestContextsWithKnownArity
   , requestContextualType
+  , requestContextualSourceKinds
   , requestContextVariablesNotInScope
   , RequestProvenance (..)
   , withRequestProvenance
@@ -68,6 +69,8 @@ import Language.Haskell.Synthesis.Name
   , renderCanonical
   )
 import Language.Haskell.Synthesis.KindInference (GroundKind)
+import Language.Haskell.Synthesis.SourceKind
+  ( SourceKindAnnotation (..), SourceTypeStep (..) )
 import Language.Haskell.Synthesis.Search
   ( SearchBatch
   , batchCandidates
@@ -409,6 +412,32 @@ requestContextualType request
         $ insertUnderLeadingForalls body
     | otherwise = ForallType variables (contexts ++ embedded) body
   insertUnderLeadingForalls goal = ForallType [] contexts goal
+
+-- | Relocate goal-owned binder annotations through 'requestContextualType'.
+-- Extra contexts are inserted at the last leading forall, before its existing
+-- contexts, or under a new empty forall when the goal has no leading binder.
+-- Ownership validation belongs to the request constructor; nominal checking
+-- belongs to the execution session after its context-width preflight.
+requestContextualSourceKinds
+  :: QueryRequest (Type variable) options
+  -> [SourceKindAnnotation]
+  -> [SourceKindAnnotation]
+requestContextualSourceKinds request annotations
+  | null $ requestContexts request = annotations
+  | otherwise = map relocate annotations
+ where
+  inserted = length $ requestContexts request
+  boundary = insertionSite [] $ requestGoal request
+  insertionSite path (ForallType _ _ body) = case body of
+    ForallType{} -> insertionSite (path ++ [ForallBody]) body
+    _ -> Just path
+  insertionSite _ _ = Nothing
+  relocate annotation = annotation {sourceKindPath = case boundary of
+    Nothing -> ForallBody : sourceKindPath annotation
+    Just site -> case splitAt (length site) $ sourceKindPath annotation of
+      (prefix, ForallConstraintArgument index argument : suffix) | prefix == site ->
+        site ++ ForallConstraintArgument (index + inserted) argument : suffix
+      _ -> sourceKindPath annotation }
 
 -- | Explicit-context variables that are outside the query goal's lexical
 -- scope, in deterministic identity order.

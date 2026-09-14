@@ -16,6 +16,8 @@ module Language.Haskell.Djex.Djinn.Internal.Request
   , DjinnLocal
   , DjinnType
   , mkDjinnRequest
+  , mkDjinnRequestWithSourceKinds
+  , djinnRequestSourceKinds
   , mkDjinnRequestWithProvenance
   , djinnRequestQuery
   , prepareDjinnRequest
@@ -27,6 +29,9 @@ module Language.Haskell.Djex.Djinn.Internal.Request
 
 import Control.Monad (void)
 import Data.Bifunctor (first)
+import Data.List (sort)
+import Language.Haskell.Synthesis.SourceKind
+  ( SourceKindAnnotation, validateSourceKindAnnotations )
 
 import Djinn.Internal.Type
   ( freshPrimedVariable
@@ -90,10 +95,18 @@ type DjinnType = Type DjinnTypeVariable
 -- | A checked query whose constructor is private. The unit cache is a witness
 -- that the exact neutral request passed the session-independent preflight;
 -- complete normalization occurs only after session-owned widths are known.
-newtype DjinnRequest = DjinnRequest
+data DjinnRequest = DjinnRequest
   (CachedQuery DjinnType QueryOptions ())
-  deriving (Eq, Show)
-    via (CachedQuery DjinnType QueryOptions ())
+  [SourceKindAnnotation]
+
+instance Eq DjinnRequest where
+  DjinnRequest left leftKinds == DjinnRequest right rightKinds =
+    left == right && leftKinds == rightKinds
+
+instance Show DjinnRequest where
+  showsPrec precedence (DjinnRequest query []) = showsPrec precedence query
+  showsPrec precedence (DjinnRequest query kinds) = showParen (precedence > 10) $
+    showString "KindedDjinnRequest " . showsPrec 11 query . showChar ' ' . showsPrec 11 kinds
 
 -- | Check the session-independent portion of a neutral Djinn query.
 -- The goal receives a bounded structural preflight, while
@@ -112,12 +125,29 @@ mkDjinnRequest
   -> Either Diagnostic DjinnRequest
 mkDjinnRequest = mkDjinnRequestWithProvenance ProgrammaticRequest
 
+-- | Retain source binder-kind obligations as semantic request data. This
+-- checks lexical ownership; the running session must establish their kinds.
+mkDjinnRequestWithSourceKinds
+  :: [SourceKindAnnotation]
+  -> QueryRequest DjinnType QueryOptions
+  -> Either Diagnostic DjinnRequest
+mkDjinnRequestWithSourceKinds [] query = mkDjinnRequest query
+mkDjinnRequestWithSourceKinds kinds query = do
+  DjinnRequest cached _ <- mkDjinnRequest query
+  first (contextualDiagnostic Error "DJEX_DJINN_SOURCE_KINDS"
+    "invalid Djinn source binder-kind annotations" . show) $
+      validateSourceKindAnnotations (requestGoal query) kinds
+  pure $ DjinnRequest cached $ sort kinds
+
+djinnRequestSourceKinds :: DjinnRequest -> [SourceKindAnnotation]
+djinnRequestSourceKinds (DjinnRequest _ kinds) = kinds
+
 -- | Seal a checked request while retaining trusted diagnostic provenance.
 mkDjinnRequestWithProvenance
   :: RequestProvenance
   -> QueryRequest DjinnType QueryOptions
   -> Either Diagnostic DjinnRequest
-mkDjinnRequestWithProvenance provenance query = DjinnRequest <$>
+mkDjinnRequestWithProvenance provenance query = (\cached -> DjinnRequest cached []) <$>
   sealCachedQueryWithProvenance provenance (do
     preflightRequestType RequestGoal $ requestGoal query
     mapM_ validateRequestContext $ requestContexts query
@@ -128,7 +158,7 @@ mkDjinnRequestWithProvenance provenance query = DjinnRequest <$>
 djinnRequestQuery
   :: DjinnRequest
   -> QueryRequest DjinnType QueryOptions
-djinnRequestQuery (DjinnRequest query) = cachedQueryRequest query
+djinnRequestQuery (DjinnRequest query _) = cachedQueryRequest query
 
 -- | Prepare the complete contextual signature against one sealed session.
 -- Known class widths are checked before entering caller-built argument
@@ -201,7 +231,7 @@ withDjinnRequestProvenance
   :: DjinnRequest
   -> Diagnostic
   -> Diagnostic
-withDjinnRequestProvenance (DjinnRequest query) =
+withDjinnRequestProvenance (DjinnRequest query _) =
   withCachedQueryProvenance query
 
 -- | Validate one compatibility-parsed raw type into the shared query

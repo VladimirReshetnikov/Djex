@@ -51,7 +51,9 @@ module Djinn.Core (
     inhabitTypedSynthesisResultPrepared,
     DjinnSourceProviderEvidence(..),
     inhabitTypedSynthesisResultPreparedWithSourceGoal,
+    inhabitTypedSynthesisResultPreparedWithKindedSourceGoal,
     inhabitTypedSynthesisStreamPreparedWithSourceGoal,
+    inhabitTypedSynthesisStreamPreparedWithKindedSourceGoal,
     inhabitSynthesisResultPreparedWithInstantiationCandidates,
     inhabitTypedSynthesisResultPreparedWithInstantiationCandidates,
     inhabitSynthesisResultPreparedWithInstantiationAssignments,
@@ -80,6 +82,9 @@ import Language.Haskell.Synthesis.Constraint
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.CandidateQuality as SharedQuality
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
+import qualified Language.Haskell.Synthesis.Declaration as SourceDeclaration
+import qualified Language.Haskell.Synthesis.SourceKind as SourceKinds
+import qualified Language.Haskell.Synthesis.SourceKind.Expansion as SourceKindExpansion
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.Kind as SharedKind
@@ -1062,7 +1067,31 @@ inhabitTypedSynthesisResultPreparedWithSourceGoal
     -> SharedGenerated.DefinitionName
     -> SharedType.Type HSymbol
     -> Either DjinnQueryError DjinnTypedResult
-inhabitTypedSynthesisResultPreparedWithSourceGoal options prepared sourceGoal
+inhabitTypedSynthesisResultPreparedWithSourceGoal options prepared sourceGoal =
+    inhabitTypedSynthesisResultPreparedWithSourceGoalInput options prepared (PlainSourceGoal sourceGoal)
+
+inhabitTypedSynthesisResultPreparedWithKindedSourceGoal
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> SourceKinds.SourceTypeKinds HSymbol
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> DjinnSourceProviderEvidence
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError DjinnTypedResult
+inhabitTypedSynthesisResultPreparedWithKindedSourceGoal options prepared checked =
+    inhabitTypedSynthesisResultPreparedWithSourceGoalInput options prepared (KindedSourceGoal checked)
+
+inhabitTypedSynthesisResultPreparedWithSourceGoalInput
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> SourceGoalInput
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> DjinnSourceProviderEvidence
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError DjinnTypedResult
+inhabitTypedSynthesisResultPreparedWithSourceGoalInput options prepared sourceGoal
         contexts evidence target goal = do
     first DjinnQueryOptionsFailure $ validateQueryOptions options
     let (candidates, assignments) = case evidence of
@@ -1101,7 +1130,31 @@ inhabitTypedSynthesisStreamPreparedWithSourceGoal
     -> SharedGenerated.DefinitionName
     -> SharedType.Type HSymbol
     -> Either DjinnQueryError [Either DjinnQueryError DjinnTypedResult]
-inhabitTypedSynthesisStreamPreparedWithSourceGoal options prepared sourceGoal
+inhabitTypedSynthesisStreamPreparedWithSourceGoal options prepared sourceGoal =
+    inhabitTypedSynthesisStreamPreparedWithSourceGoalInput options prepared (PlainSourceGoal sourceGoal)
+
+inhabitTypedSynthesisStreamPreparedWithKindedSourceGoal
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> SourceKinds.SourceTypeKinds HSymbol
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> DjinnSourceProviderEvidence
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError [Either DjinnQueryError DjinnTypedResult]
+inhabitTypedSynthesisStreamPreparedWithKindedSourceGoal options prepared checked =
+    inhabitTypedSynthesisStreamPreparedWithSourceGoalInput options prepared (KindedSourceGoal checked)
+
+inhabitTypedSynthesisStreamPreparedWithSourceGoalInput
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> SourceGoalInput
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> DjinnSourceProviderEvidence
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError [Either DjinnQueryError DjinnTypedResult]
+inhabitTypedSynthesisStreamPreparedWithSourceGoalInput options prepared sourceGoal
         contexts evidence target goal = do
     first DjinnQueryOptionsFailure $ validateQueryOptions options
     let (candidates, assignments) = case evidence of
@@ -1180,7 +1233,7 @@ inhabitSynthesisTypedResultPreparedChecked options prepared contexts candidates
         options prepared contexts candidates assignmentEvidence target goal
 
 inhabitSynthesisTypedResultPreparedCheckedWithSourceGoal
-    :: Maybe (SharedType.Type HSymbol)
+    :: Maybe SourceGoalInput
     -> QueryOptions
     -> PreparedEnvironment
     -> [Constraint (SharedType.Type HSymbol)]
@@ -1201,7 +1254,7 @@ inhabitSynthesisTypedResultPreparedCheckedWithSourceGoal sourceGoal options
 -- and the configured final ordering step has moved whole associations into
 -- their final order.
 inhabitSynthesisValidatedResultPreparedChecked
-    :: Maybe (SharedType.Type HSymbol)
+    :: Maybe SourceGoalInput
     -> QueryOptions
     -> PreparedEnvironment
     -> [Constraint (SharedType.Type HSymbol)]
@@ -1220,7 +1273,7 @@ inhabitSynthesisValidatedResultPreparedChecked sourceGoal options prepared
 -- execution. Neither constructing this record nor selecting one field forces
 -- the other execution, and no cursor exists until that execution is observed.
 inhabitSynthesisPreparedSearchChecked
-    :: Maybe (SharedType.Type HSymbol)
+    :: Maybe SourceGoalInput
     -> QueryOptions
     -> PreparedEnvironment
     -> [Constraint (SharedType.Type HSymbol)]
@@ -1262,13 +1315,17 @@ inhabitSynthesisPreparedSearchChecked sourceGoal options prepared
         prepared candidates
     checkedAssignments <- prepareProviderInstantiationAssignments
         prepared assignmentEvidence
-    checkedSourceGoal <- case sourceGoal of
-        Nothing -> Right elaboratedGoal
-        Just original -> do
+    (checkedSourceGoal, checkedLexicalGoal) <- case sourceGoal of
+        Nothing -> Right (elaboratedGoal, Nothing)
+        Just (PlainSourceGoal original) -> do
             checked <- resolveSynthesisQueryContexts prepared
                 ("source goal type " ++ renderSynthesisType original, KStar, original) []
             checkSourceSearchCorrespondence original contexts goal
-            pure checked
+            pure (checked, Nothing)
+        Just (KindedSourceGoal checked) -> do
+            checkSourceSearchCorrespondence (SourceKinds.sourceKindsType checked) contexts goal
+            expanded <- first DjinnInternalQueryFailure $ expandSourceGoalKinds prepared checked
+            pure (SourceKinds.sourceKindsType expanded, Just expanded)
     -- This table becomes authority only after the bounded assignment checker
     -- has checked every supplied kind, exact provider, and correlated vector.
     let providerKinds = case assignmentEvidence of
@@ -1279,8 +1336,11 @@ inhabitSynthesisPreparedSearchChecked sourceGoal options prepared
                   )
                 | assignment <- assignments
                 ]
-        sourceContext = SourceEvidence.sourceTypingContextWithProviderKinds
+    sourceContext <- first DjinnInternalQueryFailure $ case checkedLexicalGoal of
+        Nothing -> Right $ SourceEvidence.sourceTypingContextWithProviderKinds
             prepared checkedSourceGoal providerKinds
+        Just checked -> SourceEvidence.sourceTypingContextWithCheckedGoal
+            prepared checked providerKinds
     pure $ prepareFormulaSearch options sourceContext checkedCandidates checkedAssignments target
         elaboratedGoal
         parametricDataRelevant
@@ -1288,6 +1348,29 @@ inhabitSynthesisPreparedSearchChecked sourceGoal options prepared
         plans nominalPlans
   where
     translatorFailure = first DjinnInternalQueryFailure
+
+-- The checked source value stays separate from the implicit search projection.
+data SourceGoalInput
+    = PlainSourceGoal (SharedType.Type HSymbol)
+    | KindedSourceGoal (SourceKinds.SourceTypeKinds HSymbol)
+
+expandSourceGoalKinds
+    :: PreparedEnvironment -> SourceKinds.SourceTypeKinds HSymbol
+    -> Either String (SourceKinds.SourceTypeKinds HSymbol)
+expandSourceGoalKinds prepared checked = do
+    unless (SourceKinds.sourceKindAssumptions checked == SharedInventory.inventoryKindAssumptions inventory) $
+        Left "checked source goal belongs to a different kind inventory"
+    first show $ SourceKindExpansion.expandSourceTypeKinds fresh definitions checked
+  where
+    inventory = preparedEnvironmentInventory prepared
+    definitions = Map.fromList
+        [(name, (map SourceDeclaration.parameterVariable parameters, body))
+        | SourceDeclaration.TypeSynonymDeclaration _ name parameters body <-
+            SharedEnvironment.environmentDeclarations $ SharedInventory.inventoryEnvironment inventory]
+    fresh reserved variable = Just $ choose $ variable ++ "'"
+      where
+        choose candidate | Set.member candidate reserved = choose $ candidate ++ "'"
+                         | otherwise = candidate
 
 -- The adapter normalizes and opens all leading binders before separating the
 -- class context from the search goal. Reproduce that operation as one type,
@@ -3481,7 +3564,7 @@ projectValidatedTypedDjinnCandidate
 projectValidatedTypedDjinnCandidate candidateKey validated =
     let sourceCandidate = validatedCandidateOutput validated
     in
-    SharedTypedCandidate.mkTypedCandidate
+    SharedTypedCandidate.mkKindedTypedCandidate
         (SharedCandidate.Candidate
             { SharedCandidate.candidateOutput =
                 SourceEvidence.sourceCandidateClause sourceCandidate
@@ -3490,7 +3573,7 @@ projectValidatedTypedDjinnCandidate candidateKey validated =
                 validatedCandidateDetails validated
             })
         (first (DjinnTermGraphSourceTypingFailure . show) $
-            SourceGraph.checkAnnotatedSourceClauseGraph candidateKey
+            SourceGraph.checkAnnotatedSourceClauseGraphWithKinds candidateKey
                 (SourceEvidence.sourceCandidateContext sourceCandidate)
                 (SourceEvidence.sourceCandidateAnnotations sourceCandidate)
                 (SourceEvidence.sourceCandidateAnnotatedClause sourceCandidate))

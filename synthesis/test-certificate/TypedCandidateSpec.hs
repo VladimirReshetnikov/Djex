@@ -18,6 +18,8 @@ import Language.Haskell.Synthesis.Internal.TypedCandidate
   , mkCertificateAssociatedTypedCandidate
   , mkCertificateCapableTypedCandidate
   , mkTypedCandidate
+  , mkKindedTypedCandidate
+  , typedCandidateBinderKinds
   , typedCandidateCompatibility
   , typedCandidateTermGraph
   )
@@ -28,8 +30,9 @@ import Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Associatio
   , checkedTypeApplicationCertificateGraph
   , sealCheckedTypeApplicationCertificateGraph
   )
+import Language.Haskell.Synthesis.Kind (Kind (..))
 import Language.Haskell.Synthesis.Name (Name, parseName)
-import Language.Haskell.Synthesis.Type (Type (..), Variable)
+import Language.Haskell.Synthesis.Type (Type (..), Variable (..))
 import Language.Haskell.Synthesis.TypedGenerated
   ( TermGraph
   , TermGraphSource (..)
@@ -59,6 +62,44 @@ tests = testGroup "typed candidate certificate carrier"
   , observationTests
   , demandTests
   , exactTypeTests
+  , kindRetentionTests
+  ]
+
+kindRetentionTests :: TestTree
+kindRetentionTests = testGroup "checked binder-kind retention"
+  [ testCase "kinded carrier keeps exact graph and kind table together" $ do
+      checked <- AssociationSpec.typedCandidateCertificateGraphFixture
+      let graph = checkedTypeApplicationCertificateGraph checked
+          source = TypeVariable $ FlexibleVariable "f"
+          kinds = [(source, FunctionKind ProperTypeKind ProperTypeKind)]
+          candidate = mkKindedTypedCandidate 47 (Right (graph, kinds)) :: TestCandidate
+      typedCandidateCompatibility candidate @?= 47
+      typedCandidateTermGraph candidate @?= Right graph
+      typedCandidateBinderKinds candidate @?= Right kinds
+      branch candidate @?= ("plain", 47)
+  , testCase "distinct retained kinds distinguish equal erased graphs" $ do
+      checked <- AssociationSpec.typedCandidateCertificateGraphFixture
+      let graph = checkedTypeApplicationCertificateGraph checked
+          source = TypeVariable $ FlexibleVariable "f"
+          candidate kind = mkKindedTypedCandidate 47 (Right (graph, [(source, kind)])) :: TestCandidate
+          proper = candidate ProperTypeKind
+          higher = candidate $ FunctionKind ProperTypeKind ProperTypeKind
+      proper == higher @?= False
+      compare proper higher == EQ @?= False
+  , testCase "empty annotations preserve legacy equality and display" $ do
+      checked <- AssociationSpec.typedCandidateCertificateGraphFixture
+      let graph = checkedTypeApplicationCertificateGraph checked
+          legacy = mkTypedCandidate 47 (Right graph) :: TestCandidate
+          kinded = mkKindedTypedCandidate 47 (Right (graph, [])) :: TestCandidate
+      kinded @?= legacy
+      show kinded @?= show legacy
+      typedCandidateBinderKinds legacy @?= Right []
+  , testCase "kinded availability stays lazy behind compatibility projection" $
+      typedCandidateCompatibility
+        (mkKindedTypedCandidate 47 (error "kinded graph forced") :: TestCandidate) @?= 47
+  , testCase "kind access preserves the exact unavailable reason" $
+      typedCandidateBinderKinds
+        (mkKindedTypedCandidate 47 (Left "kind failure") :: TestCandidate) @?= Left "kind failure"
   ]
 
 constructionTests :: TestTree

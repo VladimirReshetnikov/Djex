@@ -6,6 +6,7 @@
 module Djinn.Internal.SourceEvidence
   ( SourceTypingContext
   , sourceTypingContext
+  , sourceTypingContextWithCheckedGoal
   , sourceTypingContextWithProviderKinds
   , sourceTypingPreparedEnvironment
   , sourceTypingGoal
@@ -58,7 +59,7 @@ import Djinn.Internal.ProofEnv
 import Djinn.Internal.ProofToGenerated
   ( termToGeneratedClauseWithSourceApplications )
 import Djinn.Internal.SourceTypingContext
-  ( SourceTypingContext, sourceTypingContext, sourceTypingContextWithProviderKinds
+  ( SourceTypingContext, sourceTypingContext, sourceTypingContextWithProviderKinds, sourceTypingContextWithCheckedGoal
   , sourceTypingPreparedEnvironment, sourceTypingGoal, sourceTypingProviderKinds
   , sourceTypingTermSchemes, sourceTypingConstructorNames )
 import Djinn.Internal.HIdentifier (generatedGlobalName)

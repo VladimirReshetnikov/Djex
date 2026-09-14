@@ -89,6 +89,8 @@ import Language.Haskell.Djex.HaskellSrc
   ( ParsedSourceType
   , parseSourceTypeInScope
   , parsedSourceType
+  , parsedSourceRequestKinds
+  , parsedSourceHasKindAnnotations
   )
 import Language.Haskell.Djex.Package
   ( PackageOperation (DownloadOperation, InstallOperation)
@@ -762,7 +764,7 @@ runQuery sourceName query state = do
       "checked behavioral source scope is unavailable"
       "load a valid workspace; executable predicates never fall back to another scope"
 
-  runBehavioralDjinn context behavioral target parsed = case mkDjinnRequest QueryRequest
+  runBehavioralDjinn context behavioral target parsed = case mkDjinnRequestWithSourceKinds (parsedSourceRequestKinds parsed) QueryRequest
       { requestTarget = target
       , requestGoal = projectParsedTypeToDjinn state parsed
       , requestContexts = []
@@ -821,7 +823,8 @@ runQuery sourceName query state = do
   -- by the compatibility clause. Keep this candidate's graph through selection
   -- and render it in its own checked vocabulary. Failure is explicit; there is
   -- no fallback to an unannotated expression that lost the selected evidence.
-  needsContextualRendering = not . null . SharedType.typeConstraints . parsedSourceType
+  needsContextualRendering parsed = parsedSourceHasKindAnnotations parsed ||
+    not (null $ SharedType.typeConstraints $ parsedSourceType parsed)
 
   renderContextual options parsed projectSignature renderOptions candidate = do
     term <- snd $ elaborateBehavioral parsed projectSignature
@@ -861,6 +864,9 @@ runQuery sourceName query state = do
         (exferenceSessionInventory session)
         (scopeExferenceQueryScope context) sourceName typeSource of
       Left failure -> emitDiagnostic failure
+      Right parsed | not $ null $ parsedSourceRequestKinds parsed ->
+        replFailure "DJEX_REPL_SOURCE_KINDS" "kinded source search integration is not yet available"
+          "the Length path cannot discard source binder-kind obligations"
       Right parsed -> case ExferenceSession.elaborateSessionGoal session
           $ parsedSourceType parsed of
         Left failure -> replFailure "DJEX_REPL_LENGTH_WHERE_TARGET"
@@ -1052,7 +1058,7 @@ runQuery sourceName query state = do
       DjinnBackend -> runParsedDjinn parsed
       ExferenceBackend -> runParsedExference session parsed
 
-  checkParsedDjinn parsed = mkDjinnRequest QueryRequest
+  checkParsedDjinn parsed = mkDjinnRequestWithSourceKinds (parsedSourceRequestKinds parsed) QueryRequest
       { requestTarget = resultTarget state
       , requestGoal = projectParsedTypeToDjinn state parsed
       , requestContexts = []
@@ -1100,7 +1106,7 @@ runQuery sourceName query state = do
       Right results -> prepareExferencePresentation
         (presentation state) (scopeFieldSelectors state) results
 
-  runParsedDjinn parsed = case mkDjinnRequest QueryRequest
+  runParsedDjinn parsed = case mkDjinnRequestWithSourceKinds (parsedSourceRequestKinds parsed) QueryRequest
       { requestTarget = resultTarget state
       , requestGoal = projectParsedTypeToDjinn state parsed
       , requestContexts = []

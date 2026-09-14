@@ -79,7 +79,7 @@ import Language.Haskell.Djex.Command.Output
   )
 import Language.Haskell.Djex.Command.Typed (elaborateSourceCandidate)
 import Language.Haskell.Djex.HaskellSrc
-  ( ParsedSourceType, parseSourceType, parseSourceTypeInScope, parsedSourceType )
+  ( ParsedSourceType, parseSourceType, parseSourceTypeInScope, parsedSourceType, parsedSourceRequestKinds, parsedSourceHasKindAnnotations )
 import Language.Haskell.Djex.HaskellSrc.Scope
   ( scopedSourceDefinition, standaloneSourceExpression )
 import qualified Language.Haskell.Synthesis.Type as SourceType
@@ -348,7 +348,7 @@ executeDjinnSourceCommand
   :: PresentationOptions -> FieldSelectors -> DjinnSession -> QueryOptions
   -> DefinitionName -> Map.Map Name Name -> String -> ParsedSourceType -> IO ExitCode
 executeDjinnSourceCommand presentation fieldSelectors session options target names source parsed =
-  case mkDjinnRequest QueryRequest
+  case mkDjinnRequestWithSourceKinds (parsedSourceRequestKinds parsed) QueryRequest
       { requestTarget = target
       , requestGoal = projectNames $ fmap ExferenceType.defaultVariableName $ parsedSourceType parsed
       , requestContexts = []
@@ -356,7 +356,7 @@ executeDjinnSourceCommand presentation fieldSelectors session options target nam
       } of
     Left failure -> diagnosticFailure failure
     Right request
-      | not $ null $ SourceType.typeConstraints $ parsedSourceType parsed ->
+      | parsedSourceHasKindAnnotations parsed || not (null $ SourceType.typeConstraints $ parsedSourceType parsed) ->
           case runDjinnTypedQuery session request of
             Left failure -> diagnosticFailure failure
             Right result -> replayCommandOutput $ prepareTypedDjinnPresentation

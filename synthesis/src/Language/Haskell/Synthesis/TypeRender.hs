@@ -11,6 +11,7 @@ module Language.Haskell.Synthesis.TypeRender
   , renderConstraint
   , renderTypeWithQualification
   , renderConstraintWithQualification
+  , renderTypeWithBinderNames
   , showsType
   , showsConstraint
   , showsTypeWithQualification
@@ -54,6 +55,15 @@ renderTypeWithQualification
   -> String
 renderTypeWithQualification qualification variableName typeExpression =
   showsTypeWithQualification qualification variableName 0 typeExpression ""
+
+-- | Render variable occurrences and forall declarations with separate
+-- callbacks. A lexical renamer can attach checked kinds to declarations while
+-- leaving occurrences as identifiers. Nominal qualification is shared.
+renderTypeWithBinderNames
+  :: Qualification -> (variable -> String) -> (variable -> String)
+  -> Type variable -> String
+renderTypeWithBinderNames qualification variableName binderName ty =
+  showsTypeWithBinderNames qualification variableName binderName 0 ty ""
 
 -- | Render a complete class constraint under the supplied qualification
 -- policy.  The class and all constructor names in its arguments use the same
@@ -101,7 +111,13 @@ showsTypeWithQualification
   -> Int
   -> Type variable
   -> ShowS
-showsTypeWithQualification qualification variableName precedence typeExpression =
+showsTypeWithQualification qualification variableName =
+  showsTypeWithBinderNames qualification variableName variableName
+
+showsTypeWithBinderNames
+  :: Qualification -> (variable -> String) -> (variable -> String)
+  -> Int -> Type variable -> ShowS
+showsTypeWithBinderNames qualification variableName binderName precedence typeExpression =
   case typeExpression of
   TypeVariable variable -> showString $ variableName variable
   -- Lists have no dedicated 'Type' node. Parenthesize the higher-kinded
@@ -114,36 +130,37 @@ showsTypeWithQualification qualification variableName precedence typeExpression 
     | nameSpecial name == Just ListConstructor -> showChar '['
       -- haskell-src-exts 1.24 requires an impredicative list element to be
       -- parenthesized even when its parser mode enables ImpredicativeTypes.
-      . showsTypeWithQualification qualification variableName 1 argument
+      . showsTypeWithBinderNames qualification variableName binderName 1 argument
       . showChar ']'
   TypeApplication function argument -> showParen (precedence > 1)
-    $ showsTypeWithQualification qualification variableName 1 function
+    $ showsTypeWithBinderNames qualification variableName binderName 1 function
     . showChar ' '
-    . showsTypeWithQualification qualification variableName 2 argument
+    . showsTypeWithBinderNames qualification variableName binderName 2 argument
   FunctionType parameter result -> showParen (precedence > 0)
-    $ showsTypeWithQualification qualification variableName 1 parameter
+    $ showsTypeWithBinderNames qualification variableName binderName 1 parameter
     . showString " -> "
-    . showsTypeWithQualification qualification variableName 0 result
+    . showsTypeWithBinderNames qualification variableName binderName 0 result
   TupleType boxity elements -> showString $ renderTuple boxity
-    [ showsTypeWithQualification qualification variableName 0 element ""
+    [ showsTypeWithBinderNames qualification variableName binderName 0 element ""
     | element <- elements
     ]
   ForallType [] [] body ->
-    showsTypeWithQualification qualification variableName precedence body
+    showsTypeWithBinderNames qualification variableName binderName precedence body
   ForallType variables constraints body -> showParen (precedence > 0)
     $ renderBinders variables
     . renderContext constraints
-    . showsTypeWithQualification qualification variableName 0 body
+    . showsTypeWithBinderNames qualification variableName binderName 0 body
  where
   renderBinders [] = id
   renderBinders variables = showString "forall "
-    . showString (unwords $ map variableName variables)
+    . showString (unwords $ map binderName variables)
     . showString ". "
 
   renderContext [] = id
   renderContext constraints = showChar '('
     . showString (intercalate ", "
-        $ map (renderConstraintWithQualification qualification variableName)
+        $ map (\constraint -> showsConstraintWithName (renderNamePrefix qualification)
+            (showsTypeWithBinderNames qualification variableName binderName 2) 0 constraint "")
             constraints)
     . showString ") => "
 

@@ -5,6 +5,8 @@
 -- owns an already-validated complete ground-kind vector.
 module Djinn.Internal.SourceGraphKinds
   ( validateSourceGraphKinds
+  , validateSourceGraphKindsWithLexicalKinds
+  , inferSourceGraphMetavariableKindsWithLexicalKinds
   , inferSourceGraphMetavariableKinds
   ) where
 
@@ -14,6 +16,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void, absurd)
 
+import qualified Djinn.Internal.LexicalKinds as Lexical
 import Djinn.Internal.Environment (preparedEnvironmentInventory)
 import Djinn.Internal.SourceTypingContext
   ( SourceTypingContext, sourceTypingPreparedEnvironment
@@ -35,8 +38,13 @@ validateSourceGraphKinds
   :: SourceTypingContext
   -> Q.TermGraphSource Type String
   -> Either String ()
-validateSourceGraphKinds context source = do
-  (assumptions, obligations, _) <- sourceGraphKindObligations context source
+validateSourceGraphKinds = validateSourceGraphKindsWithLexicalKinds Lexical.emptyLexicalKinds []
+
+validateSourceGraphKindsWithLexicalKinds
+  :: Lexical.LexicalKinds -> [(GroundKind, Type)] -> SourceTypingContext
+  -> Q.TermGraphSource Type String -> Either String ()
+validateSourceGraphKindsWithLexicalKinds lexical retained context source = do
+  (assumptions, obligations, _) <- sourceGraphKindObligations lexical retained context source
   checkObligations assumptions obligations
 
 -- | Infer only still-referenced requested flexible variables, after fixing
@@ -49,7 +57,12 @@ inferSourceGraphMetavariableKinds
   -> [Variable]
   -> Q.TermGraphSource Type String
   -> Either String [(Variable, GroundKind)]
-inferSourceGraphMetavariableKinds context requested source = do
+inferSourceGraphMetavariableKinds = inferSourceGraphMetavariableKindsWithLexicalKinds Lexical.emptyLexicalKinds []
+
+inferSourceGraphMetavariableKindsWithLexicalKinds
+  :: Lexical.LexicalKinds -> [(GroundKind, Type)] -> SourceTypingContext
+  -> [Variable] -> Q.TermGraphSource Type String -> Either String [(Variable, GroundKind)]
+inferSourceGraphMetavariableKindsWithLexicalKinds lexical retained context requested source = do
   let limits = Q.defaultTermGraphLimits
       -- A finite upper bound derived from existing graph/type capacities,
       -- including discarded requests rather than following an unbounded tail.
@@ -59,7 +72,7 @@ inferSourceGraphMetavariableKinds context requested source = do
              + toInteger (Q.maximumTermGraphPatternNodes limits))
   when (observedListLength capacity requested > capacity) $
     Left "source graph kind completion request exceeds graph capacities"
-  (assumptions, obligations, graphFree) <- sourceGraphKindObligations context source
+  (assumptions, obligations, graphFree) <- sourceGraphKindObligations lexical retained context source
   checkObligations assumptions obligations
   let referenced = Set.toAscList $ Set.filter T.isFlexibleVariable $
         Set.intersection graphFree $ Set.fromList requested
@@ -83,24 +96,29 @@ checkObligations assumptions obligations =
     KI.checkTypesKinds assumptions obligations
 
 sourceGraphKindObligations
-  :: SourceTypingContext
+  :: Lexical.LexicalKinds -> [(GroundKind, Type)] -> SourceTypingContext
   -> Q.TermGraphSource Type String
   -> Either String (KI.KindAssumptions, [(GroundKind, Type)], Set.Set Variable)
-sourceGraphKindObligations context source = do
+sourceGraphKindObligations lexical retained context source = do
+  observe "lexical selections" (Q.maximumTermGraphTypeNodes limits) retained
   observe "node table" (Q.maximumTermGraphNodes limits) rawNodes
   unless (Map.size nodes == length rawNodes) $ Left "duplicate source graph node identity"
   unless (Map.member (Q.termGraphSourceRoot source) nodes) $
     Left "source graph root is absent during kind checking"
   proper <- fmap concat $ mapM properAnnotations rawNodes
   selections <- fmap concat $ mapM selectionAnnotations rawNodes
-  let allTypes = proper ++ concatMap (\(_, before, selected) -> [before, selected]) selections
+  let allTypes = proper ++ map snd retained ++ concatMap (\(_, before, selected) -> [before, selected]) selections
   mapM_ observeType allTypes
   globals <- first ("source kind inventory: " ++) $ sourceTypingTermSchemes context
   let globals' = Map.map (fmap T.FlexibleVariable) globals
       reserved = Set.unions $ map allVariables allTypes
   prepared <- mapM (prepareSelection globals' reserved) selections
   overrideConstraints <- fmap concat $ mapM (retainedKindConstraints reserved) prepared
-  let sourceTypes = proper ++ [body | (_, _, body, _, _) <- prepared] ++ overrideConstraints
+  let firstLexicalOwner = 1 + maximum (0 : map (Q.termNodeIdValue . fst) rawNodes)
+      lexicalConstraints = concat
+        [ kindConstraints (Q.termNodeId owner) reserved kind ty
+        | (owner, (kind, ty)) <- zip [firstLexicalOwner ..] retained ]
+      sourceTypes = proper ++ [body | (_, _, body, _, _) <- prepared] ++ overrideConstraints ++ lexicalConstraints
       sharedVariables = Set.toAscList $ Set.unions $
         Set.fromList [binder | (_, binder, _, _, _) <- prepared]
           : map T.freeVariables sourceTypes
@@ -177,13 +195,20 @@ sourceGraphKindObligations context source = do
   prepareSelection globals reserved (owner, before, selected) = do
     (binder, openedBody) <- freshSourceBinder owner reserved before
     origin <- applicationOrigin globals Set.empty owner
-    override <- case origin of
+    providerOverride <- case origin of
       Nothing -> Right Nothing
       Just (name, consumed) -> case Map.lookup name providerKinds of
         Nothing -> Right Nothing
         Just kinds -> case drop (consumed - 1) kinds of
           kind : _ -> Right $ Just kind
           [] -> Left "source provider kind vector does not cover its exact application slot"
+    let ownedKind = case before of
+          T.ForallType (original : _) _ _ -> Lexical.lexicalBinderKind lexical original
+          _ -> Nothing
+    override <- case (ownedKind, providerOverride) of
+      (Just owned, Just provider) | owned /= provider -> Left "lexical binder and source provider kind authority disagree"
+      (Just owned, _) -> Right $ Just owned
+      (_, provider) -> Right provider
     pure (owner, binder, openedBody, selected, override)
 
   retainedKindConstraints reserved (owner, binder, _, _, override) = case override of

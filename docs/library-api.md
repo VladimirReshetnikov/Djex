@@ -1623,6 +1623,26 @@ captured locals, globals or dictionaries. Retained proper term types determine
 their kinds through unused identity-function arguments. Rigid variables remain
 ineligible; rendering still supplies no typing or certificate authority.
 
+For explicit ground-kind source binders, read `typedCandidateBinderKinds` and
+`typedCandidateTermGraph` from the same opaque candidate and pass both to
+`renderHaskellTermGraphWithKindsAndMetavariables`. The kind-table keys belong to
+that graph's exact variable-identity domain. The renderer preserves kinds on
+nested forall declarations and polymorphic helpers, including vacuous binders;
+it rejects nonvariable keys and conflicting entries. An empty table is absence
+of retained metadata, not evidence that every binder has proper kind. Emitted
+kind annotations additionally require `KindSignatures`; polymorphic transparent
+aliases can require `LiberalTypeSynonyms`.
+
+Djinn's `mkDjinnRequestWithSourceKinds` retains source binder-path obligations
+alongside the ordinary query. Execution validates them against the selected
+session inventory before synonym expansion and candidate checking. Canonical
+command/REPL source parsing supplies these obligations automatically for explicit kind
+annotations. The corresponding Exference request retains and validates the
+obligations, but its kinded execution path remains guarded. See the
+[public ground-kind acceptance report](reports/2026-09-13-djinn-kinded-source-acceptance.md)
+for full-signature replay, the open adjacent-input behavioral query, and the
+distinction between source acceptance and behavioral completeness.
+
 The public contextual REPL and one-shot frontends share this typed elaboration.
 Both one-shot engines accept `--environment DIR` and respect the loaded
 workspace's ordinary import/export scope. Standalone expressions carry their

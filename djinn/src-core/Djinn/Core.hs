@@ -3853,7 +3853,11 @@ searchContextualFormulaPlan receipt sourceContext normalOnly firstOnly options c
                     mode {searchBudget = fmap (subtract count) $ searchBudget mode,
                         searchTermAlternatives = normalOnly && searchTermAlternatives mode}
                     openedEnvironment opened
-                mapM_ (void . checkProofWithEvidence openedEnvironment opened) $ searchProofs outcome
+                -- The downstream owner checks and converts only this raw
+                -- prefix. Checking the entire opened proof list first would
+                -- force an unbounded tail before its candidate cutoff applies.
+                mapM_ (void . checkProofWithEvidence openedEnvironment opened) $
+                    take candidateLimit $ searchProofs outcome
                 pure outcome {searchProofs = map restore $ searchProofs outcome}
 
 formulaPlanSearchContext

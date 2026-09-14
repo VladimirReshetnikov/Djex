@@ -125,6 +125,7 @@ tests =
     , ("retain contextual streaming identity with exact unused Given authority", testCandidateStreamContext)
     , ("compose contextual methods with polymorphic values of abstract datatypes", testContextualPolymorphicConstructors)
     , ("select a supplied polytype for a qualified local consumer", testContextualPolymorphicSelection)
+    , ("respect the contextual raw cutoff before checking the proof tail", testContextualProofCheckCutoff)
     , ("validate streaming requests before observing their search", testCandidateStreamValidation)
     , ("stream a demanded singleton bridge reused by alpha-equivalent quantified inputs", testCandidateStreamDemandedSingleton)
     , ("stream cooperating quantified bridges at the exact demanded result", testCandidateStreamDemandedGroup)
@@ -2454,6 +2455,54 @@ testContextualPolymorphicSelection =
             SharedTypeAtom.alphaEquivalentTypes (fmap SharedType.FlexibleVariable selectedType) $
                 SharedTypedGenerated.typeApplicationSelected application
         _ -> False
+    fresh reserved original = Just $ choose $ original ++ "'"
+      where
+        choose candidate | candidate `Set.member` reserved = choose $ candidate ++ "'"
+                         | otherwise = candidate
+
+-- Every field requires the qualified consumer, applied to one of four inputs.
+-- This forces the contextual plan rather than the dictionary-independent path.
+-- A one-candidate query must check its prefix, not enumerate the Cartesian tail.
+testContextualProofCheckCutoff :: IO ()
+testContextualProofCheckCutoff = do
+    let className = sharedName "CutoffContext"
+        variable = SharedType.TypeVariable "a"
+        token = SharedType.TypeConstructor $ sharedName "CutoffToken"
+        required = Constraint className [variable]
+        consumer = SharedType.ForallType ["b"] [required] $
+            SharedType.FunctionType (SharedType.TypeVariable "b") token
+        source = SharedType.ForallType ["a"] [required] $
+            foldr SharedType.FunctionType
+                (SharedType.TupleType SharedName.Boxed $ replicate 14 token) $ consumer : replicate 4 variable
+        declarations = [SharedDeclaration.ClassDeclaration () className
+            [SharedDeclaration.TypeParameter "a" $ Just SharedKind.ProperTypeKind] [] []
+            , SharedDeclaration.AbstractTypeDeclaration () (sharedName "CutoffToken") SharedKind.ProperTypeKind]
+    environment <- mkNeutralDjinnEnvironment declarations
+    prepared <- expectShownRight $ RawEnvironment.prepareGroundSynthesisEnvironment environment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $ sharedName "contextualCutoff"
+    (implicit, _) <- expectShownRight $ SharedType.implicitizeLeadingForalls
+        (const (Nothing :: Maybe ())) fresh Set.empty source
+    let (_, contexts, goal) = SharedType.splitLeadingForalls implicit
+        configured fuel = defaultQueryOptions
+            { optionAlternatives = False, optionSorted = True, optionStrategy = DepthFirst
+            , optionCutoff = 1, optionBudget = fuel }
+        run fuel = do
+            result <- expectShownRight $ inhabitTypedSynthesisResultPreparedWithSourceGoal
+                (configured fuel) prepared source contexts (DjinnSourceInstantiationCandidates []) target goal
+            assertTypedCoreGraphs target source result
+            let search = SharedQuery.resultSearch result
+                candidates = SharedSearch.batchCandidates search
+            assertEqual "the contextual prefix lost its candidate" 1 $ length candidates
+            assertEqual "the raw cutoff did not report truncation"
+                (SharedSearch.Completed $ SharedSearch.truncated SharedSearch.CandidateLimitReached) $
+                SharedSearch.batchProgress search
+            pure $ map SharedTypedCandidate.typedCandidateCompatibility candidates
+    completed <- timeout 10000000 $ do
+        unbounded <- run Nothing
+        bounded <- run $ Just 4096
+        assertEqual "a finite budget changed the retained raw prefix" bounded unbounded
+    assertBool "the contextual cutoff forced its unused Cartesian proof tail" $ completed /= Nothing
+  where
     fresh reserved original = Just $ choose $ original ++ "'"
       where
         choose candidate | candidate `Set.member` reserved = choose $ candidate ++ "'"
